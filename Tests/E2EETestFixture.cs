@@ -23,7 +23,7 @@ namespace E2EELibraryTests
             try
             {
                 // Simple test to verify library operation
-                var keyPair = E2EE2.GenerateX25519KeyPair();
+                var keyPair = E2EEClient.GenerateKeyExchangeKeyPair();
                 if (keyPair.publicKey != null && keyPair.privateKey != null)
                 {
                     Console.WriteLine("Sodium library initialized successfully");

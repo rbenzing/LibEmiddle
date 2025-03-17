@@ -1,0 +1,39 @@
+E2EELibrary/
+├── Communication/
+│   ├── MessageSigning.cs				# Message signing and verification
+│   ├── SecureWebSocketClient			# A secure web socket client
+├── Core/
+│   ├── Constants.cs     				# Constants used across the library
+│   ├── SecureMemory.cs        		# Memory management for sensitive data
+│   └── Utils.cs         				# Shared utility methods
+├── Encryption/
+│   ├── AesEncryption.cs       		# AES encryption implementation
+│   ├── MessageEncryptor.cs    		# High-level message encryption API
+│   └── NonceGenerator.cs      		# Secure nonce generation
+├── GroupMessaging/
+│   └── GroupChatManager.cs    		# Group chat coordination
+├── KeyExchange/
+│   ├── X3DHExchange.cs                # X3DH protocol implementation
+│   └── DoubleRatchetExchange.cs       # Double Ratchet algorithm
+├── KeyManagement/
+│   ├── KeyConversion.cs       		# Key format conversion utilities
+│   ├── KeyGenerator.cs        		# Key generation functionality
+│   ├── KeyPair.cs             		# Key pair representation
+│   ├── KeyStorage.cs          		# Key storage and retrieval
+│   └── KeyValidation.cs				# Key verification and validation
+├── Models/
+│   ├── DeviceLinkMessage.cs
+│   ├── DeviceSyncMessage.cs 
+│   ├── DoubleRatchetSession.cs
+│   ├── EncryptedGroupMessage.cs
+│   ├── EncryptedMessage.cs
+│   ├── EncryptedSenderKeyDistribution.cs
+│   ├── KeyFileMetadata.cs
+│   ├── SenderKeyDistributionMessage.cs
+│   ├── X3DHKeyBundle.cs
+│   ├── X3DHPublicBundle.cs
+│   └── X3DHSession.cs
+├── MultiDevice/
+│   ├── DeviceLinking.cs       		# Device linking protocol
+│   └── DeviceManager.cs       		# Multi-device coordination
+└── E2EEClient.cs              			# Main facade/entry point for the library
