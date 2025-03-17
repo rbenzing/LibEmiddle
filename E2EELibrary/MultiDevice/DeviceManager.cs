@@ -19,7 +19,10 @@ namespace E2EELibrary.MultiDevice
     public class DeviceManager
     {
         private readonly (byte[] publicKey, byte[] privateKey) _deviceKeyPair;
-        private readonly ConcurrentBag<byte[]> _linkedDevices = new ConcurrentBag<byte[]>();
+
+        // Changed from ConcurrentBag to ConcurrentDictionary to prevent duplicates
+        private readonly ConcurrentDictionary<string, byte[]> _linkedDevices = new ConcurrentDictionary<string, byte[]>(StringComparer.Ordinal);
+
         private readonly byte[] _syncKey;
         private readonly object _syncLock = new object();
 
@@ -70,15 +73,33 @@ namespace E2EELibrary.MultiDevice
             byte[] keyCopy = new byte[finalKey.Length];
             finalKey.AsSpan(0, finalKey.Length).CopyTo(keyCopy.AsSpan(0, finalKey.Length));
 
-            // Add to the concurrent bag, ensuring a true copy is added
-            _linkedDevices.Add(keyCopy);
+            // Add to dictionary using Base64 representation of the key as dictionary key to prevent duplicates
+            string keyBase64 = Convert.ToBase64String(keyCopy);
+            _linkedDevices.TryAdd(keyBase64, keyCopy);
         }
 
         /// <summary>
-        /// Creates encrypted sync messages for other devices
+        /// Removes a linked device
         /// </summary>
-        /// <param name="syncData">Data to sync</param>
-        /// <returns>Dictionary of encrypted messages for each device</returns>
+        /// <param name="devicePublicKey">Public key of the device to remove</param>
+        /// <returns>True if the device was found and removed, false otherwise</returns>
+        public bool RemoveLinkedDevice(byte[] devicePublicKey)
+        {
+            if (devicePublicKey == null)
+                throw new ArgumentNullException(nameof(devicePublicKey));
+
+            // Convert key to X25519 if needed
+            byte[] finalKey = devicePublicKey.Length == Constants.X25519_KEY_SIZE ?
+                devicePublicKey :
+                ScalarMult.Base(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
+
+            // Use Base64 representation as dictionary key
+            string keyBase64 = Convert.ToBase64String(finalKey);
+
+            // Try to remove and return result
+            return _linkedDevices.TryRemove(keyBase64, out _);
+        }
+
         /// <summary>
         /// Creates encrypted sync messages for other devices
         /// </summary>
@@ -105,8 +126,10 @@ namespace E2EELibrary.MultiDevice
                 _deviceKeyPair.privateKey;
 
             // Thread safety for linked devices access
-            foreach (byte[] deviceKey in _linkedDevices.ToArray())
+            foreach (var deviceEntry in _linkedDevices)
             {
+                byte[] deviceKey = deviceEntry.Value;
+
                 try
                 {
                     // Ensure the device key is converted to a proper X25519 public key
@@ -164,7 +187,7 @@ namespace E2EELibrary.MultiDevice
                     byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
 
                     // Add to result
-                    string deviceKeyBase64 = Convert.ToBase64String(deviceKey);
+                    string deviceKeyBase64 = deviceEntry.Key;
                     result[deviceKeyBase64] = new EncryptedMessage
                     {
                         Ciphertext = ciphertext,
@@ -201,7 +224,7 @@ namespace E2EELibrary.MultiDevice
                 string senderKeyBase64 = Convert.ToBase64String(senderHint);
 
                 // Check if we have this sender in our linked devices
-                if (_linkedDevices.Any(device => Convert.ToBase64String(device) == senderKeyBase64))
+                if (_linkedDevices.TryGetValue(senderKeyBase64, out var _))
                 {
                     byte[]? result = TryProcessSyncMessageFromDevice(encryptedMessage, senderHint);
                     if (result != null)
@@ -210,8 +233,10 @@ namespace E2EELibrary.MultiDevice
             }
 
             // Otherwise try all linked devices
-            foreach (byte[] deviceKey in _linkedDevices.ToArray())
+            foreach (var deviceEntry in _linkedDevices)
             {
+                byte[] deviceKey = deviceEntry.Value;
+
                 // Skip the hint device if we already tried it
                 if (senderHint != null && SecureMemory.SecureCompare(deviceKey, senderHint))
                     continue;
@@ -277,82 +302,109 @@ namespace E2EELibrary.MultiDevice
                 string json = Encoding.UTF8.GetString(plaintext);
                 Console.WriteLine($"Decrypted JSON: {json}");
 
-                // Use JsonDocument.Parse instead of JsonSerializer.Deserialize to handle JsonElement properly
-                using (JsonDocument doc = JsonDocument.Parse(json))
+                // Try to deserialize - this may fail if the decryption was incorrect
+                Dictionary<string, object>? data;
+                try
                 {
-                    JsonElement root = doc.RootElement;
-
-                    // Check if all required properties exist
-                    if (!root.TryGetProperty("senderPublicKey", out _) ||
-                        !root.TryGetProperty("data", out _) ||
-                        !root.TryGetProperty("signature", out _))
+                    data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+                    if (data == null)
                     {
-                        Console.WriteLine("Required properties missing from JSON");
+                        Console.WriteLine("Deserialization returned null");
                         return null;
                     }
-
-                    // Extract values as strings first
-                    string senderPublicKeyBase64 = root.GetProperty("senderPublicKey").GetString();
-                    string dataBase64 = root.GetProperty("data").GetString();
-                    string signatureBase64 = root.GetProperty("signature").GetString();
-
-                    // Check for null values
-                    if (string.IsNullOrEmpty(senderPublicKeyBase64) ||
-                        string.IsNullOrEmpty(dataBase64) ||
-                        string.IsNullOrEmpty(signatureBase64))
-                    {
-                        Console.WriteLine("One or more required values are null or empty");
-                        return null;
-                    }
-
-                    // Convert from Base64
-                    byte[] senderPubKey = Convert.FromBase64String(senderPublicKeyBase64);
-                    byte[] syncData = Convert.FromBase64String(dataBase64);
-                    byte[] signature = Convert.FromBase64String(signatureBase64);
-
-                    // Handle timestamp if present
-                    long timestamp = 0;
-                    if (root.TryGetProperty("timestamp", out JsonElement timestampElement) &&
-                        timestampElement.ValueKind == JsonValueKind.Number)
-                    {
-                        timestamp = timestampElement.GetInt64();
-
-                        // Verify timestamp to prevent replay attacks - reject messages older than 5 minutes
-                        long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                        if (timestamp > 0 && currentTime - timestamp > 5 * 60 * 1000)
-                        {
-                            Console.WriteLine("Message is too old, possible replay attack");
-                            return null;
-                        }
-                    }
-
-                    // Verify signature
-                    bool signatureValid = MessageSigning.VerifySignature(syncData, signature, senderPubKey);
-                    if (!signatureValid)
-                    {
-                        Console.WriteLine("Signature verification failed");
-                        return null;
-                    }
-
-                    Console.WriteLine("Signature verification succeeded");
-
-                    // Make a secure copy of the sync data to return
-                    byte[] result = new byte[syncData.Length];
-                    syncData.AsSpan().CopyTo(result.AsSpan());
-                    return result;
                 }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Deserialization failed: {ex.Message}");
+                    return null;
+                }
+
+                // If we get here, deserialization succeeded
+                if (!data.ContainsKey("senderPublicKey") || !data.ContainsKey("data") || !data.ContainsKey("signature"))
+                {
+                    Console.WriteLine("Required keys missing from deserialized data");
+                    return null;
+                }
+
+                // Handle both JsonElement and string types when extracting values
+                byte[] senderPubKey = Convert.FromBase64String(data["senderPublicKey"].ToString());
+                byte[] syncData = Convert.FromBase64String(data["data"].ToString());
+                byte[] signature = Convert.FromBase64String(data["signature"].ToString());
+
+                // Get timestamp if present (for newer protocol versions)
+                long timestamp = 0;
+                if (data.ContainsKey("timestamp"))
+                {
+                    // Handle JsonElement type explicitly for timestamp 
+                    if (data["timestamp"] is JsonElement jsonTimestamp)
+                    {
+                        timestamp = jsonTimestamp.ValueKind == JsonValueKind.Number
+                            ? jsonTimestamp.GetInt64()
+                            : long.Parse(jsonTimestamp.ToString());
+                    }
+                    else
+                    {
+                        timestamp = Convert.ToInt64(data["timestamp"].ToString());
+                    }
+
+                    // Verify timestamp to prevent replay attacks - reject messages older than 5 minutes
+                    long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    if (timestamp > 0 && currentTime - timestamp > 5 * 60 * 1000)
+                    {
+                        Console.WriteLine("Message is too old, possible replay attack");
+                        return null;
+                    }
+                }
+
+                // Verify signature
+                bool signatureValid = MessageSigning.VerifySignature(syncData, signature, senderPubKey);
+                if (!signatureValid)
+                {
+                    Console.WriteLine("Signature verification failed");
+                    return null;
+                }
+
+                Console.WriteLine("Signature verification succeeded");
+
+                // Make a secure copy of the sync data to return
+                byte[] result = new byte[syncData.Length];
+                syncData.AsSpan().CopyTo(result.AsSpan());
+                return result;
             }
             catch (Exception ex)
             {
                 // Log the error for debugging
                 Console.WriteLine($"Error in TryProcessSyncMessageFromDevice: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
-                if (ex.InnerException != null)
-                {
-                    Console.WriteLine($"Inner exception: {ex.InnerException.Message}");
-                }
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Gets the number of linked devices
+        /// </summary>
+        /// <returns>The number of unique linked devices</returns>
+        public int GetLinkedDeviceCount()
+        {
+            return _linkedDevices.Count;
+        }
+
+        /// <summary>
+        /// Checks if a device is already linked
+        /// </summary>
+        /// <param name="devicePublicKey">Public key of the device to check</param>
+        /// <returns>True if the device is linked, false otherwise</returns>
+        public bool IsDeviceLinked(byte[] devicePublicKey)
+        {
+            if (devicePublicKey == null)
+                return false;
+
+            // Convert key to X25519 format if needed
+            byte[] finalKey = devicePublicKey.Length == Constants.X25519_KEY_SIZE ?
+                devicePublicKey :
+                ScalarMult.Base(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
+
+            string keyBase64 = Convert.ToBase64String(finalKey);
+            return _linkedDevices.ContainsKey(keyBase64);
         }
     }
 }

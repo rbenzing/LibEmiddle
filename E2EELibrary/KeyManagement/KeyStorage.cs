@@ -20,6 +20,11 @@ namespace E2EELibrary.KeyManagement
         /// <param name="saltRotationDays">Number of days after which the salt should be rotated (default: 30)</param>
         public static void StoreKeyToFile(byte[] key, string filePath, string? password = null, int saltRotationDays = 30)
         {
+            if (key == null)
+                throw new ArgumentException("Key cannot be null", nameof(key));
+            if (key.Length == 0)
+                throw new ArgumentException("Key cannot be empty", nameof(key));
+
             byte[] dataToStore = key;
 
             // If password is provided, encrypt the key before storing

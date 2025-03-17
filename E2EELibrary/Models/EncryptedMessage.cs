@@ -1,4 +1,6 @@
 ﻿
+using System.Text.Json;
+
 namespace E2EELibrary.Models
 {
     /// <summary>
@@ -30,12 +32,12 @@ namespace E2EELibrary.Models
         /// Timestamp to prevent replay attacks (milliseconds since Unix epoch)
         /// Always set and checked by the protocol
         /// </summary>
-        public long Timestamp { get; set; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        public long Timestamp { get; set; }
 
         /// <summary>
         /// Required message identifier for tracking and replay detection
         /// </summary>
-        public Guid MessageId { get; set; } = Guid.NewGuid();
+        public Guid MessageId { get; set; }
 
         // Add a session ID to group messages by conversation
         /// <summary>
@@ -122,16 +124,20 @@ namespace E2EELibrary.Models
                 {
                     Ciphertext = Convert.FromBase64String(dict["ciphertext"].ToString()),
                     Nonce = Convert.FromBase64String(dict["nonce"].ToString()),
-                    MessageNumber = Convert.ToInt32(dict["messageNumber"]),
+                    MessageNumber = GetInt32Value(dict["messageNumber"]),
                     SenderDHKey = Convert.FromBase64String(dict["senderDHKey"].ToString())
                 };
 
                 // Optional fields with fallbacks
                 if (dict.ContainsKey("timestamp"))
-                    message.Timestamp = Convert.ToInt64(dict["timestamp"]);
+                    message.Timestamp = GetInt64Value(dict["timestamp"]);
 
                 if (dict.ContainsKey("messageId") && Guid.TryParse(dict["messageId"].ToString(), out var messageId))
                     message.MessageId = messageId;
+
+                // Handle session ID if present
+                if (dict.ContainsKey("sessionId") && dict["sessionId"] != null)
+                    message.SessionId = dict["sessionId"].ToString();
 
                 return message;
             }
@@ -142,12 +148,46 @@ namespace E2EELibrary.Models
         }
 
         /// <summary>
+        /// Helper method to safely convert to Int32 from various possible types
+        /// </summary>
+        private static int GetInt32Value(object value)
+        {
+            if (value is int intValue)
+                return intValue;
+
+            if (value is JsonElement jsonElement)
+            {
+                if (jsonElement.ValueKind == JsonValueKind.Number)
+                    return jsonElement.GetInt32();
+            }
+
+            return Convert.ToInt32(value.ToString());
+        }
+
+        /// <summary>
+        /// Helper method to safely convert to Int64 from various possible types
+        /// </summary>
+        private static long GetInt64Value(object value)
+        {
+            if (value is long longValue)
+                return longValue;
+
+            if (value is JsonElement jsonElement)
+            {
+                if (jsonElement.ValueKind == JsonValueKind.Number)
+                    return jsonElement.GetInt64();
+            }
+
+            return Convert.ToInt64(value.ToString());
+        }
+
+        /// <summary>
         /// Serializes the message to JSON
         /// </summary>
         /// <returns>JSON string</returns>
         public string ToJson()
         {
-            return System.Text.Json.JsonSerializer.Serialize(ToDictionary());
+            return JsonSerializer.Serialize(ToDictionary());
         }
 
         /// <summary>
@@ -162,7 +202,13 @@ namespace E2EELibrary.Models
 
             try
             {
-                var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+                // Use JsonSerializerOptions to control how the dictionary is created
+                var options = new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                };
+
+                var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json, options);
 
                 ArgumentNullException.ThrowIfNull(dict);
 

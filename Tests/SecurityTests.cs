@@ -315,7 +315,7 @@ namespace E2EELibraryTests
             {
                 for (int j = i + 1; j < nonces.Count; j++)
                 {
-                    Assert.IsFalse(AreByteArraysEqual(nonces[i], nonces[j]),
+                    Assert.IsFalse(TestsHelpers.AreByteArraysEqual(nonces[i], nonces[j]),
                         $"Nonces at position {i} and {j} are identical");
                 }
             }
@@ -360,13 +360,13 @@ namespace E2EELibraryTests
             Assert.AreEqual(64, keyPair1.privateKey.Length, "Ed25519 private key should be 64 bytes");
 
             // Ensure all generated keys are different
-            Assert.IsFalse(AreByteArraysEqual(keyPair1.publicKey, keyPair2.publicKey));
-            Assert.IsFalse(AreByteArraysEqual(keyPair1.publicKey, keyPair3.publicKey));
-            Assert.IsFalse(AreByteArraysEqual(keyPair2.publicKey, keyPair3.publicKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.publicKey, keyPair2.publicKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.publicKey, keyPair3.publicKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair2.publicKey, keyPair3.publicKey));
 
-            Assert.IsFalse(AreByteArraysEqual(keyPair1.privateKey, keyPair2.privateKey));
-            Assert.IsFalse(AreByteArraysEqual(keyPair1.privateKey, keyPair3.privateKey));
-            Assert.IsFalse(AreByteArraysEqual(keyPair2.privateKey, keyPair3.privateKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.privateKey, keyPair2.privateKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.privateKey, keyPair3.privateKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair2.privateKey, keyPair3.privateKey));
 
             // Test signature functionality
             string message = "Cryptographic identity test message";
@@ -377,9 +377,9 @@ namespace E2EELibraryTests
             byte[] signature3 = E2EEClient.SignMessage(messageBytes, keyPair3.privateKey);
 
             // Ensure signatures are different for different keys
-            Assert.IsFalse(AreByteArraysEqual(signature1, signature2));
-            Assert.IsFalse(AreByteArraysEqual(signature1, signature3));
-            Assert.IsFalse(AreByteArraysEqual(signature2, signature3));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(signature1, signature2));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(signature1, signature3));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(signature2, signature3));
 
             // Ensure signatures verify correctly
             Assert.IsTrue(E2EEClient.VerifySignature(messageBytes, signature1, keyPair1.publicKey));
@@ -422,13 +422,13 @@ namespace E2EELibraryTests
                 // Verify that this message key is unique
                 for (int j = 0; j < i; j++)
                 {
-                    Assert.IsFalse(AreByteArraysEqual(messageKeys[j], messageKey),
+                    Assert.IsFalse(TestsHelpers.AreByteArraysEqual(messageKeys[j], messageKey),
                         $"Message keys at positions {j} and {i} should not be equal");
                 }
             }
 
             // Test that the final chain key doesn't reveal anything about the initial key
-            Assert.IsFalse(AreByteArraysEqual(initialKey, currentKey),
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(initialKey, currentKey),
                 "Final chain key should differ from initial key");
 
             // Check for cryptographic distinctness rather than byte-level differences
@@ -437,8 +437,8 @@ namespace E2EELibraryTests
             for (int i = 0; i < steps; i++)
             {
                 // Check that message keys are cryptographically distinct from chain keys
-                if (!AreByteArraysEqual(messageKeys[i], initialKey) &&
-                    !AreByteArraysEqual(messageKeys[i], currentKey))
+                if (!TestsHelpers.AreByteArraysEqual(messageKeys[i], initialKey) &&
+                    !TestsHelpers.AreByteArraysEqual(messageKeys[i], currentKey))
                 {
                     hasDistinctKeys = true;
                     break;
@@ -568,23 +568,10 @@ namespace E2EELibraryTests
             byte[] newNonce1 = NonceGenerator.GenerateNonce();
             byte[] newNonce2 = NonceGenerator.GenerateNonce();
 
-            Assert.IsFalse(AreByteArraysEqual(newNonce1, newNonce2), "Generated nonces should be unique");
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(newNonce1, newNonce2), "Generated nonces should be unique");
 
             // Note: This test doesn't assert against ciphertext patterns because it's illustrating
             // how a reused nonce compromises security, not strictly testing library behavior
-        }
-
-        #endregion
-
-        #region Helper Methods
-
-        /// <summary>
-        /// Helper method for byte array comparison
-        /// </summary>
-        private bool AreByteArraysEqual(byte[] a, byte[] b)
-        {
-            // Use the secure comparison even in tests to ensure consistent behavior
-            return SecureMemory.SecureCompare(a, b);
         }
 
         #endregion

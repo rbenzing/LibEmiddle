@@ -39,7 +39,7 @@ namespace E2EELibraryTests
                 existingSharedKey, newDeviceKeyPair.publicKey);
 
             // Assert
-            Assert.IsTrue(AreByteArraysEqual(derivedKey1, derivedKey2));
+            Assert.IsTrue(TestsHelpers.AreByteArraysEqual(derivedKey1, derivedKey2));
         }
 
         [TestMethod]
@@ -306,15 +306,213 @@ namespace E2EELibraryTests
 
         #endregion
 
-        #region Helper Methods
+        #region Extended
 
-        /// <summary>
-        /// Helper method for byte array comparison
-        /// </summary>
-        private bool AreByteArraysEqual(byte[] a, byte[] b)
+        [TestMethod]
+        public void DeviceManager_MultipleLinkedDevices_ShouldCreateMessagesForAll()
         {
-            // Use the secure comparison for consistent behavior
-            return SecureMemory.SecureCompare(a, b);
+            // Arrange - Create a main device and multiple secondary devices
+            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var thirdDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var fourthDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+
+            // Create X25519 keys for each device for linking
+            byte[] secondDeviceX25519Public = ScalarMult.Base(
+                KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey));
+            byte[] thirdDeviceX25519Public = ScalarMult.Base(
+                KeyConversion.DeriveX25519PrivateKeyFromEd25519(thirdDeviceKeyPair.privateKey));
+            byte[] fourthDeviceX25519Public = ScalarMult.Base(
+                KeyConversion.DeriveX25519PrivateKeyFromEd25519(fourthDeviceKeyPair.privateKey));
+
+            // Create device manager for main device
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
+
+            // Link multiple devices
+            mainDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
+            mainDeviceManager.AddLinkedDevice(thirdDeviceX25519Public);
+            mainDeviceManager.AddLinkedDevice(fourthDeviceX25519Public);
+
+            // Create sync data
+            byte[] syncData = Encoding.UTF8.GetBytes("Test sync data for multiple devices");
+
+            // Act
+            var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
+
+            // Assert
+            Assert.IsNotNull(syncMessages, "Sync messages should not be null");
+            Assert.AreEqual(3, syncMessages.Count, "Should create messages for all three linked devices");
+
+            // Check that all devices have messages
+            string secondDeviceId = Convert.ToBase64String(secondDeviceX25519Public);
+            string thirdDeviceId = Convert.ToBase64String(thirdDeviceX25519Public);
+            string fourthDeviceId = Convert.ToBase64String(fourthDeviceX25519Public);
+
+            Assert.IsTrue(syncMessages.ContainsKey(secondDeviceId), "Should contain message for second device");
+            Assert.IsTrue(syncMessages.ContainsKey(thirdDeviceId), "Should contain message for third device");
+            Assert.IsTrue(syncMessages.ContainsKey(fourthDeviceId), "Should contain message for fourth device");
+
+            // Verify message content
+            foreach (var entry in syncMessages)
+            {
+                Assert.IsNotNull(entry.Value.Ciphertext, "Ciphertext should not be null");
+                Assert.IsNotNull(entry.Value.Nonce, "Nonce should not be null");
+            }
+        }
+
+        [TestMethod]
+        public void DeviceManager_RemoveLinkedDevice_ShouldNotCreateMessageForRemovedDevice()
+        {
+            // This test verifies that if we had a way to remove linked devices,
+            // messages wouldn't be created for them
+
+            // Arrange - Create devices
+            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var thirdDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+
+            // Create X25519 keys for each device for linking
+            byte[] secondDeviceX25519Public = ScalarMult.Base(
+                KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey));
+            byte[] thirdDeviceX25519Public = ScalarMult.Base(
+                KeyConversion.DeriveX25519PrivateKeyFromEd25519(thirdDeviceKeyPair.privateKey));
+
+            // Create device manager for main device
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
+
+            // Link devices
+            mainDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
+            mainDeviceManager.AddLinkedDevice(thirdDeviceX25519Public);
+
+            // Create sync data
+            byte[] syncData = Encoding.UTF8.GetBytes("Test sync data");
+
+            // First verify both devices get messages
+            var initialSyncMessages = mainDeviceManager.CreateSyncMessages(syncData);
+            Assert.AreEqual(2, initialSyncMessages.Count, "Should initially create messages for both linked devices");
+
+            // Create a new DeviceManager with only one device linked
+            // (since we can't remove devices with the current API)
+            var updatedDeviceManager = new DeviceManager(mainDeviceKeyPair);
+            updatedDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
+            // Note: thirdDeviceX25519Public is not added (simulating removal)
+
+            // Act
+            var syncMessages = updatedDeviceManager.CreateSyncMessages(syncData);
+
+            // Assert
+            Assert.IsNotNull(syncMessages, "Sync messages should not be null");
+            Assert.AreEqual(1, syncMessages.Count, "Should create message only for the second device");
+
+            string secondDeviceId = Convert.ToBase64String(secondDeviceX25519Public);
+            string thirdDeviceId = Convert.ToBase64String(thirdDeviceX25519Public);
+
+            Assert.IsTrue(syncMessages.ContainsKey(secondDeviceId), "Should contain message for second device");
+            Assert.IsFalse(syncMessages.ContainsKey(thirdDeviceId), "Should not contain message for third device");
+        }
+
+        [TestMethod]
+        public void DeviceManager_ExpiredSyncMessage_ShouldReturnNull()
+        {
+            // Arrange
+            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+
+            // Convert to X25519 keys
+            byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
+            byte[] secondDeviceX25519Public = ScalarMult.Base(secondDeviceX25519Private);
+            byte[] mainDeviceX25519Public = ScalarMult.Base(KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
+
+            // Create managers
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
+            var secondDeviceManager = new DeviceManager(secondDeviceKeyPair);
+
+            // Link devices
+            mainDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
+            secondDeviceManager.AddLinkedDevice(mainDeviceX25519Public);
+
+            // Create a sync message with old timestamp
+            byte[] syncData = Encoding.UTF8.GetBytes("Test sync data with old timestamp");
+            var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
+            var messageForSecondDevice = syncMessages[Convert.ToBase64String(secondDeviceX25519Public)];
+
+            // Manually create a custom sync message with an old timestamp (more than 5 minutes old)
+            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(secondDeviceX25519Public,
+                KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
+
+            // Create sync message with timestamp that's too old
+            var syncMessage = new DeviceSyncMessage
+            {
+                SenderPublicKey = mainDeviceKeyPair.publicKey,
+                Data = syncData,
+                Signature = MessageSigning.SignMessage(syncData, mainDeviceKeyPair.privateKey),
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (6 * 60 * 1000) // 6 minutes old
+            };
+
+            // Serialize
+            string json = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                senderPublicKey = Convert.ToBase64String(syncMessage.SenderPublicKey),
+                data = Convert.ToBase64String(syncMessage.Data),
+                signature = Convert.ToBase64String(syncMessage.Signature),
+                timestamp = syncMessage.Timestamp
+            });
+
+            // Encrypt
+            byte[] plaintext = Encoding.UTF8.GetBytes(json);
+            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
+
+            var expiredMessage = new EncryptedMessage
+            {
+                Ciphertext = ciphertext,
+                Nonce = nonce
+            };
+
+            // Act
+            byte[] receivedSyncData = secondDeviceManager.ProcessSyncMessage(expiredMessage, mainDeviceX25519Public);
+
+            // Assert
+            Assert.IsNull(receivedSyncData, "Processing an expired sync message should return null");
+        }
+
+        [TestMethod]
+        public void DeviceManager_AddSameDeviceMultipleTimes_ShouldOnlyAddOnce()
+        {
+            // Arrange
+            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+
+            // Create X25519 keys
+            byte[] secondDeviceX25519Public = ScalarMult.Base(
+                KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey));
+
+            // Create device manager
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
+
+            // Add the same device multiple times
+            mainDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
+            mainDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
+            mainDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
+
+            // Create sync data
+            byte[] syncData = Encoding.UTF8.GetBytes("Test sync data for duplicate device");
+
+            // Act
+            var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
+
+            // Assert - With the improved implementation, duplicates are prevented
+            Assert.AreEqual(1, syncMessages.Count, "Device manager should prevent duplicate linked devices");
+
+            // All messages should be for the same device
+            string deviceId = Convert.ToBase64String(secondDeviceX25519Public);
+            Assert.IsTrue(syncMessages.ContainsKey(deviceId), "Message should be for the correct device ID");
+
+            // Verify the device count using the new method
+            Assert.AreEqual(1, mainDeviceManager.GetLinkedDeviceCount(), "Should only have one linked device");
+
+            // Verify device is linked using the new method
+            Assert.IsTrue(mainDeviceManager.IsDeviceLinked(secondDeviceX25519Public), "Device should be linked");
         }
 
         #endregion

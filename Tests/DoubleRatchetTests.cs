@@ -101,13 +101,13 @@ namespace E2EELibraryTests
                 currentChainKey = newChainKey;
 
                 // Ensure chain keys are changing from the initial value
-                Assert.IsFalse(AreByteArraysEqual(initialChainKey, currentChainKey),
+                Assert.IsFalse(TestsHelpers.AreByteArraysEqual(initialChainKey, currentChainKey),
                     "Chain key should change from initial value");
 
                 // Verify chain key changed from previous iteration
                 if (i > 0)
                 {
-                    Assert.IsFalse(AreByteArraysEqual(previousChainKey, currentChainKey),
+                    Assert.IsFalse(TestsHelpers.AreByteArraysEqual(previousChainKey, currentChainKey),
                         $"Chain key should change at each iteration (iteration {i})");
                 }
             }
@@ -296,9 +296,9 @@ namespace E2EELibraryTests
                 "Updated session should be a different instance than original session");
 
             // Sending chain key should have changed in the updated session but not in the original
-            Assert.IsFalse(AreByteArraysEqual(originalSendingChainKey, updatedSession.SendingChainKey),
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(originalSendingChainKey, updatedSession.SendingChainKey),
                 "Sending chain key should change in the updated session");
-            Assert.IsTrue(AreByteArraysEqual(originalSendingChainKey, aliceSession.SendingChainKey),
+            Assert.IsTrue(TestsHelpers.AreByteArraysEqual(originalSendingChainKey, aliceSession.SendingChainKey),
                 "Original session's sending chain key should remain unchanged");
 
             // Message number should be incremented in the updated session but not the original
@@ -555,7 +555,7 @@ namespace E2EELibraryTests
         }
 
         [TestMethod]
-        public void BorkenMessageNumber_ShouldHandleGracefully()
+        public void BrokenMessageNumber_ShouldHandleGracefully()
         {
             // Arrange
             var (aliceSession, bobSession, sessionId) = CreateTestSessions();
@@ -574,18 +574,6 @@ namespace E2EELibraryTests
             // but this test verifies that it doesn't cause crashes or memory corruption
 
             // No specific assertion here - we're mainly ensuring no exceptions are thrown
-        }
-
-        #endregion
-
-        #region Helper Methods
-
-        /// <summary>
-        /// Helper method for byte array comparison
-        /// </summary>
-        private bool AreByteArraysEqual(byte[] a, byte[] b)
-        {
-            return SecureMemory.SecureCompare(a, b);
         }
 
         #endregion

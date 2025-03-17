@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using E2EELibrary.Models;
 using E2EELibrary.Encryption;
+using System.Text.Json;
 
 namespace E2EELibrary.Communication
 {
@@ -12,7 +13,7 @@ namespace E2EELibrary.Communication
     /// </summary>
     public class SecureWebSocketClient
     {
-        private ClientWebSocket _webSocket;
+        private readonly IWebSocketClient _webSocket;
         private readonly Uri _serverUri;
         private DoubleRatchetSession? _session = null;
 
@@ -21,9 +22,19 @@ namespace E2EELibrary.Communication
         /// </summary>
         /// <param name="serverUrl">Server URL</param>
         public SecureWebSocketClient(string serverUrl)
+            : this(serverUrl, new StandardWebSocketClient())
+        {
+        }
+
+        /// <summary>
+        /// Creates a new secure WebSocket client with a provided WebSocket instance
+        /// </summary>
+        /// <param name="serverUrl">Server URL</param>
+        /// <param name="webSocket">WebSocket client to use</param>
+        public SecureWebSocketClient(string serverUrl, IWebSocketClient webSocket)
         {
             _serverUri = new Uri(serverUrl);
-            _webSocket = new ClientWebSocket();
+            _webSocket = webSocket ?? throw new ArgumentNullException(nameof(webSocket));
         }
 
         /// <summary>
@@ -97,7 +108,8 @@ namespace E2EELibrary.Communication
                     messageNumber = encryptedMessage.MessageNumber,
                     senderDHKey = Convert.ToBase64String(encryptedMessage.SenderDHKey),
                     timestamp = encryptedMessage.Timestamp,
-                    messageId = encryptedMessage.MessageId.ToString()
+                    messageId = encryptedMessage.MessageId.ToString(),
+                    sessionId = encryptedMessage.SessionId
                 };
 
                 // Serialize with options for better formatting and security
@@ -174,17 +186,24 @@ namespace E2EELibrary.Communication
                 string json = Encoding.UTF8.GetString(buffer, 0, result.Count);
 
                 // Add explicit type and options for better deserialization safety
-                var options = new System.Text.Json.JsonSerializerOptions
+                var options = new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 };
 
-                var messageData = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(
-                    json, options);
+                Dictionary<string, object> messageData;
 
-                if (messageData is null)
+                try
                 {
-                    throw new FormatException("Failed to deserialize message data.");
+                    messageData = JsonSerializer.Deserialize<Dictionary<string, object>>(json, options);
+                    if (messageData is null)
+                    {
+                        throw new FormatException("Failed to deserialize message data.");
+                    }
+                }
+                catch (JsonException jsonEx)
+                {
+                    throw new FormatException(jsonEx.Message, jsonEx);
                 }
 
                 // Validate required fields exist
@@ -214,6 +233,7 @@ namespace E2EELibrary.Communication
                 byte[] senderDHKey;
                 int messageNumber;
                 long timestamp = 0; // Default to 0 if not provided
+                string? sessionId = null;
 
                 try
                 {
@@ -274,13 +294,20 @@ namespace E2EELibrary.Communication
                     }
                 }
 
+                // Try to get session ID if available
+                if (messageData.ContainsKey("sessionId") && messageData["sessionId"] != null)
+                {
+                    sessionId = messageData["sessionId"].ToString();
+                }
+
                 var encryptedMessage = new EncryptedMessage
                 {
                     Ciphertext = ciphertext,
                     Nonce = nonce,
                     MessageNumber = messageNumber,
                     SenderDHKey = senderDHKey,
-                    Timestamp = timestamp
+                    Timestamp = timestamp,
+                    SessionId = sessionId
                 };
 
                 // Try to get message ID if available
