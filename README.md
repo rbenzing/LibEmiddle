@@ -1,4 +1,4 @@
-# Secure E2EE Communication Library
+# Secure C# E2EE Communication Library
 
 ## Overview
 
