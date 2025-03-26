@@ -303,6 +303,102 @@ namespace E2EELibrary
         }
 
         #endregion
+
+        #region Session Resumption
+
+        /// <summary>
+        /// Resumes a Double Ratchet session after an interruption or failure.
+        /// </summary>
+        /// <param name="session">The last known good session</param>
+        /// <param name="lastProcessedMessageId">The ID of the last successfully processed message, if any</param>
+        /// <returns>A session ready for continued communication, or null if resumption isn't possible</returns>
+        public static DoubleRatchetSession ResumeDoubleRatchetSession(DoubleRatchetSession session, Guid? lastProcessedMessageId = null)
+        {
+            return KeyExchange.DoubleRatchetExchange.ResumeSession(session, lastProcessedMessageId);
+        }
+
+        /// <summary>
+        /// Serializes a Double Ratchet session for storage.
+        /// </summary>
+        /// <param name="session">The session to serialize</param>
+        /// <param name="encryptionKey">Optional key to encrypt the serialized session</param>
+        /// <returns>Serialized (and optionally encrypted) session data</returns>
+        public static byte[] SerializeDoubleRatchetSession(DoubleRatchetSession session, byte[] encryptionKey = null)
+        {
+            return KeyExchange.SessionPersistence.SerializeSession(session, encryptionKey);
+        }
+
+        /// <summary>
+        /// Deserializes a Double Ratchet session from storage.
+        /// </summary>
+        /// <param name="serializedData">The serialized session data</param>
+        /// <param name="decryptionKey">Optional key to decrypt the serialized session</param>
+        /// <returns>Deserialized Double Ratchet session</returns>
+        public static DoubleRatchetSession DeserializeDoubleRatchetSession(byte[] serializedData, byte[] decryptionKey = null)
+        {
+            return KeyExchange.SessionPersistence.DeserializeSession(serializedData, decryptionKey);
+        }
+
+        #endregion
+
+        #region Device Revocation
+
+        /// <summary>
+        /// Creates a device revocation message for securely removing a device.
+        /// </summary>
+        /// <param name="revokedDeviceKey">Public key of the device to revoke</param>
+        /// <param name="authorityKeyPair">Key pair with authority to revoke devices</param>
+        /// <returns>A signed revocation message that can be distributed to other devices</returns>
+        public static Models.DeviceRevocationMessage CreateDeviceRevocationMessage(byte[] revokedDeviceKey, (byte[] publicKey, byte[] privateKey) authorityKeyPair)
+        {
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // Combine device key and timestamp for signing
+            byte[] timestampBytes = BitConverter.GetBytes(timestamp);
+            byte[] dataToSign = new byte[revokedDeviceKey.Length + timestampBytes.Length];
+
+            revokedDeviceKey.AsSpan().CopyTo(dataToSign.AsSpan(0, revokedDeviceKey.Length));
+            timestampBytes.AsSpan().CopyTo(dataToSign.AsSpan(revokedDeviceKey.Length));
+
+            // Sign the combined data
+            byte[] signature = Communication.MessageSigning.SignMessage(dataToSign, authorityKeyPair.privateKey);
+
+            // Create and return the revocation message
+            return new Models.DeviceRevocationMessage
+            {
+                RevokedDeviceKey = revokedDeviceKey,
+                RevocationTimestamp = timestamp,
+                Signature = signature
+            };
+        }
+
+        /// <summary>
+        /// Validates a device revocation message.
+        /// </summary>
+        /// <param name="revocationMessage">The revocation message to validate</param>
+        /// <param name="trustedPublicKey">The trusted public key for verification</param>
+        /// <returns>True if the message is valid and properly signed</returns>
+        public static bool ValidateDeviceRevocationMessage(Models.DeviceRevocationMessage revocationMessage, byte[] trustedPublicKey)
+        {
+            return revocationMessage.Validate(trustedPublicKey);
+        }
+
+        #endregion
+
+        #region Mailbox Integration
+
+        /// <summary>
+        /// Creates a mailbox manager for handling asynchronous message delivery.
+        /// </summary>
+        /// <param name="identityKeyPair">The user's identity key pair</param>
+        /// <param name="transport">The transport implementation to use</param>
+        /// <returns>A configured mailbox manager</returns>
+        public static Communication.MailboxManager CreateMailboxManager((byte[] publicKey, byte[] privateKey) identityKeyPair, Communication.IMailboxTransport transport)
+        {
+            return new Communication.MailboxManager(identityKeyPair, transport);
+        }
+
+        #endregion
     }
 }
 

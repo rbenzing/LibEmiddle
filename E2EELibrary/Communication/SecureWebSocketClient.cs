@@ -113,14 +113,14 @@ namespace E2EELibrary.Communication
                 };
 
                 // Serialize with options for better formatting and security
-                var options = new System.Text.Json.JsonSerializerOptions
+                var options = new JsonSerializerOptions
                 {
                     WriteIndented = false, // More compact for network transmission
-                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                     DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
                 };
 
-                string jsonMessage = System.Text.Json.JsonSerializer.Serialize(messageData, options);
+                string jsonMessage = JsonSerializer.Serialize(messageData, options);
                 byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
 
                 // Send the message with cancellation support
@@ -232,8 +232,7 @@ namespace E2EELibrary.Communication
                 byte[] nonce;
                 byte[] senderDHKey;
                 int messageNumber;
-                long timestamp = 0; // Default to 0 if not provided
-                string? sessionId = null;
+                long timestamp = 0;
 
                 try
                 {
@@ -276,7 +275,7 @@ namespace E2EELibrary.Communication
                 }
 
                 // Try to get timestamp if available
-                if (messageData.ContainsKey("timestamp") && messageData["timestamp"] != null)
+                if (messageData.TryGetValue("timestamp", out object? timestampPre) && timestampPre != null)
                 {
                     if (!long.TryParse(messageData["timestamp"].ToString(), out timestamp))
                     {
@@ -295,10 +294,12 @@ namespace E2EELibrary.Communication
                 }
 
                 // Try to get session ID if available
-                if (messageData.ContainsKey("sessionId") && messageData["sessionId"] != null)
+                if (messageData.TryGetValue("sessionId", out object? sessionId) && sessionId != null)
                 {
-                    sessionId = messageData["sessionId"].ToString();
+                    sessionId = messageData["sessionId"];
                 }
+
+                ArgumentNullException.ThrowIfNull(sessionId);
 
                 var encryptedMessage = new EncryptedMessage
                 {
@@ -307,7 +308,7 @@ namespace E2EELibrary.Communication
                     MessageNumber = messageNumber,
                     SenderDHKey = senderDHKey,
                     Timestamp = timestamp,
-                    SessionId = sessionId
+                    SessionId = sessionId.ToString(),
                 };
 
                 // Try to get message ID if available

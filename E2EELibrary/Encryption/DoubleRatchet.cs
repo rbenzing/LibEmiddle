@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using E2EELibrary.Core;
@@ -95,12 +96,18 @@ namespace E2EELibrary.Encryption
 
                 // Check for replay
                 if (session.HasProcessedMessageId(encryptedMessage.MessageId))
-                    return (null, null);
+                {
+                    // Define specific error for replay detection rather than silent failure
+                    throw new CryptographicException("Message already processed (possible replay attack)");
+                }
 
                 // Validate timestamp
                 long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                if (Math.Abs(currentTime - encryptedMessage.Timestamp) > 5 * 60 * 1000)
-                    return (null, null);
+                if (Math.Abs(currentTime - encryptedMessage.Timestamp) > Constants.MAX_MESSAGE_AGE_MS)
+                {
+                    // Define specific error for timestamp validation rather than silent failure
+                    throw new SecurityException("Message timestamp outside acceptable range");
+                }
 
                 // Derive the message key
                 byte[] messageKey;
@@ -169,10 +176,10 @@ namespace E2EELibrary.Encryption
 
                     return (updatedSession, decryptedMessage);
                 }
-                catch
+                catch (CryptographicException ex)
                 {
-                    // Decryption failed
-                    return (null, null);
+                    // Specific handling for decryption failures
+                    throw new CryptographicException("Message decryption failed: authentication tag verification failed", ex);
                 }
                 finally
                 {
@@ -181,9 +188,23 @@ namespace E2EELibrary.Encryption
                         SecureMemory.SecureClear(messageKey);
                 }
             }
-            catch (Exception)
+            catch (CryptographicException ex)
             {
-                // Any other exception
+                // Log specific cryptographic failures with details but return generic result
+                // In a production environment, this should use a proper logging framework
+                Console.WriteLine($"Cryptographic failure during message decryption: {ex.Message}");
+                return (null, null);
+            }
+            catch (SecurityException ex)
+            {
+                // Log security violations separately
+                Console.WriteLine($"Security violation during message processing: {ex.Message}");
+                return (null, null);
+            }
+            catch (Exception ex)
+            {
+                // Generic exception handler as last resort
+                Console.WriteLine($"Unexpected error in Double Ratchet decryption: {ex.Message}");
                 return (null, null);
             }
         }

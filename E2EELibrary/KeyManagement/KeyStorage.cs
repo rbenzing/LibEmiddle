@@ -48,7 +48,7 @@ namespace E2EELibrary.KeyManagement
                     using var deriveBytes = new Rfc2898DeriveBytes(
                         password,
                         salt,
-                        310000,
+                        Constants.PBKDF2_ITERATIONS,
                         HashAlgorithmName.SHA256);
 
                     derivedKey = deriveBytes.GetBytes(Constants.AES_KEY_SIZE);
@@ -59,7 +59,7 @@ namespace E2EELibrary.KeyManagement
                     using var deriveBytes = new Rfc2898DeriveBytes(
                         password,
                         salt,
-                        310000,
+                        Constants.PBKDF2_ITERATIONS,
                         HashAlgorithmName.SHA256);
 
                     derivedKey = deriveBytes.GetBytes(Constants.AES_KEY_SIZE);
@@ -198,7 +198,7 @@ namespace E2EELibrary.KeyManagement
                                 using var deriveBytes = new Rfc2898DeriveBytes(
                                     password,
                                     salt,
-                                    310000,
+                                    Constants.PBKDF2_ITERATIONS,
                                     HashAlgorithmName.SHA256);
 
                                 derivedKey = deriveBytes.GetBytes(Constants.AES_KEY_SIZE);
@@ -208,7 +208,7 @@ namespace E2EELibrary.KeyManagement
                                 using var deriveBytes = new Rfc2898DeriveBytes(
                                     password,
                                     salt,
-                                    310000,
+                                    Constants.PBKDF2_ITERATIONS,
                                     HashAlgorithmName.SHA256);
 
                                 derivedKey = deriveBytes.GetBytes(Constants.AES_KEY_SIZE);

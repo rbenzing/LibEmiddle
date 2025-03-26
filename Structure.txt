@@ -1,39 +1,48 @@
 E2EELibrary/
 ├── Communication/
-│   ├── MessageSigning.cs				# Message signing and verification
-│   ├── SecureWebSocketClient			# A secure web socket client
+│   ├── IWebSocketClient.cs
+│   ├── MailboxManager.cs
+│   ├── MessageSigning.cs
+│   ├── SecureWebSocketClient.cs
+│   ├── StandardWebSocketClient.cs
 ├── Core/
-│   ├── Constants.cs     				# Constants used across the library
-│   ├── SecureMemory.cs        		# Memory management for sensitive data
-│   └── Utils.cs         				# Shared utility methods
+│   ├── Constants.cs
+│   ├── SecureMemory.cs
+│   └── Utils.cs         						
 ├── Encryption/
-│   ├── AesEncryption.cs       		# AES encryption implementation
-│   ├── MessageEncryptor.cs    		# High-level message encryption API
-│   └── NonceGenerator.cs      		# Secure nonce generation
+│   ├── AES.cs
+│   ├── DoubleRatchet.cs
+│   ├── GroupMessage.cs
+│   ├── NonceGenerator.cs
+│   └── SenderKeyDistribution.cs
 ├── GroupMessaging/
-│   └── GroupChatManager.cs    		# Group chat coordination
+│   └── GroupChatManager.cs
 ├── KeyExchange/
-│   ├── X3DHExchange.cs                # X3DH protocol implementation
-│   └── DoubleRatchetExchange.cs       # Double Ratchet algorithm
+│   ├── DoubleRatchetExchange.cs
+│   ├── SessionPersistence.cs
+│   └── X3DHExchange.cs
 ├── KeyManagement/
-│   ├── KeyConversion.cs       		# Key format conversion utilities
-│   ├── KeyGenerator.cs        		# Key generation functionality
-│   ├── KeyPair.cs             		# Key pair representation
-│   ├── KeyStorage.cs          		# Key storage and retrieval
-│   └── KeyValidation.cs				# Key verification and validation
+│   ├── KeyConversion.cs
+│   ├── KeyGenerator.cs
+│   ├── KeyPair.cs
+│   ├── KeyStorage.cs
+│   └── KeyValidation.cs
 ├── Models/
 │   ├── DeviceLinkMessage.cs
+│   ├── DeviceRevocationMessage.cs
 │   ├── DeviceSyncMessage.cs 
 │   ├── DoubleRatchetSession.cs
 │   ├── EncryptedGroupMessage.cs
 │   ├── EncryptedMessage.cs
 │   ├── EncryptedSenderKeyDistribution.cs
 │   ├── KeyFileMetadata.cs
+│   ├── MailboxMessage.cs
+│   ├── MailboxTransport.cs
 │   ├── SenderKeyDistributionMessage.cs
 │   ├── X3DHKeyBundle.cs
 │   ├── X3DHPublicBundle.cs
 │   └── X3DHSession.cs
 ├── MultiDevice/
-│   ├── DeviceLinking.cs       		# Device linking protocol
-│   └── DeviceManager.cs       		# Multi-device coordination
+│   ├── DeviceLinking.cs
+│   └── DeviceManager.cs
 └── E2EEClient.cs              			# Main facade/entry point for the library

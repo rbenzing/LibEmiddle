@@ -87,6 +87,11 @@ namespace E2EELibrary.Models
         public int MessageNumber { get; }
 
         /// <summary>
+        /// Provides read-only access to processed message numbers
+        /// </summary>
+        public IReadOnlyCollection<int> ProcessedMessageNumbers => _processedMessageNumbers;
+
+        /// <summary>
         /// Provides read-only access to processed message IDs
         /// </summary>
         public IReadOnlyCollection<Guid> RecentlyProcessedIds => _recentlyProcessedIds;

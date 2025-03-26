@@ -406,5 +406,91 @@ namespace E2EELibrary.MultiDevice
             string keyBase64 = Convert.ToBase64String(finalKey);
             return _linkedDevices.ContainsKey(keyBase64);
         }
+
+        /// <summary>
+        /// Creates a revocation message for a device.
+        /// </summary>
+        /// <param name="deviceKeyToRevoke">The public key of the device to revoke</param>
+        /// <returns>A signed revocation message</returns>
+        public DeviceRevocationMessage CreateRevocationMessage(byte[] deviceKeyToRevoke)
+        {
+            if (deviceKeyToRevoke == null || deviceKeyToRevoke.Length == 0)
+                throw new ArgumentException("Device key cannot be null or empty", nameof(deviceKeyToRevoke));
+
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // Combine device key and timestamp for signing
+            byte[] timestampBytes = BitConverter.GetBytes(timestamp);
+            byte[] dataToSign = new byte[deviceKeyToRevoke.Length + timestampBytes.Length];
+
+            Buffer.BlockCopy(deviceKeyToRevoke, 0, dataToSign, 0, deviceKeyToRevoke.Length);
+            Buffer.BlockCopy(timestampBytes, 0, dataToSign, deviceKeyToRevoke.Length, timestampBytes.Length);
+
+            // Sign the combined data
+            byte[] signature = MessageSigning.SignMessage(dataToSign, _deviceKeyPair.privateKey);
+
+            // Create and return the revocation message
+            return new DeviceRevocationMessage
+            {
+                RevokedDeviceKey = deviceKeyToRevoke,
+                RevocationTimestamp = timestamp,
+                Signature = signature
+            };
+        }
+
+        /// <summary>
+        /// Revokes a linked device and creates a revocation message.
+        /// </summary>
+        /// <param name="devicePublicKey">Public key of the device to revoke</param>
+        /// <returns>A revocation message that should be distributed to other devices</returns>
+        public DeviceRevocationMessage RevokeLinkedDevice(byte[] devicePublicKey)
+        {
+            if (devicePublicKey == null)
+                throw new ArgumentNullException(nameof(devicePublicKey));
+
+            // Convert key to X25519 format if needed
+            byte[] finalKey = devicePublicKey.Length == Constants.X25519_KEY_SIZE ?
+                devicePublicKey :
+                KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey);
+
+            // Use Base64 representation as dictionary key
+            string deviceId = Convert.ToBase64String(finalKey);
+
+            // Try to remove from linked devices
+            bool removed = _linkedDevices.TryRemove(deviceId, out var _);
+
+            if (!removed)
+            {
+                throw new KeyNotFoundException("Device not found in linked devices");
+            }
+
+            // Create revocation message
+            return CreateRevocationMessage(finalKey);
+        }
+
+        /// <summary>
+        /// Processes a revocation message received from another device.
+        /// </summary>
+        /// <param name="revocationMessage">The received revocation message</param>
+        /// <param name="trustedPublicKey">The trusted public key for verification</param>
+        /// <returns>True if the message was valid and the device was removed</returns>
+        public bool ProcessRevocationMessage(DeviceRevocationMessage revocationMessage, byte[] trustedPublicKey)
+        {
+            if (revocationMessage == null)
+                throw new ArgumentNullException(nameof(revocationMessage));
+
+            if (trustedPublicKey == null)
+                throw new ArgumentNullException(nameof(trustedPublicKey));
+
+            // Validate the message
+            if (!revocationMessage.Validate(trustedPublicKey))
+                return false;
+
+            // Get the device ID
+            string deviceId = Convert.ToBase64String(revocationMessage.RevokedDeviceKey);
+
+            // Remove the device if it exists
+            return _linkedDevices.TryRemove(deviceId, out var _);
+        }
     }
 }

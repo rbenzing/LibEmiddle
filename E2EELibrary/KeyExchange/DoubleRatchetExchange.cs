@@ -1,6 +1,7 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
 using E2EELibrary.Core;
+using E2EELibrary.Models;
 
 namespace E2EELibrary.KeyExchange
 {
@@ -130,6 +131,70 @@ namespace E2EELibrary.KeyExchange
             byte[] newChainKey = HKDF_Expand(prk, Encoding.UTF8.GetBytes("ChainKeyDerivation"), Constants.AES_KEY_SIZE);
 
             return (newRootKey, newChainKey);
+        }
+
+        /// <summary>
+        /// Attempts to resume a session after an interruption or failure.
+        /// </summary>
+        /// <param name="session">The last known good session</param>
+        /// <param name="lastProcessedMessageId">The ID of the last successfully processed message, if any</param>
+        /// <returns>A session ready for continued communication, or null if resumption isn't possible</returns>
+        public static DoubleRatchetSession ResumeSession(DoubleRatchetSession session, Guid? lastProcessedMessageId = null)
+        {
+            if (session == null)
+                throw new ArgumentNullException(nameof(session));
+
+            // Verify the session is in a valid state
+            if (!ValidateSession(session))
+                return null;
+
+            // Create a new session (with the same parameters) to ensure clean state
+            var resumedSession = new DoubleRatchetSession(
+                dhRatchetKeyPair: session.DHRatchetKeyPair,
+                remoteDHRatchetKey: session.RemoteDHRatchetKey,
+                rootKey: session.RootKey,
+                sendingChainKey: session.SendingChainKey,
+                receivingChainKey: session.ReceivingChainKey,
+                messageNumber: session.MessageNumber,
+                sessionId: session.SessionId,
+                recentlyProcessedIds: session.RecentlyProcessedIds,
+                processedMessageNumbers: session.ProcessedMessageNumbers
+            );
+
+            // If a last processed message ID was provided, make sure it's marked as processed
+            if (lastProcessedMessageId.HasValue && !resumedSession.HasProcessedMessageId(lastProcessedMessageId.Value))
+            {
+                resumedSession = resumedSession.WithProcessedMessageId(lastProcessedMessageId.Value);
+            }
+
+            return resumedSession;
+        }
+
+        /// <summary>
+        /// Validates a session to ensure it's in a valid state for continued use.
+        /// </summary>
+        /// <param name="session">The session to validate</param>
+        /// <returns>True if the session is valid, false otherwise</returns>
+        public static bool ValidateSession(DoubleRatchetSession session)
+        {
+            if (session == null)
+                return false;
+
+            // Check for null or invalid key material
+            if (session.DHRatchetKeyPair.publicKey == null || session.DHRatchetKeyPair.publicKey.Length != Constants.X25519_KEY_SIZE)
+                return false;
+            if (session.DHRatchetKeyPair.privateKey == null || session.DHRatchetKeyPair.privateKey.Length != Constants.X25519_KEY_SIZE)
+                return false;
+            if (session.RemoteDHRatchetKey == null || session.RemoteDHRatchetKey.Length != Constants.X25519_KEY_SIZE)
+                return false;
+            if (session.RootKey == null || session.RootKey.Length != Constants.AES_KEY_SIZE)
+                return false;
+            if (session.SendingChainKey == null || session.SendingChainKey.Length != Constants.AES_KEY_SIZE)
+                return false;
+            if (session.ReceivingChainKey == null || session.ReceivingChainKey.Length != Constants.AES_KEY_SIZE)
+                return false;
+
+            return true;
         }
     }
 }
