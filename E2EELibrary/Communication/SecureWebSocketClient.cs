@@ -273,6 +273,11 @@ namespace E2EELibrary.Communication
                 // Pass through cancellation
                 throw;
             }
+            catch (JsonException ex)
+            {
+                // Convert JSON exceptions to FormatException
+                throw new FormatException($"Invalid JSON format: {ex.Message}", ex);
+            }
             catch (Exception ex) when (
                 ex is not InvalidOperationException &&
                 ex is not WebSocketException &&
