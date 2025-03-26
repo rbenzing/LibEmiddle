@@ -1,4 +1,4 @@
-# Secure E2EE Communication Library
+# Secure C# E2EE Communication Library
 
 ## Overview
 
@@ -105,7 +105,7 @@ var encryptedMessage = groupManager.EncryptGroupMessage(groupId, "Group chat mes
 ## 📦 Dependencies
 
 - .NET Standard 2.1+
-- Libsodium (Sodium.Core)
+- Libsodium
 - System.Security.Cryptography
 
 ## 🧪 Comprehensive Testing
@@ -131,17 +131,13 @@ MIT License - See LICENSE file for details
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please read our CONTRIBUTING.md for guidelines on submitting pull requests, reporting issues, and suggesting improvements.
+Contributions are welcome! All pull requests, reporting issues, and suggested improvements will be reviewed and considered.
 
 ## 📞 Support
 
-For security issues, please contact [your-email@example.com]
+For security issues, please contact [me@russellbenzing.com]
 
 ## 📚 References
 
 - [Signal Protocol](https://signal.org/protocol/)
 - [Cryptographic Standards](https://www.rfc-editor.org/rfc/rfc7748)
-
-## 🌟 Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=YourUsername/E2EELibrary)](https://star-history.com/#YourUsername/E2EELibrary)
