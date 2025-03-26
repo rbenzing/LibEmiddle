@@ -31,42 +31,23 @@ namespace E2EELibrary.KeyManagement
             if (!string.IsNullOrEmpty(password))
             {
                 // Generate salt with high entropy
-                byte[] salt = new byte[32];
-                using (var rng = RandomNumberGenerator.Create())
-                {
-                    rng.GetBytes(salt);
-                }
+                byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE];
+                RandomNumberGenerator.Fill(salt);
 
                 // Store creation timestamp for salt rotation
                 long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-                // Use Argon2id where available, fallback to PBKDF2 with high iteration count
-                byte[] derivedKey;
-                try
-                {
-                    // we use PBKDF2 with increased parameters
-                    using var deriveBytes = new Rfc2898DeriveBytes(
-                        password,
-                        salt,
-                        Constants.PBKDF2_ITERATIONS,
-                        HashAlgorithmName.SHA256);
+                // Derive encryption key from password
+                byte[] derivedKey = DeriveKeyFromPassword(password, salt);
 
-                    derivedKey = deriveBytes.GetBytes(Constants.AES_KEY_SIZE);
-                }
-                catch
-                {
-                    // Fallback to standard PBKDF2 if custom implementation fails
-                    using var deriveBytes = new Rfc2898DeriveBytes(
-                        password,
-                        salt,
-                        Constants.PBKDF2_ITERATIONS,
-                        HashAlgorithmName.SHA256);
-
-                    derivedKey = deriveBytes.GetBytes(Constants.AES_KEY_SIZE);
-                }
-
+                // Generate a secure nonce
                 byte[] nonce = NonceGenerator.GenerateNonce();
+
+                // Encrypt the key
                 byte[] encryptedKey = AES.AESEncrypt(key, derivedKey, nonce);
+
+                // Securely clear derived key after use
+                SecureMemory.SecureClear(derivedKey);
 
                 // Create metadata for salt rotation
                 var metadata = new KeyFileMetadata
@@ -82,15 +63,15 @@ namespace E2EELibrary.KeyManagement
                 byte[] metadataBytes = Encoding.UTF8.GetBytes(metadataJson);
                 byte[] metadataLength = BitConverter.GetBytes(metadataBytes.Length);
 
-                // Combine all components: 
-                // [metadata length (4 bytes)][metadata][salt][nonce][encrypted key]
-                byte[] result = new byte[
-                    metadataLength.Length +
-                    metadataBytes.Length +
-                    salt.Length +
-                    nonce.Length +
-                    encryptedKey.Length
-                ];
+                // Calculate total size needed
+                int totalSize = metadataLength.Length +
+                                metadataBytes.Length +
+                                salt.Length +
+                                nonce.Length +
+                                encryptedKey.Length;
+
+                // Use SecureMemory to create a secure buffer for the output
+                byte[] result = SecureMemory.CreateSecureBuffer(totalSize);
 
                 int offset = 0;
 
@@ -116,6 +97,7 @@ namespace E2EELibrary.KeyManagement
                 dataToStore = result;
             }
 
+            // Write to file
             File.WriteAllBytes(filePath, dataToStore);
         }
 
@@ -173,49 +155,29 @@ namespace E2EELibrary.KeyManagement
 
                             // Extract salt, nonce, and encrypted key
                             int offset = 4 + metadataLength;
-                            byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE]; // Using 32-byte salt in new format
+                            byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE]; // Using constant for consistency
                             byte[] nonce = new byte[Constants.NONCE_SIZE];
                             byte[] encryptedKey = new byte[storedData.Length - offset - salt.Length - nonce.Length];
 
-                            // Copy salt data
-                            storedData.AsSpan(offset, salt.Length).CopyTo(salt);
+                            // Copy salt data - using spans for efficient memory handling
+                            storedData.AsSpan(offset, salt.Length).CopyTo(salt.AsSpan());
                             offset += salt.Length;
 
                             // Copy nonce data
-                            storedData.AsSpan(offset, nonce.Length).CopyTo(nonce);
+                            storedData.AsSpan(offset, nonce.Length).CopyTo(nonce.AsSpan());
                             offset += nonce.Length;
 
                             // Copy encrypted key data
-                            storedData.AsSpan(offset, encryptedKey.Length).CopyTo(encryptedKey);
+                            storedData.AsSpan(offset, encryptedKey.Length).CopyTo(encryptedKey.AsSpan());
 
-                            // Derive key using the same parameters
-                            byte[] derivedKey;
-                            try
-                            {
-                                // Try to use Argon2id if available
-                                // derivedKey = Argon2.DeriveKey(password, salt, iterations: 3, memory: 65536, parallelism: 4, keyLength: AES_KEY_SIZE);
-
-                                using var deriveBytes = new Rfc2898DeriveBytes(
-                                    password,
-                                    salt,
-                                    Constants.PBKDF2_ITERATIONS,
-                                    HashAlgorithmName.SHA256);
-
-                                derivedKey = deriveBytes.GetBytes(Constants.AES_KEY_SIZE);
-                            }
-                            catch
-                            {
-                                using var deriveBytes = new Rfc2898DeriveBytes(
-                                    password,
-                                    salt,
-                                    Constants.PBKDF2_ITERATIONS,
-                                    HashAlgorithmName.SHA256);
-
-                                derivedKey = deriveBytes.GetBytes(Constants.AES_KEY_SIZE);
-                            }
+                            // Derive key using PBKDF2 with our standard parameters
+                            byte[] derivedKey = DeriveKeyFromPassword(password, salt);
 
                             // Decrypt the key
                             byte[] decryptedKey = AES.AESDecrypt(encryptedKey, derivedKey, nonce);
+
+                            // Securely clear the derived key when done with it
+                            SecureMemory.SecureClear(derivedKey);
 
                             // If rotation is needed, store the key with a new salt
                             if (needsRotation)
@@ -233,22 +195,19 @@ namespace E2EELibrary.KeyManagement
                 byte[] oldNonce = new byte[Constants.NONCE_SIZE];
                 byte[] oldEncryptedKey = new byte[storedData.Length - oldSalt.Length - oldNonce.Length];
 
-                // Create spans for the source and destination arrays
-                ReadOnlySpan<byte> storedDataSpan = storedData.AsSpan();
+                // Use spans for efficient memory copying
+                storedData.AsSpan(0, oldSalt.Length).CopyTo(oldSalt.AsSpan());
+                storedData.AsSpan(oldSalt.Length, oldNonce.Length).CopyTo(oldNonce.AsSpan());
+                storedData.AsSpan(oldSalt.Length + oldNonce.Length, oldEncryptedKey.Length).CopyTo(oldEncryptedKey.AsSpan());
 
-                // Copy the salt, nonce, and encrypted key portions
-                storedDataSpan.Slice(0, oldSalt.Length).CopyTo(oldSalt.AsSpan());
-                storedDataSpan.Slice(oldSalt.Length, oldNonce.Length).CopyTo(oldNonce.AsSpan());
-                storedDataSpan.Slice(oldSalt.Length + oldNonce.Length, oldEncryptedKey.Length).CopyTo(oldEncryptedKey.AsSpan());
+                // Derive key from password
+                byte[] oldDerivedKey = DeriveKeyFromPassword(password, oldSalt);
 
-                using var oldDeriveBytes = new Rfc2898DeriveBytes(
-                    password,
-                    oldSalt,
-                    310000,
-                    HashAlgorithmName.SHA256);
-
-                byte[] oldDerivedKey = oldDeriveBytes.GetBytes(Constants.AES_KEY_SIZE);
+                // Decrypt the key
                 byte[] decryptedOldKey = AES.AESDecrypt(oldEncryptedKey, oldDerivedKey, oldNonce);
+
+                // Securely clear the derived key
+                SecureMemory.SecureClear(oldDerivedKey);
 
                 // Automatically upgrade to new format with salt rotation
                 StoreKeyToFile(decryptedOldKey, filePath, password);
@@ -263,6 +222,20 @@ namespace E2EELibrary.KeyManagement
             {
                 throw new InvalidDataException("The key file appears to be corrupted or invalid.", ex);
             }
+        }
+
+        /// <summary>
+        /// Helper method to derive a key from a password using PBKDF2
+        /// </summary>
+        private static byte[] DeriveKeyFromPassword(string password, byte[] salt)
+        {
+            using var deriveBytes = new Rfc2898DeriveBytes(
+                password,
+                salt,
+                Constants.PBKDF2_ITERATIONS,
+                HashAlgorithmName.SHA256);
+
+            return deriveBytes.GetBytes(Constants.AES_KEY_SIZE);
         }
     }
 }
