@@ -1,6 +1,4 @@
-﻿using System;
-using System.IO;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text.Json;
 using E2EELibrary.Models;
 using E2EELibrary.Core;
@@ -19,10 +17,9 @@ namespace E2EELibrary.KeyExchange
         /// <param name="session">The session to serialize</param>
         /// <param name="encryptionKey">Optional key to encrypt the serialized session</param>
         /// <returns>Serialized (and optionally encrypted) session data</returns>
-        public static byte[] SerializeSession(DoubleRatchetSession session, byte[] encryptionKey = null)
+        public static byte[] SerializeSession(DoubleRatchetSession session, byte[]? encryptionKey = null)
         {
-            if (session == null)
-                throw new ArgumentNullException(nameof(session));
+            ArgumentNullException.ThrowIfNull(session, nameof(session));
 
             // Create a serializable representation
             var sessionData = new
@@ -68,7 +65,7 @@ namespace E2EELibrary.KeyExchange
         /// <param name="serializedData">The serialized session data</param>
         /// <param name="decryptionKey">Optional key to decrypt the serialized session</param>
         /// <returns>Deserialized Double Ratchet session</returns>
-        public static DoubleRatchetSession DeserializeSession(byte[] serializedData, byte[] decryptionKey = null)
+        public static DoubleRatchetSession DeserializeSession(byte[] serializedData, byte[]? decryptionKey = null)
         {
             if (serializedData == null || serializedData.Length == 0)
                 throw new ArgumentException("Serialized data cannot be null or empty", nameof(serializedData));
@@ -105,22 +102,38 @@ namespace E2EELibrary.KeyExchange
                 using JsonDocument document = JsonDocument.Parse(json);
                 JsonElement root = document.RootElement;
 
+                ArgumentNullException.ThrowIfNull(root, nameof(root));
+
                 // Extract properties
-                byte[] dhPublicKey = Convert.FromBase64String(root.GetProperty("DHRatchetPublicKey").GetString());
-                byte[] dhPrivateKey = Convert.FromBase64String(root.GetProperty("DHRatchetPrivateKey").GetString());
-                byte[] remoteDHKey = Convert.FromBase64String(root.GetProperty("RemoteDHRatchetKey").GetString());
-                byte[] rootKey = Convert.FromBase64String(root.GetProperty("RootKey").GetString());
-                byte[] sendingChainKey = Convert.FromBase64String(root.GetProperty("SendingChainKey").GetString());
-                byte[] receivingChainKey = Convert.FromBase64String(root.GetProperty("ReceivingChainKey").GetString());
+                byte[] dhPublicKey = Convert.FromBase64String(root.GetProperty("DHRatchetPublicKey").GetString() ?? "");
+                ArgumentNullException.ThrowIfNullOrWhiteSpace(dhPublicKey.ToString(), nameof(dhPublicKey));
+
+                byte[] dhPrivateKey = Convert.FromBase64String(root.GetProperty("DHRatchetPrivateKey").GetString() ?? "");
+                ArgumentNullException.ThrowIfNullOrWhiteSpace(dhPrivateKey.ToString(), nameof(dhPrivateKey));
+
+                byte[] remoteDHKey = Convert.FromBase64String(root.GetProperty("RemoteDHRatchetKey").GetString() ?? "");
+                ArgumentNullException.ThrowIfNullOrWhiteSpace(remoteDHKey.ToString(), nameof(remoteDHKey));
+
+                byte[] rootKey = Convert.FromBase64String(root.GetProperty("RootKey").GetString() ?? "");
+                ArgumentNullException.ThrowIfNullOrWhiteSpace(rootKey.ToString(), nameof(rootKey));
+
+                byte[] sendingChainKey = Convert.FromBase64String(root.GetProperty("SendingChainKey").GetString() ?? "");
+                ArgumentNullException.ThrowIfNullOrWhiteSpace(sendingChainKey.ToString(), nameof(sendingChainKey));
+
+                byte[] receivingChainKey = Convert.FromBase64String(root.GetProperty("ReceivingChainKey").GetString() ?? "");
+                ArgumentNullException.ThrowIfNullOrWhiteSpace(receivingChainKey.ToString(), nameof(receivingChainKey));
+
                 int messageNumber = root.GetProperty("MessageNumber").GetInt32();
-                string sessionId = root.GetProperty("SessionId").GetString();
+                string? sessionId = root.GetProperty("SessionId").GetString();
+
+                ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
 
                 // Extract processed message IDs
                 List<Guid> processedMessageIds = new List<Guid>();
                 var idsElement = root.GetProperty("ProcessedMessageIds");
                 foreach (JsonElement idElement in idsElement.EnumerateArray())
                 {
-                    string idStr = idElement.GetString();
+                    string? idStr = idElement.GetString();
                     if (Guid.TryParse(idStr, out Guid id))
                     {
                         processedMessageIds.Add(id);
@@ -138,6 +151,10 @@ namespace E2EELibrary.KeyExchange
                     sessionId: sessionId,
                     recentlyProcessedIds: processedMessageIds
                 );
+            }
+            catch(ArgumentNullException ex)
+            {
+                throw new ArgumentException("Failed to deserialize session data", ex);
             }
             catch (JsonException ex)
             {
@@ -159,7 +176,7 @@ namespace E2EELibrary.KeyExchange
         /// <param name="session">The session to save</param>
         /// <param name="filePath">The file path to save to</param>
         /// <param name="encryptionKey">Optional key to encrypt the session data</param>
-        public static void SaveSessionToFile(DoubleRatchetSession session, string filePath, byte[] encryptionKey = null)
+        public static void SaveSessionToFile(DoubleRatchetSession session, string filePath, byte[]? encryptionKey = null)
         {
             byte[] serializedData = SerializeSession(session, encryptionKey);
             File.WriteAllBytes(filePath, serializedData);
@@ -171,7 +188,7 @@ namespace E2EELibrary.KeyExchange
         /// <param name="filePath">The file path to load from</param>
         /// <param name="decryptionKey">Optional key to decrypt the session data</param>
         /// <returns>The loaded Double Ratchet session</returns>
-        public static DoubleRatchetSession LoadSessionFromFile(string filePath, byte[] decryptionKey = null)
+        public static DoubleRatchetSession LoadSessionFromFile(string filePath, byte[]? decryptionKey = null)
         {
             if (!File.Exists(filePath))
                 throw new FileNotFoundException("Session file not found", filePath);

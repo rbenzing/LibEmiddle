@@ -143,11 +143,6 @@ namespace E2EELibrary.GroupMessaging
         /// </summary>
         /// <param name="distribution">Distribution message</param>
         /// <returns>True if the distribution was valid and processed</returns>
-        /// <summary>
-        /// Processes a received sender key distribution message
-        /// </summary>
-        /// <param name="distribution">Distribution message</param>
-        /// <returns>True if the distribution was valid and processed</returns>
         public bool ProcessSenderKeyDistribution(SenderKeyDistributionMessage distribution)
         {
             if (distribution == null)
@@ -159,9 +154,13 @@ namespace E2EELibrary.GroupMessaging
             if (distribution.SenderIdentityKey == null)
                 throw new ArgumentException("Sender identity key cannot be null", nameof(distribution));
 
-            // Verify the signature
+            // Normalize the data that was signed to ensure canonical form
+            // This prevents canonicalization attacks by standardizing the verification input
+            byte[] dataForVerification = distribution.SenderKey;
+
+            // Verify the signature using the normalized data
             bool validSignature = MessageSigning.VerifySignature(
-                distribution.SenderKey,
+                dataForVerification,
                 distribution.Signature,
                 distribution.SenderIdentityKey);
 

@@ -116,8 +116,8 @@ namespace E2EELibraryTests
 
             // Assert
             Assert.IsNotNull(message);
-            Assert.AreEqual(0, message.Timestamp); // Default value
-            Assert.AreEqual(Guid.Empty, message.MessageId); // Default value
+            Assert.IsTrue(message.Timestamp > 0); // Should have a valid timestamp
+            Assert.AreNotEqual(Guid.Empty, message.MessageId); // Should have a valid GUID
         }
 
         [TestMethod]

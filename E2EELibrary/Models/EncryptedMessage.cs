@@ -1,5 +1,5 @@
-﻿
-using System.Text.Json;
+﻿using System.Text.Json;
+using E2EELibrary.Core;
 
 namespace E2EELibrary.Models
 {
@@ -37,7 +37,7 @@ namespace E2EELibrary.Models
         /// <summary>
         /// Required message identifier for tracking and replay detection
         /// </summary>
-        public Guid MessageId { get; set; }
+        public Guid MessageId { get; set; } = Guid.NewGuid();
 
         // Add a session ID to group messages by conversation
         /// <summary>
@@ -98,7 +98,8 @@ namespace E2EELibrary.Models
             ArgumentNullException.ThrowIfNull(Nonce);
             ArgumentNullException.ThrowIfNull(SenderDHKey);
 
-            return new Dictionary<string, object>
+            // Create a dictionary with predictable field ordering for canonicalization
+            var result = new Dictionary<string, object>
             {
                 ["ciphertext"] = Convert.ToBase64String(Ciphertext),
                 ["nonce"] = Convert.ToBase64String(Nonce),
@@ -107,6 +108,14 @@ namespace E2EELibrary.Models
                 ["timestamp"] = Timestamp,
                 ["messageId"] = MessageId.ToString()
             };
+
+            // Add optional fields only if they have values
+            if (!string.IsNullOrEmpty(SessionId))
+            {
+                result["sessionId"] = SessionId;
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -120,20 +129,32 @@ namespace E2EELibrary.Models
 
             try
             {
+                // Validate required fields
+                ValidateRequiredDictionaryFields(dict);
+
                 var message = new EncryptedMessage
                 {
-                    Ciphertext = Convert.FromBase64String(dict["ciphertext"].ToString()),
-                    Nonce = Convert.FromBase64String(dict["nonce"].ToString()),
+                    Ciphertext = ConvertToBytes(dict["ciphertext"]),
+                    Nonce = ConvertToBytes(dict["nonce"]),
                     MessageNumber = GetInt32Value(dict["messageNumber"]),
-                    SenderDHKey = Convert.FromBase64String(dict["senderDHKey"].ToString())
+                    SenderDHKey = ConvertToBytes(dict["senderDHKey"])
                 };
 
                 // Optional fields with fallbacks
                 if (dict.ContainsKey("timestamp"))
                     message.Timestamp = GetInt64Value(dict["timestamp"]);
+                else
+                    message.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-                if (dict.ContainsKey("messageId") && Guid.TryParse(dict["messageId"].ToString(), out var messageId))
+                if (dict.ContainsKey("messageId") &&
+                    Guid.TryParse(dict["messageId"].ToString(), out var messageId))
+                {
                     message.MessageId = messageId;
+                }
+                else
+                {
+                    message.MessageId = Guid.NewGuid();
+                }
 
                 // Handle session ID if present
                 if (dict.ContainsKey("sessionId") && dict["sessionId"] != null)
@@ -148,46 +169,29 @@ namespace E2EELibrary.Models
         }
 
         /// <summary>
-        /// Helper method to safely convert to Int32 from various possible types
-        /// </summary>
-        private static int GetInt32Value(object value)
-        {
-            if (value is int intValue)
-                return intValue;
-
-            if (value is JsonElement jsonElement)
-            {
-                if (jsonElement.ValueKind == JsonValueKind.Number)
-                    return jsonElement.GetInt32();
-            }
-
-            return Convert.ToInt32(value.ToString());
-        }
-
-        /// <summary>
-        /// Helper method to safely convert to Int64 from various possible types
-        /// </summary>
-        private static long GetInt64Value(object value)
-        {
-            if (value is long longValue)
-                return longValue;
-
-            if (value is JsonElement jsonElement)
-            {
-                if (jsonElement.ValueKind == JsonValueKind.Number)
-                    return jsonElement.GetInt64();
-            }
-
-            return Convert.ToInt64(value.ToString());
-        }
-
-        /// <summary>
-        /// Serializes the message to JSON
+        /// Serializes the message to JSON using standardized options
         /// </summary>
         /// <returns>JSON string</returns>
         public string ToJson()
         {
-            return JsonSerializer.Serialize(ToDictionary());
+            // Create a normalized dictionary representation with consistent ordering
+            var orderedDict = new Dictionary<string, object>(StringComparer.Ordinal)
+            {
+                ["ciphertext"] = Convert.ToBase64String(Ciphertext ?? Array.Empty<byte>()),
+                ["nonce"] = Convert.ToBase64String(Nonce ?? Array.Empty<byte>()),
+                ["messageNumber"] = MessageNumber,
+                ["senderDHKey"] = Convert.ToBase64String(SenderDHKey ?? Array.Empty<byte>()),
+                ["timestamp"] = Timestamp,
+                ["messageId"] = MessageId.ToString()
+            };
+
+            // Add optional fields only if they have values
+            if (!string.IsNullOrEmpty(SessionId))
+            {
+                orderedDict["sessionId"] = SessionId;
+            }
+
+            return JsonSerialization.Serialize(orderedDict);
         }
 
         /// <summary>
@@ -202,22 +206,166 @@ namespace E2EELibrary.Models
 
             try
             {
-                // Use JsonSerializerOptions to control how the dictionary is created
-                var options = new System.Text.Json.JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                };
-
-                var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json, options);
+                // For backward compatibility, use case-insensitive deserialization
+                var dict = JsonSerialization.DeserializeInsensitive<Dictionary<string, JsonElement>>(json);
 
                 ArgumentNullException.ThrowIfNull(dict);
 
-                return FromDictionary(dict);
+                ValidateRequiredJsonFields(dict);
+
+                var message = new EncryptedMessage
+                {
+                    Ciphertext = Utils.GetBytesFromBase64(dict, "ciphertext"),
+                    Nonce = Utils.GetBytesFromBase64(dict, "nonce"),
+                    MessageNumber = Utils.GetInt32Value(dict["messageNumber"]),
+                    SenderDHKey = Utils.GetBytesFromBase64(dict, "senderDHKey"),
+                    Timestamp = Utils.GetInt64Value(dict, "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                    MessageId = Utils.GetGuidValue(dict, "messageId", Guid.NewGuid())
+                };
+
+                // Handle optional fields
+                if (dict.TryGetValue("sessionId", out JsonElement sessionIdElement) &&
+                    sessionIdElement.ValueKind == JsonValueKind.String)
+                {
+                    message.SessionId = sessionIdElement.GetString();
+                }
+
+                return message;
             }
             catch (Exception ex)
             {
                 throw new FormatException("Invalid JSON format for encrypted message", ex);
             }
+        }
+
+        private static void ValidateRequiredDictionaryFields(Dictionary<string, object> dict)
+        {
+            // Check for required fields
+            string[] requiredFields = { "ciphertext", "nonce", "messageNumber", "senderDHKey" };
+            foreach (var field in requiredFields)
+            {
+                if (!dict.ContainsKey(field) || dict[field] == null)
+                {
+                    throw new FormatException($"Required field '{field}' is missing or null");
+                }
+            }
+        }
+
+        private static void ValidateRequiredJsonFields(Dictionary<string, JsonElement> dict)
+        {
+            string[] requiredFields = { "ciphertext", "nonce", "messageNumber", "senderDHKey" };
+
+            foreach (var field in requiredFields)
+            {
+                if (!dict.ContainsKey(field))
+                {
+                    throw new FormatException($"Required field '{field}' is missing");
+                }
+
+                // Also validate that base64 fields contain valid base64 strings
+                if (field is "ciphertext" or "nonce" or "senderDHKey")
+                {
+                    if (dict[field].ValueKind != JsonValueKind.String)
+                    {
+                        throw new FormatException($"Field '{field}' must be a string");
+                    }
+
+                    string? base64 = dict[field].GetString();
+                    if (string.IsNullOrEmpty(base64) || !Utils.IsValidBase64(base64))
+                    {
+                        throw new FormatException($"Field '{field}' contains invalid Base64 data");
+                    }
+                }
+            }
+        }
+
+        private static byte[] ConvertToBytes(object value)
+        {
+            if (value is byte[] byteArray)
+                return byteArray;
+
+            if (value is string base64String)
+            {
+                try
+                {
+                    return Convert.FromBase64String(base64String);
+                }
+                catch (FormatException)
+                {
+                    throw new FormatException($"Invalid Base64 encoding: {base64String}");
+                }
+            }
+
+            if (value is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.String)
+            {
+                try
+                {
+                    return Convert.FromBase64String(jsonElement.GetString() ?? "");
+                }
+                catch (FormatException)
+                {
+                    throw new FormatException($"Invalid Base64 encoding in JsonElement");
+                }
+            }
+
+            throw new FormatException($"Cannot convert value of type {value.GetType().Name} to byte array");
+        }
+
+        private static int GetInt32Value(object value)
+        {
+            if (value is int intValue)
+                return intValue;
+
+            if (value is JsonElement jsonElement)
+            {
+                if (jsonElement.ValueKind == JsonValueKind.Number)
+                    return jsonElement.GetInt32();
+
+                if (jsonElement.ValueKind == JsonValueKind.String &&
+                    int.TryParse(jsonElement.GetString(), out int parsedValue))
+                    return parsedValue;
+            }
+
+            if (value is string stringValue && int.TryParse(stringValue, out int result))
+                return result;
+
+            if (value != null)
+            {
+                if (int.TryParse(value.ToString(), out int parsed))
+                    return parsed;
+            }
+
+            throw new FormatException($"Cannot convert {value} to Int32");
+        }
+
+        private static long GetInt64Value(object value)
+        {
+            if (value is long longValue)
+                return longValue;
+
+            if (value is int intValue)
+                return intValue;
+
+            if (value is JsonElement jsonElement)
+            {
+                if (jsonElement.ValueKind == JsonValueKind.Number)
+                    return jsonElement.GetInt64();
+
+                if (jsonElement.ValueKind == JsonValueKind.String &&
+                    long.TryParse(jsonElement.GetString(), out long parsedValue))
+                    return parsedValue;
+            }
+
+            if (value is string stringValue && long.TryParse(stringValue, out long result))
+                return result;
+
+            if (value != null)
+            {
+                if (long.TryParse(value.ToString(), out long parsed))
+                    return parsed;
+            }
+
+            throw new FormatException($"Cannot convert {value} to Int64");
         }
     }
 }

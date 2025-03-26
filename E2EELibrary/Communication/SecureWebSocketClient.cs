@@ -2,9 +2,10 @@
 using System.Security;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using E2EELibrary.Models;
 using E2EELibrary.Encryption;
-using System.Text.Json;
+using E2EELibrary.Core;
 
 namespace E2EELibrary.Communication
 {
@@ -100,7 +101,7 @@ namespace E2EELibrary.Communication
                 // Set timestamp in the EncryptedMessage object for replay protection
                 encryptedMessage.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-                // Convert encrypted message to transportable format
+                // Convert encrypted message to transportable format using our standardized serialization
                 var messageData = new
                 {
                     ciphertext = Convert.ToBase64String(encryptedMessage.Ciphertext),
@@ -112,15 +113,8 @@ namespace E2EELibrary.Communication
                     sessionId = encryptedMessage.SessionId
                 };
 
-                // Serialize with options for better formatting and security
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = false, // More compact for network transmission
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-                };
-
-                string jsonMessage = JsonSerializer.Serialize(messageData, options);
+                // Use our standardized JSON serialization
+                string jsonMessage = JsonSerialization.Serialize(messageData);
                 byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
 
                 // Send the message with cancellation support
@@ -185,25 +179,12 @@ namespace E2EELibrary.Communication
                 // Parse message - only use the bytes we actually received
                 string json = Encoding.UTF8.GetString(buffer, 0, result.Count);
 
-                // Add explicit type and options for better deserialization safety
-                var options = new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                };
+                // Use our standardized JSON deserialization with case-insensitive option for backward compatibility
+                Dictionary<string, JsonElement>? messageData = JsonSerialization.DeserializeInsensitive<Dictionary<string, JsonElement>>(json);
 
-                Dictionary<string, object> messageData;
-
-                try
+                if (messageData is null)
                 {
-                    messageData = JsonSerializer.Deserialize<Dictionary<string, object>>(json, options);
-                    if (messageData is null)
-                    {
-                        throw new FormatException("Failed to deserialize message data.");
-                    }
-                }
-                catch (JsonException jsonEx)
-                {
-                    throw new FormatException(jsonEx.Message, jsonEx);
+                    throw new FormatException("Failed to deserialize message data.");
                 }
 
                 // Validate required fields exist
@@ -215,92 +196,49 @@ namespace E2EELibrary.Communication
                     throw new FormatException("Message is missing required fields.");
                 }
 
-                // Safely extract values with null checking
-                string? ciphertextBase64 = messageData["ciphertext"]?.ToString();
-                string? nonceBase64 = messageData["nonce"]?.ToString();
-                string? senderDHKeyBase64 = messageData["senderDHKey"]?.ToString();
+                // Extract values with proper error handling
+                byte[]? ciphertext = Utils.GetBytesFromBase64(messageData, "ciphertext");
+                byte[]? nonce = Utils.GetBytesFromBase64(messageData, "nonce");
+                byte[]? senderDHKey = Utils.GetBytesFromBase64(messageData, "senderDHKey");
 
-                if (string.IsNullOrEmpty(ciphertextBase64) ||
-                    string.IsNullOrEmpty(nonceBase64) ||
-                    string.IsNullOrEmpty(senderDHKeyBase64))
-                {
-                    throw new FormatException("Message contains null or empty required fields.");
-                }
-
-                // Try-catch each conversion separately for better error messages
-                byte[] ciphertext;
-                byte[] nonce;
-                byte[] senderDHKey;
-                int messageNumber;
-                long timestamp = 0;
-
-                try
-                {
-                    ciphertext = Convert.FromBase64String(ciphertextBase64);
-                }
-                catch (FormatException)
-                {
-                    throw new FormatException("Invalid Base64 encoding for ciphertext.");
-                }
-
-                try
-                {
-                    nonce = Convert.FromBase64String(nonceBase64);
-                }
-                catch (FormatException)
-                {
-                    throw new FormatException("Invalid Base64 encoding for nonce.");
-                }
-
-                try
-                {
-                    senderDHKey = Convert.FromBase64String(senderDHKeyBase64);
-                }
-                catch (FormatException)
-                {
-                    throw new FormatException("Invalid Base64 encoding for senderDHKey.");
-                }
-
-                try
-                {
-                    // Use TryParse for safer conversion
-                    if (!int.TryParse(messageData["messageNumber"]?.ToString(), out messageNumber))
-                    {
-                        throw new FormatException("Invalid message number format.");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    throw new FormatException($"Error parsing message number: {ex.Message}");
-                }
+                // Get the message number with proper handling of different formats
+                int messageNumber = Utils.GetInt32Value(messageData["messageNumber"]);
 
                 // Try to get timestamp if available
-                if (messageData.TryGetValue("timestamp", out object? timestampPre) && timestampPre != null)
+                long timestamp = 0;
+                if (messageData.TryGetValue("timestamp", out JsonElement timestampElement))
                 {
-                    if (!long.TryParse(messageData["timestamp"].ToString(), out timestamp))
+                    timestamp = Utils.GetInt64Value(timestampElement, 0);
+
+                    // Check if message is too old (5 minutes threshold for replay protection)
+                    long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    if (timestamp > 0 && currentTime - timestamp > 5 * 60 * 1000)
                     {
-                        // Log warning but don't throw - timestamp is useful but not critical
-                        // In production, consider logging this: "Warning: Invalid timestamp format in message"
-                    }
-                    else
-                    {
-                        // Check if message is too old (5 minutes threshold for replay protection)
-                        long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                        if (timestamp > 0 && currentTime - timestamp > 5 * 60 * 1000)
-                        {
-                            throw new SecurityException("Message is too old (possible replay attack).");
-                        }
+                        throw new SecurityException("Message is too old (possible replay attack).");
                     }
                 }
 
                 // Try to get session ID if available
-                if (messageData.TryGetValue("sessionId", out object? sessionId) && sessionId != null)
+                string? sessionId = null;
+                if (messageData.TryGetValue("sessionId", out JsonElement sessionIdElement) &&
+                    sessionIdElement.ValueKind == JsonValueKind.String)
                 {
-                    sessionId = messageData["sessionId"];
+                    sessionId = sessionIdElement.GetString();
                 }
 
-                ArgumentNullException.ThrowIfNull(sessionId);
+                // Try to get message ID if available
+                Guid messageId = Guid.NewGuid(); // Default to a new ID
+                if (messageData.TryGetValue("messageId", out JsonElement messageIdElement) &&
+                    messageIdElement.ValueKind == JsonValueKind.String)
+                {
+                    string? messageIdStr = messageIdElement.GetString();
+                    if (!string.IsNullOrEmpty(messageIdStr) && Guid.TryParse(messageIdStr, out Guid parsedId))
+                    {
+                        messageId = parsedId;
+                    }
+                }
 
+                // Create the encrypted message
                 var encryptedMessage = new EncryptedMessage
                 {
                     Ciphertext = ciphertext,
@@ -308,18 +246,9 @@ namespace E2EELibrary.Communication
                     MessageNumber = messageNumber,
                     SenderDHKey = senderDHKey,
                     Timestamp = timestamp,
-                    SessionId = sessionId.ToString(),
+                    MessageId = messageId,
+                    SessionId = sessionId
                 };
-
-                // Try to get message ID if available
-                if (messageData.ContainsKey("messageId") && messageData["messageId"] != null)
-                {
-                    string? messageIdStr = messageData["messageId"].ToString();
-                    if (!string.IsNullOrEmpty(messageIdStr) && Guid.TryParse(messageIdStr, out Guid messageId))
-                    {
-                        encryptedMessage.MessageId = messageId;
-                    }
-                }
 
                 // Validate the message before attempting decryption
                 if (!encryptedMessage.Validate())

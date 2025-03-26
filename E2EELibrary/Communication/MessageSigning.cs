@@ -103,5 +103,40 @@ namespace E2EELibrary.Communication
                 return false;
             }
         }
+
+        /// <summary>
+        /// Signs a message object after normalizing it to a canonical representation
+        /// </summary>
+        /// <typeparam name="T">Type of object to sign</typeparam>
+        /// <param name="data">Data object to sign</param>
+        /// <param name="privateKey">Private key for signing</param>
+        /// <returns>Signature as a byte array</returns>
+        public static byte[] SignObject<T>(T data, byte[] privateKey)
+        {
+            // Normalize the object by serializing with our standard options
+            string json = JsonSerialization.Serialize(data);
+
+            // Sign the canonical representation
+            byte[] messageBytes = Encoding.UTF8.GetBytes(json);
+            return SignMessage(messageBytes, privateKey);
+        }
+
+        /// <summary>
+        /// Verifies a signature for a message object after normalizing it
+        /// </summary>
+        /// <typeparam name="T">Type of object that was signed</typeparam>
+        /// <param name="data">Data object to verify</param>
+        /// <param name="signature">Signature to verify</param>
+        /// <param name="publicKey">Public key of the signer</param>
+        /// <returns>True if the signature is valid</returns>
+        public static bool VerifyObject<T>(T data, byte[] signature, byte[] publicKey)
+        {
+            // Normalize the object by serializing with our standard options
+            string json = JsonSerialization.Serialize(data);
+
+            // Verify the signature against the canonical representation
+            byte[] messageBytes = Encoding.UTF8.GetBytes(json);
+            return VerifySignature(messageBytes, signature, publicKey);
+        }
     }
 }

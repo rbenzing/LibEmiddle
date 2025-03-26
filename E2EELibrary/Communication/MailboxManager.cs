@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Collections.Concurrent;
 using E2EELibrary.Core;
 using E2EELibrary.Models;
 using E2EELibrary.Encryption;
@@ -174,9 +168,9 @@ namespace E2EELibrary.Communication
         /// <param name="messageType">Optional type filter</param>
         /// <param name="onlyUnread">Whether to get only unread messages</param>
         /// <returns>List of messages with their decrypted content</returns>
-        public List<(MailboxMessage Message, string Content)> GetMessages(MessageType? messageType = null, bool onlyUnread = false)
+        public List<(MailboxMessage Message, string? Content)> GetMessages(MessageType? messageType = null, bool onlyUnread = false)
         {
-            var results = new List<(MailboxMessage, string)>();
+            var results = new List<(MailboxMessage, string?)>();
 
             foreach (var message in _incomingMessages.Values)
             {
@@ -514,7 +508,7 @@ namespace E2EELibrary.Communication
         /// <param name="recipientId">The recipient ID (Base64 of their public key)</param>
         /// <param name="encryptionKey">Optional key to encrypt the session data</param>
         /// <returns>Serialized session data</returns>
-        public byte[] ExportSession(string recipientId, byte[] encryptionKey = null)
+        public byte[] ExportSession(string recipientId, byte[]? encryptionKey = null)
         {
             if (!_sessions.TryGetValue(recipientId, out var session))
                 throw new KeyNotFoundException($"No session found for recipient {recipientId}");
@@ -529,7 +523,7 @@ namespace E2EELibrary.Communication
         /// <param name="sessionData">The serialized session data</param>
         /// <param name="decryptionKey">Optional key to decrypt the session data</param>
         /// <returns>True if the session was imported successfully</returns>
-        public bool ImportSession(string recipientId, byte[] sessionData, byte[] decryptionKey = null)
+        public bool ImportSession(string recipientId, byte[] sessionData, byte[]? decryptionKey = null)
         {
             try
             {
