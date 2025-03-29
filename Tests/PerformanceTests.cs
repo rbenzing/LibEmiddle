@@ -4,7 +4,6 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
 using E2EELibrary;
 using E2EELibrary.Encryption;
-using E2EELibrary.KeyManagement;
 
 namespace E2EELibraryTests
 {

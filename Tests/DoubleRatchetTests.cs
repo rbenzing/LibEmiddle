@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
 using E2EELibrary;
@@ -8,7 +9,6 @@ using E2EELibrary.Encryption;
 using E2EELibrary.KeyExchange;
 using E2EELibrary.Models;
 using E2EELibrary.Core;
-using System.Linq;
 
 namespace E2EELibraryTests
 {

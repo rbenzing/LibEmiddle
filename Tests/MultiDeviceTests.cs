@@ -5,7 +5,6 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using E2EELibrary;
 using E2EELibrary.KeyManagement;
 using E2EELibrary.MultiDevice;
-using E2EELibrary.Core;
 using Sodium;
 using E2EELibrary.Communication;
 using E2EELibrary.Encryption;

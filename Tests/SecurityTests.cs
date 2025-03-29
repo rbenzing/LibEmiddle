@@ -2,14 +2,11 @@
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
-using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using E2EELibrary;
 using E2EELibrary.Encryption;
 using E2EELibrary.KeyExchange;
-using E2EELibrary.KeyManagement;
 using E2EELibrary.Models;
-using E2EELibrary.Core;
 
 namespace E2EELibraryTests
 {

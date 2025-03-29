@@ -1,14 +1,12 @@
 ﻿using System.Security.Cryptography;
 using System.Collections.Concurrent;
-using System.Security;
 using System.Text;
-using System.Linq;
+using System.Text.Json;
 using E2EELibrary.Communication;
 using E2EELibrary.Core;
 using E2EELibrary.Encryption;
 using E2EELibrary.KeyManagement;
 using E2EELibrary.Models;
-using System.Text.Json;
 
 namespace E2EELibrary.GroupMessaging
 {

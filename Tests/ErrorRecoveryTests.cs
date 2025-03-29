@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Security.Cryptography;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
+using Sodium;
 using E2EELibrary;
 using E2EELibrary.Communication;
 using E2EELibrary.Models;
@@ -14,8 +16,6 @@ using E2EELibrary.KeyManagement;
 using E2EELibrary.Encryption;
 using E2EELibrary.GroupMessaging;
 using E2EELibrary.MultiDevice;
-using Sodium;
-using System.Security.Cryptography;
 using E2EELibrary.Communication.Abstract;
 
 namespace E2EELibraryTests

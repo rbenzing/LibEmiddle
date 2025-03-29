@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
 using System.Collections.Generic;

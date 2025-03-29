@@ -1,13 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using E2EELibrary;
 using E2EELibrary.GroupMessaging;
-using E2EELibrary.Core;
 using E2EELibrary.Models;
 using System.Collections.Concurrent;
 

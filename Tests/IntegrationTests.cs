@@ -1,15 +1,9 @@
 ﻿using System;
-using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Security.Cryptography;
 using E2EELibrary;
-using E2EELibrary.KeyManagement;
 using E2EELibrary.Encryption;
 using E2EELibrary.KeyExchange;
 using E2EELibrary.GroupMessaging;
-using E2EELibrary.MultiDevice;
 using E2EELibrary.Models;
 using E2EELibrary.Core;
 
