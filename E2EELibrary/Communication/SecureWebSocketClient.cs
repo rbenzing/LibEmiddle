@@ -6,6 +6,7 @@ using System.Text.Json;
 using E2EELibrary.Models;
 using E2EELibrary.Encryption;
 using E2EELibrary.Core;
+using E2EELibrary.Communication.Abstract;
 
 namespace E2EELibrary.Communication
 {

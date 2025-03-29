@@ -9,6 +9,7 @@ using E2EELibrary;
 using E2EELibrary.GroupMessaging;
 using E2EELibrary.Core;
 using E2EELibrary.Models;
+using System.Collections.Concurrent;
 
 namespace E2EELibraryTests
 {
@@ -32,27 +33,70 @@ namespace E2EELibraryTests
 
             string groupId = "large-group-test";
 
-            // Everyone creates the group
-            foreach (var manager in groupManagers)
+            // All members create their own group
+            for (int i = 0; i < memberCount; i++)
             {
-                manager.CreateGroup(groupId);
+                groupManagers[i].CreateGroup(groupId);
+            }
+
+            // Each member needs to authorize every other member - bidirectional authorization
+            for (int authorizerIdx = 0; authorizerIdx < memberCount; authorizerIdx++)
+            {
+                for (int targetIdx = 0; targetIdx < memberCount; targetIdx++)
+                {
+                    if (authorizerIdx != targetIdx) // Don't need to authorize yourself
+                    {
+                        bool authorizationResult = groupManagers[authorizerIdx].AuthorizeMember(
+                            groupId,
+                            memberKeyPairs[targetIdx].publicKey);
+
+                        Assert.IsTrue(authorizationResult,
+                            $"Member {authorizerIdx} should authorize member {targetIdx}");
+                    }
+                }
             }
 
             // Create distribution messages for all members
             var distributionMessages = new List<SenderKeyDistributionMessage>();
-            foreach (var manager in groupManagers)
+            for (int i = 0; i < memberCount; i++)
             {
-                distributionMessages.Add(manager.CreateDistributionMessage(groupId));
+                distributionMessages.Add(groupManagers[i].CreateDistributionMessage(groupId));
             }
 
             // Each member processes all other members' distribution messages
             for (int receiverIdx = 0; receiverIdx < memberCount; receiverIdx++)
             {
+                Console.WriteLine($"Processing distributions for receiver {receiverIdx}");
                 for (int senderIdx = 0; senderIdx < memberCount; senderIdx++)
                 {
                     if (receiverIdx != senderIdx)
                     {
-                        bool result = groupManagers[receiverIdx].ProcessSenderKeyDistribution(distributionMessages[senderIdx]);
+                        bool result = groupManagers[receiverIdx].ProcessSenderKeyDistribution(
+                            distributionMessages[senderIdx]);
+
+                        // Debug logging for failed distributions
+                        if (!result)
+                        {
+                            string senderKey = Convert.ToBase64String(memberKeyPairs[senderIdx].publicKey);
+                            Console.WriteLine($"Failed to process distribution from sender {senderIdx} with key {senderKey}");
+
+                            // Check authorization status
+                            var authorizedMembersField = typeof(GroupChatManager).GetField("_authorizedMembers",
+                                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                            var authorizedMembers = (ConcurrentDictionary<string, ConcurrentDictionary<string, bool>>)
+                                authorizedMembersField.GetValue(groupManagers[receiverIdx]);
+
+                            if (authorizedMembers.TryGetValue(groupId, out var membersDict))
+                            {
+                                string receiverKey = Convert.ToBase64String(memberKeyPairs[receiverIdx].publicKey);
+                                string senderBase64Key = Convert.ToBase64String(memberKeyPairs[senderIdx].publicKey);
+
+                                Console.WriteLine($"Receiver {receiverIdx} key: {receiverKey}");
+                                Console.WriteLine($"Sender {senderIdx} key: {senderBase64Key}");
+                                Console.WriteLine($"Is sender authorized: {membersDict.ContainsKey(senderBase64Key)}");
+                            }
+                        }
+
                         Assert.IsTrue(result, $"Member {receiverIdx} should process distribution from member {senderIdx}");
                     }
                 }
@@ -103,11 +147,29 @@ namespace E2EELibraryTests
 
             string groupId = "member-removal-test";
 
-            // Everyone creates and joins the group initially
+            // Alice creates the group as admin and authorizes all other members
             aliceManager.CreateGroup(groupId);
+            aliceManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
+            aliceManager.AuthorizeMember(groupId, charlieKeyPair.publicKey);
+            aliceManager.AuthorizeMember(groupId, daveKeyPair.publicKey);
+
+            // Everyone creates their local view of the group
             bobManager.CreateGroup(groupId);
             charlieManager.CreateGroup(groupId);
             daveManager.CreateGroup(groupId);
+
+            // All members need to authorize Alice and each other for bidirectional communication
+            bobManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
+            bobManager.AuthorizeMember(groupId, charlieKeyPair.publicKey);
+            bobManager.AuthorizeMember(groupId, daveKeyPair.publicKey);
+
+            charlieManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
+            charlieManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
+            charlieManager.AuthorizeMember(groupId, daveKeyPair.publicKey);
+
+            daveManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
+            daveManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
+            daveManager.AuthorizeMember(groupId, charlieKeyPair.publicKey);
 
             // Exchange initial distribution messages
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
@@ -151,10 +213,22 @@ namespace E2EELibraryTests
 
             // 1. Create new group (in reality, this would be a key rotation after member removal)
             string newGroupId = "member-removal-test-new";
+
+            // Alice creates new group and authorizes only Bob and Charlie
             aliceManager.CreateGroup(newGroupId);
+            aliceManager.AuthorizeMember(newGroupId, bobKeyPair.publicKey);
+            aliceManager.AuthorizeMember(newGroupId, charlieKeyPair.publicKey);
+
+            // Bob and Charlie create their view of the new group
             bobManager.CreateGroup(newGroupId);
             charlieManager.CreateGroup(newGroupId);
-            // Dave is excluded
+
+            // Bob and Charlie authorize Alice and each other
+            bobManager.AuthorizeMember(newGroupId, aliceKeyPair.publicKey);
+            bobManager.AuthorizeMember(newGroupId, charlieKeyPair.publicKey);
+
+            charlieManager.AuthorizeMember(newGroupId, aliceKeyPair.publicKey);
+            charlieManager.AuthorizeMember(newGroupId, bobKeyPair.publicKey);
 
             // 2. Exchange new distribution messages (without Dave)
             var aliceNewDistribution = aliceManager.CreateDistributionMessage(newGroupId);
@@ -179,7 +253,11 @@ namespace E2EELibraryTests
             string bobDecryptedNew = bobManager.DecryptGroupMessage(aliceNewMsg);
             string charlieDecryptedNew = charlieManager.DecryptGroupMessage(aliceNewMsg);
 
-            // 6. Try to have Dave decrypt
+            // 6. Try to have Dave decrypt (even if Dave creates his own group, he won't be authorized by others)
+            daveManager.CreateGroup(newGroupId);  // Dave tries to join new group
+            daveManager.AuthorizeMember(newGroupId, aliceKeyPair.publicKey);
+            // But no one has authorized Dave in the new group
+
             string daveDecryptedNew = daveManager.DecryptGroupMessage(aliceNewMsg);
 
             // Assert
@@ -200,15 +278,28 @@ namespace E2EELibraryTests
 
             string groupId = "concurrent-access-test";
 
-            // Set up the group
+            // Both create their local view of the group
             aliceManager.CreateGroup(groupId);
             bobManager.CreateGroup(groupId);
 
+            // Both authorize each other - this is the key for bidirectional authorization
+            bool aliceAuthBobResult = aliceManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
+            Assert.IsTrue(aliceAuthBobResult, "Alice should be able to authorize Bob");
+
+            bool bobAuthAliceResult = bobManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
+            Assert.IsTrue(bobAuthAliceResult, "Bob should be able to authorize Alice");
+
+            // Exchange distribution messages
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
             var bobDistribution = bobManager.CreateDistributionMessage(groupId);
 
-            aliceManager.ProcessSenderKeyDistribution(bobDistribution);
-            bobManager.ProcessSenderKeyDistribution(aliceDistribution);
+            // Both process each other's distribution messages
+            bool aliceProcessResult = aliceManager.ProcessSenderKeyDistribution(bobDistribution);
+            bool bobProcessResult = bobManager.ProcessSenderKeyDistribution(aliceDistribution);
+
+            // Verify that both could process each other's distribution
+            Assert.IsTrue(aliceProcessResult, "Alice should process Bob's distribution successfully");
+            Assert.IsTrue(bobProcessResult, "Bob should process Alice's distribution successfully");
 
             // Act - Simulate concurrent message sending
             const int messageCount = 20;

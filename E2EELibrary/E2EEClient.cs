@@ -5,6 +5,7 @@ using E2EELibrary.GroupMessaging;
 using E2EELibrary.MultiDevice;
 using E2EELibrary.Models;
 using E2EELibrary.Communication;
+using E2EELibrary.Communication.Abstract;
 
 namespace E2EELibrary
 {
@@ -393,9 +394,32 @@ namespace E2EELibrary
         /// <param name="identityKeyPair">The user's identity key pair</param>
         /// <param name="transport">The transport implementation to use</param>
         /// <returns>A configured mailbox manager</returns>
-        public static Communication.MailboxManager CreateMailboxManager((byte[] publicKey, byte[] privateKey) identityKeyPair, Communication.IMailboxTransport transport)
+        public static Communication.MailboxManager CreateMailboxManager((byte[] publicKey, byte[] privateKey) identityKeyPair, IMailboxTransport transport)
         {
             return new Communication.MailboxManager(identityKeyPair, transport);
+        }
+
+        #endregion
+
+        #region Mailbox Transport Factories
+
+        /// <summary>
+        /// Creates an HTTP-based mailbox transport.
+        /// </summary>
+        /// <param name="serverUrl">The URL of the mailbox server</param>
+        /// <returns>An HTTP mailbox transport</returns>
+        public static IMailboxTransport CreateHttpMailboxTransport(string serverUrl)
+        {
+            return new HttpMailboxTransport(serverUrl);
+        }
+
+        /// <summary>
+        /// Creates an in-memory mailbox transport for testing or local-only scenarios.
+        /// </summary>
+        /// <returns>An in-memory mailbox transport</returns>
+        public static IMailboxTransport CreateInMemoryMailboxTransport()
+        {
+            return new InMemoryMailboxTransport();
         }
 
         #endregion

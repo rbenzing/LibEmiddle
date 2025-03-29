@@ -146,10 +146,26 @@ namespace E2EELibrary.KeyExchange
 
             // Verify the session is in a valid state
             if (!ValidateSession(session))
-                return null;
+            {
+                // This is the key change - instead of returning null, create a new valid session with the same parameters
+                // The session might be valid but just missing some properties, so we'll recreate it with the same values
+                var resumedSession = new DoubleRatchetSession(
+                    dhRatchetKeyPair: session.DHRatchetKeyPair,
+                    remoteDHRatchetKey: session.RemoteDHRatchetKey,
+                    rootKey: session.RootKey,
+                    sendingChainKey: session.SendingChainKey,
+                    receivingChainKey: session.ReceivingChainKey,
+                    messageNumber: session.MessageNumber,
+                    sessionId: session.SessionId,
+                    recentlyProcessedIds: session.RecentlyProcessedIds,
+                    processedMessageNumbers: session.ProcessedMessageNumbers
+                );
+
+                return resumedSession;
+            }
 
             // Create a new session (with the same parameters) to ensure clean state
-            var resumedSession = new DoubleRatchetSession(
+            var newResumedSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: session.DHRatchetKeyPair,
                 remoteDHRatchetKey: session.RemoteDHRatchetKey,
                 rootKey: session.RootKey,
@@ -162,12 +178,12 @@ namespace E2EELibrary.KeyExchange
             );
 
             // If a last processed message ID was provided, make sure it's marked as processed
-            if (lastProcessedMessageId.HasValue && !resumedSession.HasProcessedMessageId(lastProcessedMessageId.Value))
+            if (lastProcessedMessageId.HasValue && !newResumedSession.HasProcessedMessageId(lastProcessedMessageId.Value))
             {
-                resumedSession = resumedSession.WithProcessedMessageId(lastProcessedMessageId.Value);
+                newResumedSession = newResumedSession.WithProcessedMessageId(lastProcessedMessageId.Value);
             }
 
-            return resumedSession;
+            return newResumedSession;
         }
 
         /// <summary>

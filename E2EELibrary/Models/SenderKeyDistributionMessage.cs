@@ -1,5 +1,4 @@
-﻿
-namespace E2EELibrary.Models
+﻿namespace E2EELibrary.Models
 {
     /// <summary>
     /// Sender key distribution message for group messaging
@@ -25,5 +24,10 @@ namespace E2EELibrary.Models
         /// Signature of the sender key
         /// </summary>
         public byte[]? Signature { get; set; }
+
+        /// <summary>
+        /// Message identifier
+        /// </summary>
+        public string? MessageId { get; set; }
     }
 }

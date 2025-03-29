@@ -1,12 +1,17 @@
 E2EELibrary/
 ├── Communication/
-│   ├── IWebSocketClient.cs
+│   ├── Abstract/
+│   │   ├── IMailboxTransport.cs
+│   │   ├── IWebSocketClient.cs
+│   ├── HttpMailboxTransport.cs
+│   ├── InMemoryMailboxTransport.cs
 │   ├── MailboxManager.cs
 │   ├── MessageSigning.cs
 │   ├── SecureWebSocketClient.cs
 │   ├── StandardWebSocketClient.cs
 ├── Core/
 │   ├── Constants.cs
+│   ├── JsonSerialization.cs
 │   ├── SecureMemory.cs
 │   └── Utils.cs         						
 ├── Encryption/
@@ -45,4 +50,4 @@ E2EELibrary/
 ├── MultiDevice/
 │   ├── DeviceLinking.cs
 │   └── DeviceManager.cs
-└── E2EEClient.cs              			# Main facade/entry point for the library
+└── E2EEClient.cs

@@ -32,7 +32,8 @@ namespace E2EELibrary.KeyExchange
                 ReceivingChainKey = Convert.ToBase64String(session.ReceivingChainKey),
                 MessageNumber = session.MessageNumber,
                 SessionId = session.SessionId,
-                ProcessedMessageIds = session.RecentlyProcessedIds
+                ProcessedMessageIds = session.RecentlyProcessedIds,
+                ProcessedMessageNumbers = session.ProcessedMessageNumbers
             };
 
             // Serialize to JSON
@@ -140,6 +141,16 @@ namespace E2EELibrary.KeyExchange
                     }
                 }
 
+                // Extract processed message numbers if they exist
+                List<int> processedMessageNumbers = new List<int>();
+                if (root.TryGetProperty("ProcessedMessageNumbers", out JsonElement processedNumbersElement))
+                {
+                    foreach (JsonElement numElement in processedNumbersElement.EnumerateArray())
+                    {
+                        processedMessageNumbers.Add(numElement.GetInt32());
+                    }
+                }
+
                 // Create session
                 return new DoubleRatchetSession(
                     dhRatchetKeyPair: (dhPublicKey, dhPrivateKey),
@@ -149,10 +160,11 @@ namespace E2EELibrary.KeyExchange
                     receivingChainKey: receivingChainKey,
                     messageNumber: messageNumber,
                     sessionId: sessionId,
-                    recentlyProcessedIds: processedMessageIds
+                    recentlyProcessedIds: processedMessageIds,
+                    processedMessageNumbers: processedMessageNumbers
                 );
             }
-            catch(ArgumentNullException ex)
+            catch (ArgumentNullException ex)
             {
                 throw new ArgumentException("Failed to deserialize session data", ex);
             }

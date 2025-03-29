@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Security;
 using System.Text.Json;
+using E2EELibrary.Communication.Abstract;
 
 namespace E2EELibraryTests
 {

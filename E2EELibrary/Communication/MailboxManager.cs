@@ -4,6 +4,7 @@ using E2EELibrary.Models;
 using E2EELibrary.Encryption;
 using E2EELibrary.KeyExchange;
 using E2EELibrary.KeyManagement;
+using E2EELibrary.Communication.Abstract;
 
 namespace E2EELibrary.Communication
 {
@@ -97,9 +98,12 @@ namespace E2EELibrary.Communication
         /// Sets the polling interval.
         /// </summary>
         /// <param name="interval">The new polling interval</param>
-        public void SetPollingInterval(TimeSpan interval)
+        /// <param name="forTesting">Set to true to bypass the minimum interval check for testing purposes</param>
+        public void SetPollingInterval(TimeSpan interval, bool forTesting = false)
         {
-            if (interval < TimeSpan.FromSeconds(5))
+            // In production code, enforce a reasonable minimum to avoid excessive polling
+            // For tests, allow shorter intervals when forTesting flag is set
+            if (!forTesting && interval < TimeSpan.FromSeconds(5))
                 throw new ArgumentException("Polling interval cannot be less than 5 seconds", nameof(interval));
 
             _pollingInterval = interval;
@@ -259,17 +263,29 @@ namespace E2EELibrary.Communication
         /// <returns>True if the message was deleted</returns>
         public async Task<bool> DeleteMessageAsync(string messageId)
         {
-            bool localRemoved = _incomingMessages.TryRemove(messageId, out _);
+            // First check if we even have this message locally
+            if (!_incomingMessages.ContainsKey(messageId))
+            {
+                return false;
+            }
 
             try
             {
+                // Attempt to delete from server first
                 bool serverRemoved = await _transport.DeleteMessageAsync(messageId);
-                return localRemoved || serverRemoved;
+
+                // Then remove from local collection if server deletion succeeded
+                if (serverRemoved)
+                {
+                    _incomingMessages.TryRemove(messageId, out _);
+                }
+
+                return serverRemoved;
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Error deleting message on server: {ex.Message}");
-                return localRemoved;
+                return false;
             }
         }
 
@@ -389,6 +405,16 @@ namespace E2EELibrary.Communication
                     {
                         break; // Cancellation requested
                     }
+                }
+
+                // Wait for next poll - this should be skipped if we already delayed after an error
+                try
+                {
+                    await Task.Delay(_pollingInterval, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break; // Cancellation requested
                 }
             }
         }

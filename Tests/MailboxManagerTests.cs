@@ -9,6 +9,7 @@ using E2EELibrary.Models;
 using E2EELibrary.KeyManagement;
 using System.Security.Cryptography;
 using System.Text;
+using E2EELibrary.Communication.Abstract;
 
 namespace E2EELibraryTests
 {
@@ -66,8 +67,10 @@ namespace E2EELibraryTests
             int messageReceivedCount = 0;
             MailboxMessage lastReceivedMessage = null;
 
-            // Create mailbox manager with our mocked transport
-            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            // Create mailbox manager without starting any background tasks
+            var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+
+            try
             {
                 // Subscribe to message received event
                 mailboxManager.MessageReceived += (sender, args) =>
@@ -94,6 +97,14 @@ namespace E2EELibraryTests
 
                 // Stop the manager
                 mailboxManager.Stop();
+            }
+            finally
+            {
+                // Make sure to dispose the mailbox manager
+                if (mailboxManager is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
             }
 
             // Assert
@@ -122,8 +133,10 @@ namespace E2EELibraryTests
 
             var recipientKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
-            // Create mailbox manager
-            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            // Create mailbox manager without starting any background tasks
+            var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+
+            try
             {
                 // Act
                 string messageId = mailboxManager.SendMessage(
@@ -153,6 +166,14 @@ namespace E2EELibraryTests
                 // Verify transport was called
                 _mockTransport.Verify(t => t.SendMessageAsync(It.IsAny<MailboxMessage>()), Times.Once);
             }
+            finally
+            {
+                // Make sure to dispose the mailbox manager
+                if (mailboxManager is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
         }
 
         [TestMethod]
@@ -171,8 +192,10 @@ namespace E2EELibraryTests
                 .Setup(t => t.SendMessageAsync(It.IsAny<MailboxMessage>()))
                 .ReturnsAsync(true);
 
-            // Create mailbox manager and start it
-            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            // Create mailbox manager without starting any background tasks
+            var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+
+            try
             {
                 // First fetch messages
                 var fetchMethod = typeof(MailboxManager).GetMethod("PollForMessagesAsync",
@@ -203,6 +226,14 @@ namespace E2EELibraryTests
                     It.Is<MailboxMessage>(m => m.Type == MessageType.ReadReceipt)),
                     Times.Once);
             }
+            finally
+            {
+                // Make sure to dispose the mailbox manager
+                if (mailboxManager is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
         }
 
         [TestMethod]
@@ -217,14 +248,24 @@ namespace E2EELibraryTests
                 .Setup(t => t.DeleteMessageAsync(It.IsAny<string>()))
                 .ReturnsAsync(true);
 
-            // Create mailbox manager and start it
-            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            // Create mailbox manager without starting any background tasks
+            var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+
+            try
             {
-                // First fetch messages
-                var fetchMethod = typeof(MailboxManager).GetMethod("PollForMessagesAsync",
+                // Instead of using reflection to call a private method, directly add the messages
+                // to the internal collection using reflection
+                var incomingMessagesField = typeof(MailboxManager).GetField("_incomingMessages",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
-                await (Task)fetchMethod.Invoke(mailboxManager, new object[] { CancellationToken.None });
+                var incomingMessages = incomingMessagesField.GetValue(mailboxManager) as
+                    System.Collections.Concurrent.ConcurrentDictionary<string, MailboxMessage>;
+
+                // Add test messages directly
+                foreach (var message in _testMessages)
+                {
+                    incomingMessages.TryAdd(message.MessageId, message);
+                }
 
                 // Get messages
                 var messagesBefore = mailboxManager.GetMessages();
@@ -232,7 +273,7 @@ namespace E2EELibraryTests
 
                 string testMessageId = messagesBefore[0].Message.MessageId;
 
-                // Act
+                // Act - call the method we're actually testing
                 bool result = await mailboxManager.DeleteMessageAsync(testMessageId);
 
                 // Get messages again to check deletion
@@ -257,13 +298,24 @@ namespace E2EELibraryTests
                 // Verify server method was called
                 _mockTransport.Verify(t => t.DeleteMessageAsync(testMessageId), Times.Once);
             }
+            finally
+            {
+                // Make sure to dispose the mailbox manager
+                if (mailboxManager is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
         }
 
         [TestMethod]
         public void SetPollingInterval_ShouldUpdateInterval()
         {
             // Arrange
-            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            // Create mailbox manager without starting any background tasks
+            var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+
+            try
             {
                 // Act
                 TimeSpan newInterval = TimeSpan.FromSeconds(60);
@@ -271,6 +323,14 @@ namespace E2EELibraryTests
 
                 // Assert - we can't directly test the private field, but we can verify no exception was thrown
                 // This is a simple test just to ensure the method runs without errors
+            }
+            finally
+            {
+                // Make sure to dispose the mailbox manager
+                if (mailboxManager is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
             }
         }
 
