@@ -3,6 +3,22 @@ using System.Runtime.InteropServices;
 
 namespace E2EELibrary.Core
 {
+    static class NativeLibrary
+    {
+        public const string LibraryName =
+#if NET
+            "libsodium";
+#elif WIN32
+        "libsodium.dll";
+#elif LINUX
+        "libsodium.so";
+#elif OSX
+        "libsodium.dylib";
+#else
+        "libsodium";
+#endif
+    }
+
     /// <summary>
     /// Provides a native interface to the libsodium cryptographic library.
     /// This class ensures the library is properly initialized before use.
@@ -10,7 +26,7 @@ namespace E2EELibrary.Core
     public static class Sodium
     {
         // Version constants for libsodium
-        private const string SODIUM_VERSION_STRING = "1.0.18";
+        private const string SODIUM_VERSION_STRING = "1.0.20";
         private const int SODIUM_LIBRARY_VERSION_MAJOR = 10;
         private const int SODIUM_LIBRARY_VERSION_MINOR = 3;
 
@@ -82,7 +98,7 @@ namespace E2EELibrary.Core
 
         #region Native library imports
 
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(NativeLibrary.LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern int sodium_init();
 
         [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]

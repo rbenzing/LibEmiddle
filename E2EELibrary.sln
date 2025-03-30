@@ -14,19 +14,17 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{B72A061D-81CB-44EE-9C30-26ECFA601C42}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "win-x64", "win-x64", "{82453A83-141F-4BF4-8A39-7492E1C93820}"
-	ProjectSection(SolutionItems) = preProject
-		..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\x64\Release\v143\dynamic\libsodium.dll = ..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\x64\Release\v143\dynamic\libsodium.dll
-		..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\x64\Release\v143\dynamic\libsodium.exp = ..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\x64\Release\v143\dynamic\libsodium.exp
-		..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\x64\Release\v143\dynamic\libsodium.lib = ..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\x64\Release\v143\dynamic\libsodium.lib
-		..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\x64\Release\v143\dynamic\libsodium.pdb = ..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\x64\Release\v143\dynamic\libsodium.pdb
-	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "win-x86", "win-x86", "{3FF003CF-1253-45E4-8883-42CCA6CF2F90}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "native", "native", "{4288914F-EDF0-4732-9463-A17364B57917}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\x64\Release\v143\dynamic\libsodium.dll = ..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\x64\Release\v143\dynamic\libsodium.dll
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "native", "native", "{467D088E-2C76-4DBE-9B1A-75BFC09BDA5F}"
 	ProjectSection(SolutionItems) = preProject
 		..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\Win32\Release\v143\dynamic\libsodium.dll = ..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\Win32\Release\v143\dynamic\libsodium.dll
-		..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\Win32\Release\v143\dynamic\libsodium.exp = ..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\Win32\Release\v143\dynamic\libsodium.exp
-		..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\Win32\Release\v143\dynamic\libsodium.lib = ..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\Win32\Release\v143\dynamic\libsodium.lib
-		..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\Win32\Release\v143\dynamic\libsodium.pdb = ..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\Win32\Release\v143\dynamic\libsodium.pdb
 	EndProjectSection
 EndProject
 Global
@@ -52,6 +50,8 @@ Global
 		{86746BC1-8D65-4393-B407-E4C64910CA3A} = {B72A061D-81CB-44EE-9C30-26ECFA601C42}
 		{82453A83-141F-4BF4-8A39-7492E1C93820} = {6F74C8D0-E8DE-43CF-9D0F-66D086406243}
 		{3FF003CF-1253-45E4-8883-42CCA6CF2F90} = {6F74C8D0-E8DE-43CF-9D0F-66D086406243}
+		{4288914F-EDF0-4732-9463-A17364B57917} = {82453A83-141F-4BF4-8A39-7492E1C93820}
+		{467D088E-2C76-4DBE-9B1A-75BFC09BDA5F} = {3FF003CF-1253-45E4-8883-42CCA6CF2F90}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {C2ED0BBE-6E1F-4E59-9294-2ED1DA7D115C}

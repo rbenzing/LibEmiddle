@@ -2,14 +2,15 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using E2EELibrary.Communication;
+using E2EELibrary.Communication.Abstract;
+using E2EELibrary.Core;
 using E2EELibrary.Models;
 using E2EELibrary.KeyManagement;
-using System.Security.Cryptography;
-using System.Text;
-using E2EELibrary.Communication.Abstract;
 
 namespace E2EELibraryTests
 {
@@ -47,7 +48,7 @@ namespace E2EELibraryTests
                         SenderDHKey = new byte[] { 7, 8, 9 },
                         Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                     },
-                    Type = MessageType.Chat,
+                    Type = Enums.MessageType.Chat,
                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     ExpiresAt = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds()
                 };
@@ -142,7 +143,7 @@ namespace E2EELibraryTests
                 string messageId = mailboxManager.SendMessage(
                     recipientKeyPair.publicKey,
                     "Test message content",
-                    MessageType.Chat);
+                    Enums.MessageType.Chat);
 
                 // Start the manager to process outgoing queue
                 mailboxManager.Start();
@@ -223,7 +224,7 @@ namespace E2EELibraryTests
 
                 // Verify a read receipt was sent
                 _mockTransport.Verify(t => t.SendMessageAsync(
-                    It.Is<MailboxMessage>(m => m.Type == MessageType.ReadReceipt)),
+                    It.Is<MailboxMessage>(m => m.Type == Enums.MessageType.ReadReceipt)),
                     Times.Once);
             }
             finally
@@ -388,7 +389,7 @@ namespace E2EELibraryTests
             using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
             {
                 // Send a message to create a session
-                mailboxManager.SendMessage(recipientKeyPair.publicKey, "Test message", MessageType.Chat);
+                mailboxManager.SendMessage(recipientKeyPair.publicKey, "Test message", Enums.MessageType.Chat);
 
                 // Act
                 byte[] sessionData = mailboxManager.ExportSession(recipientId);
@@ -403,7 +404,7 @@ namespace E2EELibraryTests
                     Assert.IsTrue(result, "Session import should succeed");
 
                     // Verify we can now send messages with the imported session
-                    string messageId = newMailboxManager.SendMessage(recipientKeyPair.publicKey, "Test with imported session", MessageType.Chat);
+                    string messageId = newMailboxManager.SendMessage(recipientKeyPair.publicKey, "Test with imported session", Enums.MessageType.Chat);
                     Assert.IsFalse(string.IsNullOrEmpty(messageId), "Should be able to send messages with imported session");
                 }
             }
@@ -449,7 +450,7 @@ namespace E2EELibraryTests
             using (var sourceManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
             {
                 // Send a message to create a session
-                sourceManager.SendMessage(recipientKeyPair.publicKey, "Test message", MessageType.Chat);
+                sourceManager.SendMessage(recipientKeyPair.publicKey, "Test message", Enums.MessageType.Chat);
 
                 // Export with the correct key
                 byte[] sessionData = sourceManager.ExportSession(recipientId, correctKey);
@@ -499,7 +500,7 @@ namespace E2EELibraryTests
                     MessageNumber = 1,
                     SenderDHKey = new byte[] { 7, 8, 9 }
                 },
-                Type = MessageType.Chat,
+                Type = Enums.MessageType.Chat,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds() // Not expired
             };
@@ -516,7 +517,7 @@ namespace E2EELibraryTests
                     MessageNumber = 2,
                     SenderDHKey = new byte[] { 7, 8, 9 }
                 },
-                Type = MessageType.Chat,
+                Type = Enums.MessageType.Chat,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds() // Already expired
             };

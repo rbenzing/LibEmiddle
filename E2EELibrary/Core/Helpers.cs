@@ -6,7 +6,7 @@ namespace E2EELibrary.Core
     /// <summary>
     /// Utility methods for cryptographic operations used across the library.
     /// </summary>
-    public static class Utils
+    public static class Helpers
     {
         /// <summary>
         /// Validates UTF-8 encoding of a byte array

@@ -126,7 +126,7 @@ namespace E2EELibrary.Communication
         /// <param name="messageType">The type of message</param>
         /// <param name="timeToLive">How long the message should be valid (0 for no expiration)</param>
         /// <returns>The message ID</returns>
-        public string SendMessage(byte[] recipientKey, string message, MessageType messageType = MessageType.Chat, long timeToLive = 0)
+        public string SendMessage(byte[] recipientKey, string message, Enums.MessageType messageType = Enums.MessageType.Chat, long timeToLive = 0)
         {
             if (recipientKey == null || recipientKey.Length == 0)
                 throw new ArgumentException("Recipient key cannot be null or empty", nameof(recipientKey));
@@ -172,7 +172,7 @@ namespace E2EELibrary.Communication
         /// <param name="messageType">Optional type filter</param>
         /// <param name="onlyUnread">Whether to get only unread messages</param>
         /// <returns>List of messages with their decrypted content</returns>
-        public List<(MailboxMessage Message, string? Content)> GetMessages(MessageType? messageType = null, bool onlyUnread = false)
+        public List<(MailboxMessage Message, string? Content)> GetMessages(Enums.MessageType? messageType = null, bool onlyUnread = false)
         {
             var results = new List<(MailboxMessage, string?)>();
 
@@ -494,7 +494,7 @@ namespace E2EELibrary.Communication
             string json = System.Text.Json.JsonSerializer.Serialize(receiptData);
 
             // Send as a normal message
-            MessageType receiptType = isDeliveryReceipt ? MessageType.DeliveryReceipt : MessageType.ReadReceipt;
+            Enums.MessageType receiptType = isDeliveryReceipt ? Enums.MessageType.DeliveryReceipt : Enums.MessageType.ReadReceipt;
             SendMessage(originalMessage.SenderKey, json, receiptType);
         }
 

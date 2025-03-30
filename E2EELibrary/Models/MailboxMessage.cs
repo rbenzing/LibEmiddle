@@ -1,4 +1,4 @@
-﻿using System;
+﻿using E2EELibrary.Core;
 
 namespace E2EELibrary.Models
 {
@@ -30,7 +30,7 @@ namespace E2EELibrary.Models
         /// <summary>
         /// Message type for routing
         /// </summary>
-        public MessageType Type { get; set; }
+        public Enums.MessageType Type { get; set; }
 
         /// <summary>
         /// When the message was created
@@ -101,51 +101,5 @@ namespace E2EELibrary.Models
             long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             return currentTime > ExpiresAt;
         }
-    }
-
-    /// <summary>
-    /// Type of mailbox message
-    /// </summary>
-    public enum MessageType
-    {
-        /// <summary>
-        /// A regular chat message
-        /// </summary>
-        Chat = 0,
-
-        /// <summary>
-        /// A device sync message
-        /// </summary>
-        DeviceSync = 1,
-
-        /// <summary>
-        /// A key exchange or key update message
-        /// </summary>
-        KeyExchange = 2,
-
-        /// <summary>
-        /// A group chat message
-        /// </summary>
-        GroupChat = 3,
-
-        /// <summary>
-        /// A device revocation message
-        /// </summary>
-        DeviceRevocation = 4,
-
-        /// <summary>
-        /// A file transfer message
-        /// </summary>
-        FileTransfer = 5,
-
-        /// <summary>
-        /// A delivery receipt
-        /// </summary>
-        DeliveryReceipt = 7,
-
-        /// <summary>
-        /// A read receipt
-        /// </summary>
-        ReadReceipt = 8
     }
 }

@@ -13,6 +13,7 @@ E2EELibrary/
 │   ├── Constants.cs
 │   ├── JsonSerialization.cs
 │   ├── SecureMemory.cs
+│   ├── Sodium.cs
 │   └── Utils.cs         						
 ├── Encryption/
 │   ├── AES.cs
@@ -21,12 +22,19 @@ E2EELibrary/
 │   ├── NonceGenerator.cs
 │   └── SenderKeyDistribution.cs
 ├── GroupMessaging/
-│   └── GroupChatManager.cs
+│   ├── GroupChatManager.cs
+│   ├── GroupKeyManager.cs
+│   ├── GroupMemberManager.cs
+│   ├── GroupMessageCrypto.cs
+│   ├── GroupSecurityValidator.cs
+│   ├── GroupSessionPersistence.cs
+│   └── SenderKeyDistribution.cs
 ├── KeyExchange/
 │   ├── DoubleRatchetExchange.cs
 │   ├── SessionPersistence.cs
 │   └── X3DHExchange.cs
 ├── KeyManagement/
+│   ├── KeyAuth.cs
 │   ├── KeyConversion.cs
 │   ├── KeyGenerator.cs
 │   ├── KeyPair.cs
@@ -40,9 +48,9 @@ E2EELibrary/
 │   ├── EncryptedGroupMessage.cs
 │   ├── EncryptedMessage.cs
 │   ├── EncryptedSenderKeyDistribution.cs
+│   ├── GroupSession.cs
 │   ├── KeyFileMetadata.cs
 │   ├── MailboxMessage.cs
-│   ├── MailboxTransport.cs
 │   ├── SenderKeyDistributionMessage.cs
 │   ├── X3DHKeyBundle.cs
 │   ├── X3DHPublicBundle.cs

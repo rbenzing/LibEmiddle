@@ -4,9 +4,12 @@ using E2EELibrary;
 using E2EELibrary.Core;
 using E2EELibrary.Encryption;
 using E2EELibrary.GroupMessaging;
+using E2EELibrary.Models;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
+using System.Reflection;
+using SenderKeyDistribution = E2EELibrary.GroupMessaging.SenderKeyDistribution;
 
 namespace E2EELibraryTests
 {
@@ -14,30 +17,34 @@ namespace E2EELibraryTests
     public class GroupMessagingTests
     {
         [TestMethod]
-        public void RotateGroupEpoch_ShouldIncrementEpochAndGenerateNewKey()
+        public void RotateGroupKey_ShouldGenerateNewKey()
         {
             // Arrange
             var keyPair = E2EEClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(keyPair);
-            string groupId = "test-epoch-rotation";
+            string groupId = "test-key-rotation";
             byte[] originalKey = groupManager.CreateGroup(groupId);
 
             // Act
-            int newEpoch = groupManager.RotateGroupEpoch(groupId);
+            byte[] newKey = groupManager.RotateGroupKey(groupId);
 
-            // Get the new sender key via reflection
-            var myGroupSenderKeysField = typeof(GroupChatManager).GetField("_myGroupSenderKeys",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var groupSenderKeys = (ConcurrentDictionary<string, byte[]>)myGroupSenderKeysField.GetValue(groupManager);
-            byte[] newKey = groupSenderKeys[groupId];
+            // Get the sender key via reflection
+            var groupSessionPersistenceField = typeof(GroupChatManager).GetField("_sessionPersistence",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            var sessionPersistence = groupSessionPersistenceField.GetValue(groupManager) as GroupSessionPersistence;
+
+            var session = sessionPersistence.GetGroupSession(groupId);
+            byte[] storedKey = session.SenderKey;
 
             // Assert
-            Assert.AreEqual(2, newEpoch); // Should increment from 1 to 2
+            Assert.IsNotNull(newKey);
+            Assert.AreEqual(32, newKey.Length);
             Assert.IsFalse(AreByteArraysEqual(originalKey, newKey));
+            Assert.IsTrue(AreByteArraysEqual(newKey, storedKey));
         }
 
         [TestMethod]
-        public void AuthorizeMember_ShouldAddMemberToAuthorizedList()
+        public void AddGroupMember_ShouldAddMemberToAuthorizedList()
         {
             // Arrange
             var adminKeyPair = E2EEClient.GenerateSignatureKeyPair();
@@ -47,23 +54,22 @@ namespace E2EELibraryTests
             groupManager.CreateGroup(groupId);
 
             // Act
-            bool result = groupManager.AuthorizeMember(groupId, memberKeyPair.publicKey);
+            bool result = groupManager.AddGroupMember(groupId, memberKeyPair.publicKey);
 
-            // Get the authorized members via reflection
-            var authorizedMembersField = typeof(GroupChatManager).GetField("_authorizedMembers",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var allAuthorizedMembers = (ConcurrentDictionary<string, ConcurrentDictionary<string, bool>>)
-                authorizedMembersField.GetValue(groupManager);
-            var groupMembers = allAuthorizedMembers[groupId];
-            string memberIdBase64 = Convert.ToBase64String(memberKeyPair.publicKey);
+            // Get the member manager via reflection
+            var memberManagerField = typeof(GroupChatManager).GetField("_memberManager",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            var memberManager = memberManagerField.GetValue(groupManager) as GroupMemberManager;
+
+            bool isMember = memberManager.IsMember(groupId, memberKeyPair.publicKey);
 
             // Assert
             Assert.IsTrue(result);
-            Assert.IsTrue(groupMembers.ContainsKey(memberIdBase64));
+            Assert.IsTrue(isMember);
         }
 
         [TestMethod]
-        public void RevokeMember_ShouldRemoveMemberAndRotateEpoch()
+        public void RemoveGroupMember_ShouldRemoveMemberAndRotateKey()
         {
             // Arrange
             var adminKeyPair = E2EEClient.GenerateSignatureKeyPair();
@@ -71,30 +77,34 @@ namespace E2EELibraryTests
             var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = "test-revocation";
             groupManager.CreateGroup(groupId);
-            groupManager.AuthorizeMember(groupId, memberKeyPair.publicKey);
+            groupManager.AddGroupMember(groupId, memberKeyPair.publicKey);
 
-            // Get the initial epoch
-            var epochsField = typeof(GroupChatManager).GetField("_groupEpochs",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var epochs = (ConcurrentDictionary<string, int>)epochsField.GetValue(groupManager);
-            int initialEpoch = epochs[groupId];
+            // Get the original key
+            var sessionPersistenceField = typeof(GroupChatManager).GetField("_sessionPersistence",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            var sessionPersistence = sessionPersistenceField.GetValue(groupManager) as GroupSessionPersistence;
+
+            var originalSession = sessionPersistence.GetGroupSession(groupId);
+            byte[] originalKey = originalSession.SenderKey;
 
             // Act
-            bool result = groupManager.RevokeMember(groupId, memberKeyPair.publicKey);
+            bool result = groupManager.RemoveGroupMember(groupId, memberKeyPair.publicKey);
 
-            // Get the authorized members and updated epoch
-            var authorizedMembersField = typeof(GroupChatManager).GetField("_authorizedMembers",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var allAuthorizedMembers = (ConcurrentDictionary<string, ConcurrentDictionary<string, bool>>)
-                authorizedMembersField.GetValue(groupManager);
-            var groupMembers = allAuthorizedMembers[groupId];
-            string memberIdBase64 = Convert.ToBase64String(memberKeyPair.publicKey);
-            int newEpoch = epochs[groupId];
+            // Get the member manager via reflection
+            var memberManagerField = typeof(GroupChatManager).GetField("_memberManager",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            var memberManager = memberManagerField.GetValue(groupManager) as GroupMemberManager;
+
+            bool isMember = memberManager.IsMember(groupId, memberKeyPair.publicKey);
+
+            // Get the updated key
+            var updatedSession = sessionPersistence.GetGroupSession(groupId);
+            byte[] newKey = updatedSession.SenderKey;
 
             // Assert
             Assert.IsTrue(result);
-            Assert.IsFalse(groupMembers.ContainsKey(memberIdBase64));
-            Assert.AreEqual(initialEpoch + 1, newEpoch); // Epoch should be incremented
+            Assert.IsFalse(isMember);
+            Assert.IsFalse(AreByteArraysEqual(originalKey, newKey)); // Key should have been rotated
         }
 
         [TestMethod]
@@ -133,21 +143,19 @@ namespace E2EELibraryTests
 
             string groupId = "test-forward-secrecy";
 
-            // 1. Both parties create the group
+            // 1. Admin creates the group and member joins
             adminManager.CreateGroup(groupId);
             memberManager.CreateGroup(groupId);
 
-            // 2. Bi-directional authorization - this is the missing piece
-            // Admin authorizes member
-            adminManager.AuthorizeMember(groupId, memberKeyPair.publicKey);
-            // AND member authorizes admin
-            memberManager.AuthorizeMember(groupId, adminKeyPair.publicKey);
+            // 2. Admin authorizes member and vice versa
+            adminManager.AddGroupMember(groupId, memberKeyPair.publicKey);
+            memberManager.AddGroupMember(groupId, adminKeyPair.publicKey);
 
             // Create and exchange distribution messages
             var adminDistribution = adminManager.CreateDistributionMessage(groupId);
             var memberDistribution = memberManager.CreateDistributionMessage(groupId);
 
-            // Process distributions - now both should succeed
+            // Process distributions
             bool memberProcessResult = memberManager.ProcessSenderKeyDistribution(adminDistribution);
             Assert.IsTrue(memberProcessResult, "Member should be able to process admin's distribution");
 
@@ -160,7 +168,7 @@ namespace E2EELibraryTests
             string decrypted1 = memberManager.DecryptGroupMessage(encrypted1);
 
             // Now revoke member
-            adminManager.RevokeMember(groupId, memberKeyPair.publicKey);
+            adminManager.RemoveGroupMember(groupId, memberKeyPair.publicKey);
 
             // Send a new message after revocation
             string message2 = "Message after revocation";
@@ -189,11 +197,12 @@ namespace E2EELibraryTests
 
             string groupId = "test-untrusted-rejection";
             adminManager.CreateGroup(groupId);
-            memberManager.CreateGroup(groupId); // Member needs to create the group too
-            untrustedManager.CreateGroup(groupId); // Even untrusted member creates a group (but won't be authorized)
+            memberManager.CreateGroup(groupId);
+            untrustedManager.CreateGroup(groupId);
 
             // Add only the trusted member
-            adminManager.AuthorizeMember(groupId, memberKeyPair.publicKey);
+            adminManager.AddGroupMember(groupId, memberKeyPair.publicKey);
+            memberManager.AddGroupMember(groupId, adminKeyPair.publicKey);
 
             // Exchange distribution messages between admin and trusted member
             var adminDistribution = adminManager.CreateDistributionMessage(groupId);
@@ -239,24 +248,17 @@ namespace E2EELibraryTests
         }
 
         [TestMethod]
-        public void CreateSenderKeyDistributionMessage_ShouldReturnValidMessage()
+        public void CreateDistributionMessage_ShouldReturnValidMessage()
         {
             // Arrange
             string groupId = "test-group-123";
-            byte[] senderKey = E2EEClient.GenerateSenderKey();
             var senderKeyPair = E2EEClient.GenerateSignatureKeyPair();
 
             // Create an instance of GroupChatManager
             var groupChatManager = new GroupChatManager(senderKeyPair);
 
-            // We need to create the group first to initialize it
-            groupChatManager.CreateGroup(groupId);
-
-            // Manually set the sender key for testing
-            var field = typeof(GroupChatManager).GetField("_myGroupSenderKeys",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var groupKeys = (ConcurrentDictionary<string, byte[]>)field.GetValue(groupChatManager);
-            groupKeys[groupId] = senderKey;
+            // Create the group
+            byte[] senderKey = groupChatManager.CreateGroup(groupId);
 
             // Act
             var distributionMessage = groupChatManager.CreateDistributionMessage(groupId);
@@ -264,36 +266,25 @@ namespace E2EELibraryTests
             // Assert
             Assert.IsNotNull(distributionMessage);
             Assert.AreEqual(groupId, distributionMessage.GroupId);
-            Assert.IsTrue(AreByteArraysEqual(senderKey, distributionMessage.SenderKey));
+
+            // Get session persistence manager via reflection
+            var sessionPersistenceField = typeof(GroupChatManager).GetField("_sessionPersistence",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            var sessionPersistence = sessionPersistenceField.GetValue(groupChatManager) as GroupSessionPersistence;
+
+            var session = sessionPersistence.GetGroupSession(groupId);
+            byte[] storedKey = session.SenderKey;
+
+            Assert.IsTrue(AreByteArraysEqual(storedKey, distributionMessage.SenderKey));
             Assert.IsTrue(AreByteArraysEqual(senderKeyPair.publicKey, distributionMessage.SenderIdentityKey));
 
-            // Extract the current epoch (will be 1 for a new group)
-            int epoch = 1;
+            // Get the distribution manager via reflection to verify signature
+            var distributionManagerField = typeof(GroupChatManager).GetField("_distributionManager",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            var distributionManager = distributionManagerField.GetValue(groupChatManager) as SenderKeyDistribution;
 
-            // Create the same signing context that's used internally
-            byte[] dataToVerify;
-            using (var ms = new MemoryStream())
-            {
-                // Start with the sender key
-                ms.Write(distributionMessage.SenderKey, 0, distributionMessage.SenderKey.Length);
-
-                // Add the epoch number
-                ms.Write(BitConverter.GetBytes(epoch), 0, 4);
-
-                // Add the group ID
-                byte[] groupIdBytes = Encoding.UTF8.GetBytes(groupId);
-                ms.Write(groupIdBytes, 0, groupIdBytes.Length);
-
-                dataToVerify = ms.ToArray();
-            }
-
-            // Verify signature with the enhanced context
-            bool validSignature = E2EEClient.VerifySignature(
-                dataToVerify,
-                distributionMessage.Signature,
-                distributionMessage.SenderIdentityKey);
-
-            Assert.IsTrue(validSignature);
+            bool isValidDistribution = distributionManager.ValidateDistributionMessage(distributionMessage);
+            Assert.IsTrue(isValidDistribution, "Distribution message should be valid");
         }
 
         [TestMethod]
@@ -301,68 +292,29 @@ namespace E2EELibraryTests
         {
             // Arrange
             string groupId = "test-group-456";
-            byte[] senderKey = E2EEClient.GenerateSenderKey();
             var senderKeyPair = E2EEClient.GenerateSignatureKeyPair();
             var recipientKeyPair = E2EEClient.GenerateSignatureKeyPair();
 
             // Create an instance of GroupChatManager
             var groupChatManager = new GroupChatManager(senderKeyPair);
 
-            // Create the group and set the sender key
+            // Create the group
             groupChatManager.CreateGroup(groupId);
 
-            // Set the sender key directly for testing
-            var myGroupSenderKeysField = typeof(GroupChatManager).GetField("_myGroupSenderKeys",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var groupSenderKeys = (ConcurrentDictionary<string, byte[]>)myGroupSenderKeysField.GetValue(groupChatManager);
-            groupSenderKeys[groupId] = senderKey;
-
-            // Create distribution message using the instance method
+            // Create distribution message
             var distributionMessage = groupChatManager.CreateDistributionMessage(groupId);
 
             // Act
-            var encryptedDistribution = SenderKeyDistribution.EncryptSenderKeyDistribution(
+            var encryptedDistribution = E2EELibrary.Encryption.SenderKeyDistribution.EncryptSenderKeyDistribution(
                 distributionMessage, recipientKeyPair.publicKey, senderKeyPair.privateKey);
-            var decryptedDistribution = SenderKeyDistribution.DecryptSenderKeyDistribution(
+            var decryptedDistribution = E2EELibrary.Encryption.SenderKeyDistribution.DecryptSenderKeyDistribution(
                 encryptedDistribution, recipientKeyPair.privateKey);
 
             // Assert
             Assert.AreEqual(distributionMessage.GroupId, decryptedDistribution.GroupId);
             Assert.IsTrue(AreByteArraysEqual(distributionMessage.SenderKey, decryptedDistribution.SenderKey));
             Assert.IsTrue(AreByteArraysEqual(distributionMessage.SenderIdentityKey, decryptedDistribution.SenderIdentityKey));
-
-            // The signature verification needs to be separate since our enhanced signatures include different context
-            // The SenderKeyDistribution encrypt/decrypt code doesn't need to understand our enhanced format,
-            // it just needs to correctly transport the message
-
-            // Verify the signature in context-aware manner
-            // Extract the epoch from the enhanced message (will be 1 for a new group)
-            int epoch = 1;
-
-            // Create the signature verification context
-            byte[] dataToVerify;
-            using (var ms = new MemoryStream())
-            {
-                // Start with the sender key
-                ms.Write(decryptedDistribution.SenderKey, 0, decryptedDistribution.SenderKey.Length);
-
-                // Add the epoch number
-                ms.Write(BitConverter.GetBytes(epoch), 0, 4);
-
-                // Add the group ID
-                byte[] groupIdBytes = Encoding.UTF8.GetBytes(groupId);
-                ms.Write(groupIdBytes, 0, groupIdBytes.Length);
-
-                dataToVerify = ms.ToArray();
-            }
-
-            // Verify signature with context
-            bool validSignature = E2EEClient.VerifySignature(
-                dataToVerify,
-                decryptedDistribution.Signature,
-                decryptedDistribution.SenderIdentityKey);
-
-            Assert.IsTrue(validSignature);
+            Assert.IsTrue(AreByteArraysEqual(distributionMessage.Signature, decryptedDistribution.Signature));
         }
 
         [TestMethod]
@@ -382,6 +334,11 @@ namespace E2EELibraryTests
             // Alice creates a group
             aliceManager.CreateGroup(groupId);
 
+            // Alice authorizes Bob and Bob authorizes Alice
+            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            bobManager.CreateGroup(groupId);
+            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+
             // Alice creates a distribution message
             var distributionMessage = aliceManager.CreateDistributionMessage(groupId);
 
@@ -400,14 +357,14 @@ namespace E2EELibraryTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentException))]
+        [ExpectedException(typeof(InvalidOperationException))]
         public void GroupChatManager_CreateDistribution_WithNonExistentGroup_ShouldThrowException()
         {
             // Arrange
             var keyPair = E2EEClient.GenerateSignatureKeyPair();
             var manager = new GroupChatManager(keyPair);
 
-            // Act & Assert - Should throw ArgumentException
+            // Act & Assert - Should throw InvalidOperationException
             manager.CreateDistributionMessage("non-existent-group");
         }
 
@@ -426,22 +383,21 @@ namespace E2EELibraryTests
             // Setup the group - Alice is the admin/creator
             string groupId = "multiple-senders-test-group";
             aliceManager.CreateGroup(groupId);
-
-            // Alice authorizes Bob and Charlie 
-            aliceManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
-            aliceManager.AuthorizeMember(groupId, charlieKeyPair.publicKey);
-
-            // Bob and Charlie join the group
             bobManager.CreateGroup(groupId);
             charlieManager.CreateGroup(groupId);
 
-            // Bob authorizes Alice and Charlie
-            bobManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
-            bobManager.AuthorizeMember(groupId, charlieKeyPair.publicKey);
+            // Add members both ways
+            // Alice adds Bob and Charlie
+            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
 
-            // Charlie authorizes Alice and Bob
-            charlieManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
-            charlieManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
+            // Bob adds Alice and Charlie
+            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
+
+            // Charlie adds Alice and Bob
+            charlieManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+            charlieManager.AddGroupMember(groupId, bobKeyPair.publicKey);
 
             // Exchange sender keys
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
@@ -499,18 +455,15 @@ namespace E2EELibraryTests
             var daveManager = new GroupChatManager(daveKeyPair);
 
             // 1. Each member creates their own group
-            Console.WriteLine("Creating groups for all members");
             string groupId = "member-addition-test-group";
             aliceManager.CreateGroup(groupId);
             bobManager.CreateGroup(groupId);
 
             // 2. Bidirectional authorization between Alice and Bob
-            Console.WriteLine("Setting up bidirectional authorization between Alice and Bob");
-            aliceManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
-            bobManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
 
             // 3. Exchange distribution messages between Alice and Bob
-            Console.WriteLine("Exchanging distribution messages between Alice and Bob");
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
             var bobDistribution = bobManager.CreateDistributionMessage(groupId);
 
@@ -521,28 +474,23 @@ namespace E2EELibraryTests
             Assert.IsTrue(bobProcessAlice, "Bob should successfully process Alice's distribution");
 
             // 4. Send initial message before Dave joins
-            Console.WriteLine("Sending initial message before Dave joins");
             string initialMessage = "Initial message before Dave joins";
             var initialEncrypted = aliceManager.EncryptGroupMessage(groupId, initialMessage);
             string bobDecryptsInitial = bobManager.DecryptGroupMessage(initialEncrypted);
 
             Assert.AreEqual(initialMessage, bobDecryptsInitial, "Bob should be able to decrypt the initial message");
 
-            // 5. Add Dave to the group (with proper bidirectional authorization)
-            Console.WriteLine("Adding Dave to the group");
+            // 5. Add Dave to the group
             daveManager.CreateGroup(groupId);
 
             // Bidirectional authorization for Dave with both Alice and Bob
-            // Alice <-> Dave
-            aliceManager.AuthorizeMember(groupId, daveKeyPair.publicKey);
-            daveManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, daveKeyPair.publicKey);
+            daveManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
 
-            // Bob <-> Dave
-            bobManager.AuthorizeMember(groupId, daveKeyPair.publicKey);
-            daveManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, daveKeyPair.publicKey);
+            daveManager.AddGroupMember(groupId, bobKeyPair.publicKey);
 
             // 6. Exchange distribution messages for all members
-            Console.WriteLine("Exchanging distribution messages for all members");
             var daveDistribution = daveManager.CreateDistributionMessage(groupId);
 
             // Process Dave's distribution
@@ -559,7 +507,6 @@ namespace E2EELibraryTests
             Assert.IsTrue(daveProcessBob, "Dave should successfully process Bob's distribution");
 
             // 7. Send new messages after Dave joins
-            Console.WriteLine("Sending new messages after Dave joins");
             string aliceMessage = "Message from Alice after Dave joined";
             string bobMessage = "Message from Bob after Dave joined";
             string daveMessage = "Dave's first message to the group";
@@ -569,7 +516,6 @@ namespace E2EELibraryTests
             var daveEncrypted = daveManager.EncryptGroupMessage(groupId, daveMessage);
 
             // 8. Everyone decrypts new messages
-            Console.WriteLine("Decrypting new messages");
             string bobDecryptsAlice = bobManager.DecryptGroupMessage(aliceEncrypted);
             string bobDecryptsDave = bobManager.DecryptGroupMessage(daveEncrypted);
             string aliceDecryptsBob = aliceManager.DecryptGroupMessage(bobEncrypted);
@@ -578,7 +524,6 @@ namespace E2EELibraryTests
             string daveDecryptsBob = daveManager.DecryptGroupMessage(bobEncrypted);
 
             // 9. Dave tries to decrypt the initial message
-            Console.WriteLine("Dave attempts to decrypt the initial message");
             string daveDecryptsInitial = daveManager.DecryptGroupMessage(initialEncrypted);
 
             // 10. Assert results
@@ -616,16 +561,16 @@ namespace E2EELibraryTests
 
             // Step 4: Each participant authorizes all others
             // Alice authorizes Bob and Charlie
-            aliceManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
-            aliceManager.AuthorizeMember(groupId, charlieKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
 
             // Bob authorizes Alice and Charlie
-            bobManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
-            bobManager.AuthorizeMember(groupId, charlieKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
 
             // Charlie authorizes Alice and Bob
-            charlieManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
-            charlieManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
+            charlieManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+            charlieManager.AddGroupMember(groupId, bobKeyPair.publicKey);
 
             // Step 5: Each participant creates their distribution message
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
@@ -673,6 +618,31 @@ namespace E2EELibraryTests
             Assert.AreEqual(aliceMessage, charlieDecryptedAliceMessage);
             Assert.AreEqual(bobMessage, aliceDecryptedBobMessage);
             Assert.AreEqual(bobMessage, charlieDecryptedBobMessage);
+        }
+
+        [TestMethod]
+        public void DeleteGroup_ShouldWorkCorrectly()
+        {
+            // Arrange
+            var adminKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var memberKeyPair = E2EEClient.GenerateSignatureKeyPair();
+
+            var groupManager = new GroupChatManager(adminKeyPair);
+            string groupId = "test-delete-group";
+
+            // Create group and add a member
+            groupManager.CreateGroup(groupId);
+            groupManager.AddGroupMember(groupId, memberKeyPair.publicKey);
+
+            // Verify group exists
+            Assert.IsTrue(groupManager.GroupExists(groupId));
+
+            // Act
+            bool result = groupManager.DeleteGroup(groupId);
+
+            // Assert
+            Assert.IsTrue(result);
+            Assert.IsFalse(groupManager.GroupExists(groupId));
         }
 
         // Helper method for byte array comparison

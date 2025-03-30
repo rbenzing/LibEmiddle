@@ -150,44 +150,41 @@ namespace E2EELibraryTests
             var bobManager = new GroupChatManager(bobKeyPair);
             var charlieManager = new GroupChatManager(charlieKeyPair);
 
-            // Step 3: Alice creates the group as the admin
+            // Step 3: All participants create their own view of the group 
+            // (each participant maintains their own state in our distributed architecture)
             string groupId = "friends-group-123";
             aliceManager.CreateGroup(groupId);
-
-            // Step 3.5: Alice authorizes Bob and Charlie as members
-            aliceManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
-            aliceManager.AuthorizeMember(groupId, charlieKeyPair.publicKey);
-
-            // Step 4: Alice sends her sender key to Bob and Charlie
-            var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
-
-            // Bob and Charlie create their own views of the group and authorize other members
             bobManager.CreateGroup(groupId);
             charlieManager.CreateGroup(groupId);
 
-            // Bob authorizes Alice and Charlie
-            bobManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
-            bobManager.AuthorizeMember(groupId, charlieKeyPair.publicKey);
+            // Step 4: Each participant adds the others as members
+            // Alice adds Bob and Charlie
+            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
 
-            // Charlie authorizes Alice and Bob
-            charlieManager.AuthorizeMember(groupId, aliceKeyPair.publicKey);
-            charlieManager.AuthorizeMember(groupId, bobKeyPair.publicKey);
+            // Bob adds Alice and Charlie
+            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
 
-            // Bob and Charlie process Alice's sender key
-            bool bobProcessResult = bobManager.ProcessSenderKeyDistribution(aliceDistribution);
-            bool charlieProcessResult = charlieManager.ProcessSenderKeyDistribution(aliceDistribution);
+            // Charlie adds Alice and Bob
+            charlieManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+            charlieManager.AddGroupMember(groupId, bobKeyPair.publicKey);
 
-            // Step 5: Bob creates his sender key and distributes it
+            // Step 5: Each participant creates their distribution message with their sender key
+            var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
             var bobDistribution = bobManager.CreateDistributionMessage(groupId);
+            var charlieDistribution = charlieManager.CreateDistributionMessage(groupId);
 
-            // Alice and Charlie process Bob's sender key
+            // Step 6: Everyone processes everyone else's distribution messages
+            // Bob and Charlie process Alice's distribution
+            bool bobProcessAliceResult = bobManager.ProcessSenderKeyDistribution(aliceDistribution);
+            bool charlieProcessAliceResult = charlieManager.ProcessSenderKeyDistribution(aliceDistribution);
+
+            // Alice and Charlie process Bob's distribution
             bool aliceProcessBobResult = aliceManager.ProcessSenderKeyDistribution(bobDistribution);
             bool charlieProcessBobResult = charlieManager.ProcessSenderKeyDistribution(bobDistribution);
 
-            // Step 6: Charlie creates his sender key and distributes it
-            var charlieDistribution = charlieManager.CreateDistributionMessage(groupId);
-
-            // Alice and Bob process Charlie's sender key
+            // Alice and Bob process Charlie's distribution
             bool aliceProcessCharlieResult = aliceManager.ProcessSenderKeyDistribution(charlieDistribution);
             bool bobProcessCharlieResult = bobManager.ProcessSenderKeyDistribution(charlieDistribution);
 
@@ -208,12 +205,13 @@ namespace E2EELibraryTests
             string charlieDecryptedBobMessage = charlieManager.DecryptGroupMessage(bobEncryptedMessage);
 
             // Assert results
-            Assert.IsTrue(bobProcessResult);
-            Assert.IsTrue(charlieProcessResult);
+            Assert.IsTrue(bobProcessAliceResult);
+            Assert.IsTrue(charlieProcessAliceResult);
             Assert.IsTrue(aliceProcessBobResult);
             Assert.IsTrue(charlieProcessBobResult);
             Assert.IsTrue(aliceProcessCharlieResult);
             Assert.IsTrue(bobProcessCharlieResult);
+
             Assert.AreEqual(aliceMessage, bobDecryptedAliceMessage);
             Assert.AreEqual(aliceMessage, charlieDecryptedAliceMessage);
             Assert.AreEqual(bobMessage, aliceDecryptedBobMessage);

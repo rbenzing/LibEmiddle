@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace E2EELibrary.Core
+﻿namespace E2EELibrary.Core
 {
     /// <summary>
     /// Constants used across the library for cryptographic operations.

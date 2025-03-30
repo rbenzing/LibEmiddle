@@ -420,7 +420,7 @@ namespace E2EELibraryTests
                 string messageId = mailboxManager.SendMessage(
                     recipientKeyPair.publicKey,
                     "Test message that should be retained after transport failure",
-                    MessageType.Chat);
+                    Enums.MessageType.Chat);
 
                 // Start the manager to process the outgoing queue
                 mailboxManager.Start();

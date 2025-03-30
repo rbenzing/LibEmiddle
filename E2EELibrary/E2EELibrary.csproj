@@ -34,16 +34,18 @@
 	<ItemGroup>
 		<None Include="../structure.txt" Pack="true" PackagePath="/" />
 	</ItemGroup>
-	
+
 	<ItemGroup>
-		<Content Include="runtimes/**/*">
+		<None Include="runtimes\**\*">
+			<Pack>true</Pack>
+			<PackagePath>runtimes</PackagePath>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-		</Content>
+		</None>
 	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.TestPlatform" Version="17.13.0" />
+		<PackageReference Include="libsodium" Version="1.0.20" />
 	</ItemGroup>
 
 </Project>

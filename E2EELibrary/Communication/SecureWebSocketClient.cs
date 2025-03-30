@@ -200,18 +200,18 @@ namespace E2EELibrary.Communication
                 }
 
                 // Extract values with proper error handling
-                byte[]? ciphertext = Utils.GetBytesFromBase64(messageData, "ciphertext");
-                byte[]? nonce = Utils.GetBytesFromBase64(messageData, "nonce");
-                byte[]? senderDHKey = Utils.GetBytesFromBase64(messageData, "senderDHKey");
+                byte[]? ciphertext = Helpers.GetBytesFromBase64(messageData, "ciphertext");
+                byte[]? nonce = Helpers.GetBytesFromBase64(messageData, "nonce");
+                byte[]? senderDHKey = Helpers.GetBytesFromBase64(messageData, "senderDHKey");
 
                 // Get the message number with proper handling of different formats
-                int messageNumber = Utils.GetInt32Value(messageData["messageNumber"]);
+                int messageNumber = Helpers.GetInt32Value(messageData["messageNumber"]);
 
                 // Try to get timestamp if available
                 long timestamp = 0;
                 if (messageData.TryGetValue("timestamp", out JsonElement timestampElement))
                 {
-                    timestamp = Utils.GetInt64Value(timestampElement, 0);
+                    timestamp = Helpers.GetInt64Value(timestampElement, 0);
 
                     // Check if message is too old (5 minutes threshold for replay protection)
                     long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

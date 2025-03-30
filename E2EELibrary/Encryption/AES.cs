@@ -198,7 +198,7 @@ namespace E2EELibrary.Encryption
                 }
 
                 // Check if the plaintext contains valid UTF-8 before conversion
-                if (!Utils.IsValidUtf8(plaintext))
+                if (!Helpers.IsValidUtf8(plaintext))
                 {
                     throw new FormatException("Decrypted content is not valid UTF-8");
                 }

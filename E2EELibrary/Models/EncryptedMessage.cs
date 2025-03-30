@@ -215,12 +215,12 @@ namespace E2EELibrary.Models
 
                 var message = new EncryptedMessage
                 {
-                    Ciphertext = Utils.GetBytesFromBase64(dict, "ciphertext"),
-                    Nonce = Utils.GetBytesFromBase64(dict, "nonce"),
-                    MessageNumber = Utils.GetInt32Value(dict["messageNumber"]),
-                    SenderDHKey = Utils.GetBytesFromBase64(dict, "senderDHKey"),
-                    Timestamp = Utils.GetInt64Value(dict, "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
-                    MessageId = Utils.GetGuidValue(dict, "messageId", Guid.NewGuid())
+                    Ciphertext = Helpers.GetBytesFromBase64(dict, "ciphertext"),
+                    Nonce = Helpers.GetBytesFromBase64(dict, "nonce"),
+                    MessageNumber = Helpers.GetInt32Value(dict["messageNumber"]),
+                    SenderDHKey = Helpers.GetBytesFromBase64(dict, "senderDHKey"),
+                    Timestamp = Helpers.GetInt64Value(dict, "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+                    MessageId = Helpers.GetGuidValue(dict, "messageId", Guid.NewGuid())
                 };
 
                 // Handle optional fields
@@ -271,7 +271,7 @@ namespace E2EELibrary.Models
                     }
 
                     string? base64 = dict[field].GetString();
-                    if (string.IsNullOrEmpty(base64) || !Utils.IsValidBase64(base64))
+                    if (string.IsNullOrEmpty(base64) || !Helpers.IsValidBase64(base64))
                     {
                         throw new FormatException($"Field '{field}' contains invalid Base64 data");
                     }
