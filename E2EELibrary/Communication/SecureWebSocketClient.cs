@@ -60,6 +60,7 @@ namespace E2EELibrary.Communication
         /// Sends an encrypted message to the server
         /// </summary>
         /// <param name="message">Plain text message</param>
+        /// <param name="cancellationToken">The cancel token</param>
         public async Task SendEncryptedMessageAsync(string message, CancellationToken cancellationToken = default)
         {
             // Validate input parameters
@@ -149,6 +150,7 @@ namespace E2EELibrary.Communication
         /// <summary>
         /// Receives and decrypts a message from the server
         /// </summary>
+        /// <param name="cancellationToken">The cancel token</param>
         /// <returns>Decrypted message</returns>
         public async Task<string?> ReceiveEncryptedMessageAsync(CancellationToken cancellationToken = default)
         {

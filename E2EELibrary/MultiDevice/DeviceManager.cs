@@ -318,17 +318,36 @@ namespace E2EELibrary.MultiDevice
                     return null;
                 }
 
-                // If we get here, deserialization succeeded
-                if (!data.ContainsKey("senderPublicKey") || !data.ContainsKey("data") || !data.ContainsKey("signature"))
+                // Check if required keys exist and their values are not null
+                if (!data.ContainsKey("senderPublicKey") ||
+                    !data.ContainsKey("data") ||
+                    !data.ContainsKey("signature") ||
+                    data["senderPublicKey"] == null ||
+                    data["data"] == null ||
+                    data["signature"] == null)
                 {
-                    Console.WriteLine("Required keys missing from deserialized data");
+                    Console.WriteLine("Required keys missing or null in deserialized data");
                     return null;
                 }
 
-                // Handle both JsonElement and string types when extracting values
-                byte[] senderPubKey = Convert.FromBase64String(data["senderPublicKey"].ToString());
-                byte[] syncData = Convert.FromBase64String(data["data"].ToString());
-                byte[] signature = Convert.FromBase64String(data["signature"].ToString());
+                // Handle null checks before converting
+                string? senderPubKeyString = data["senderPublicKey"]?.ToString();
+                string? syncDataString = data["data"]?.ToString();
+                string? signatureString = data["signature"]?.ToString();
+
+                // Verify none of the strings are null
+                if (string.IsNullOrEmpty(senderPubKeyString) ||
+                    string.IsNullOrEmpty(syncDataString) ||
+                    string.IsNullOrEmpty(signatureString))
+                {
+                    Console.WriteLine("One or more required values is null or empty");
+                    return null;
+                }
+
+                // Now it's safe to convert
+                byte[] senderPubKey = Convert.FromBase64String(senderPubKeyString);
+                byte[] syncData = Convert.FromBase64String(syncDataString);
+                byte[] signature = Convert.FromBase64String(signatureString);
 
                 // Get timestamp if present (for newer protocol versions)
                 long timestamp = 0;

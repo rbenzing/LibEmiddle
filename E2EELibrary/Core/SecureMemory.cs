@@ -40,9 +40,6 @@ namespace E2EELibrary.Core
 
             // Additional protection against optimizations
             GC.KeepAlive(data);
-
-            // Inform runtime that the following code is in a constrained execution region
-            RuntimeHelpers.PrepareConstrainedRegions();
         }
 
         /// <summary>

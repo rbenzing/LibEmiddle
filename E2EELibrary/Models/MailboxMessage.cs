@@ -63,10 +63,29 @@ namespace E2EELibrary.Models
         public long? ReadAt { get; set; }
 
         /// <summary>
-        /// Creates a new mailbox message.
+        /// Creates a new mailbox message with required properties initialized.
         /// </summary>
         public MailboxMessage()
         {
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            // Initialize non-nullable reference properties with empty arrays
+            RecipientKey = Array.Empty<byte>();
+            SenderKey = Array.Empty<byte>();
+            EncryptedPayload = new EncryptedMessage();
+        }
+
+        /// <summary>
+        /// Creates a new mailbox message with specific recipient and sender keys and payload.
+        /// </summary>
+        /// <param name="recipientKey">The recipient's public key</param>
+        /// <param name="senderKey">The sender's public key</param>
+        /// <param name="payload">The encrypted payload</param>
+        /// <exception cref="ArgumentNullException">Thrown when any required parameter is null</exception>
+        public MailboxMessage(byte[] recipientKey, byte[] senderKey, EncryptedMessage payload)
+        {
+            RecipientKey = recipientKey ?? throw new ArgumentNullException(nameof(recipientKey));
+            SenderKey = senderKey ?? throw new ArgumentNullException(nameof(senderKey));
+            EncryptedPayload = payload ?? throw new ArgumentNullException(nameof(payload));
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         }
 

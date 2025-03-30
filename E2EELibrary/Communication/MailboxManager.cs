@@ -341,6 +341,7 @@ namespace E2EELibrary.Communication
         /// <summary>
         /// Polls for new messages from the server.
         /// </summary>
+        /// <param name="cancellationToken">The cancel token</param>
         private async Task PollForMessagesAsync(CancellationToken cancellationToken)
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -422,6 +423,7 @@ namespace E2EELibrary.Communication
         /// <summary>
         /// Processes outgoing messages.
         /// </summary>
+        /// <param name="cancellationToken">The cancel token</param>
         private async Task ProcessOutgoingMessagesAsync(CancellationToken cancellationToken)
         {
             while (!cancellationToken.IsCancellationRequested)

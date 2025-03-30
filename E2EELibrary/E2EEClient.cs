@@ -296,6 +296,7 @@ namespace E2EELibrary
         /// <summary>
         /// Creates a device link message
         /// </summary>
+        /// <param name="mainDeviceKeyPair">Tuple of public and private keys</param>
         /// <param name="newDevicePublicKey">New device's public key</param>
         /// <returns>Encrypted link message</returns>
         public static EncryptedMessage CreateDeviceLinkMessage((byte[] publicKey, byte[] privateKey) mainDeviceKeyPair, byte[] newDevicePublicKey)
@@ -324,7 +325,7 @@ namespace E2EELibrary
         /// <param name="session">The session to serialize</param>
         /// <param name="encryptionKey">Optional key to encrypt the serialized session</param>
         /// <returns>Serialized (and optionally encrypted) session data</returns>
-        public static byte[] SerializeDoubleRatchetSession(DoubleRatchetSession session, byte[] encryptionKey = null)
+        public static byte[] SerializeDoubleRatchetSession(DoubleRatchetSession session, byte[]? encryptionKey = null)
         {
             return KeyExchange.SessionPersistence.SerializeSession(session, encryptionKey);
         }
@@ -335,7 +336,7 @@ namespace E2EELibrary
         /// <param name="serializedData">The serialized session data</param>
         /// <param name="decryptionKey">Optional key to decrypt the serialized session</param>
         /// <returns>Deserialized Double Ratchet session</returns>
-        public static DoubleRatchetSession DeserializeDoubleRatchetSession(byte[] serializedData, byte[] decryptionKey = null)
+        public static DoubleRatchetSession DeserializeDoubleRatchetSession(byte[] serializedData, byte[]? decryptionKey = null)
         {
             return KeyExchange.SessionPersistence.DeserializeSession(serializedData, decryptionKey);
         }

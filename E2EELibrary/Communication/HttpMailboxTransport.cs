@@ -19,8 +19,10 @@ namespace E2EELibrary.Communication
         /// </summary>
         /// <param name="baseUrl">Base URL of the mailbox server</param>
         /// <param name="httpClient">Optional HTTP client (for testing or custom configuration)</param>
-        public HttpMailboxTransport(string baseUrl, HttpClient httpClient = null)
+        public HttpMailboxTransport(string baseUrl, HttpClient? httpClient = null)
         {
+            ArgumentNullException.ThrowIfNull(httpClient, nameof(httpClient));
+
             _baseUrl = baseUrl.TrimEnd('/');
             _httpClient = httpClient ?? new HttpClient();
             _jsonOptions = new JsonSerializerOptions

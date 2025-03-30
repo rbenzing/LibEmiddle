@@ -576,6 +576,10 @@ namespace E2EELibrary.GroupMessaging
                 // Basic encryption
                 EncryptedMessage encryptedMessage = GroupMessage.EncryptGroupMessage(message, senderKeyCopy);
 
+                // Validate encrypted message contents
+                ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, nameof(encryptedMessage.Ciphertext));
+                ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce, nameof(encryptedMessage.Nonce));
+
                 // ENSURE we have a valid join timestamp before setting message timestamp
                 if (!_joinTimestamps.TryGetValue(groupId, out long joinTime))
                 {
