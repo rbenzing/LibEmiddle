@@ -1,5 +1,4 @@
 ﻿using System.Security.Cryptography;
-using Sodium;
 using E2EELibrary.Core;
 
 namespace E2EELibrary.KeyManagement
@@ -27,7 +26,7 @@ namespace E2EELibrary.KeyManagement
         public static (byte[] publicKey, byte[] privateKey) GenerateEd25519KeyPair()
         {
             // Generate a full Ed25519 key pair.
-            var edKeyPair = PublicKeyAuth.GenerateKeyPair();
+            var edKeyPair = KeyAuth.GenerateKeyPair();
             return (edKeyPair.PublicKey, edKeyPair.PrivateKey);
         }
 
@@ -38,7 +37,7 @@ namespace E2EELibrary.KeyManagement
         public static (byte[] publicKey, byte[] privateKey) GenerateX25519KeyPair()
         {
             // Generate a full Ed25519 key pair first.
-            var edKeyPair = PublicKeyAuth.GenerateKeyPair();
+            var edKeyPair = KeyAuth.GenerateKeyPair();
 
             // Derive a proper 32-byte X25519 private key from the Ed25519 private key.
             byte[] x25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(edKeyPair.PrivateKey);
@@ -46,7 +45,7 @@ namespace E2EELibrary.KeyManagement
             try
             {
                 // Compute the corresponding X25519 public key.
-                byte[] x25519Public = ScalarMult.Base(x25519Private);
+                byte[] x25519Public = Sodium.ScalarMultBase(x25519Private);
 
                 // Validate the generated public key
                 if (!KeyValidation.ValidateX25519PublicKey(x25519Public))

@@ -5,7 +5,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using E2EELibrary;
 using E2EELibrary.KeyManagement;
 using E2EELibrary.MultiDevice;
-using Sodium;
+using E2EELibrary.Core;
 using E2EELibrary.Communication;
 using E2EELibrary.Encryption;
 using E2EELibrary.KeyExchange;
@@ -146,7 +146,7 @@ namespace E2EELibraryTests
 
             // Derive X25519 keys for the second device
             byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
-            byte[] secondDeviceX25519Public = ScalarMult.Base(secondDeviceX25519Private);
+            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
 
             // Validate the derived X25519 public key
             bool isValid = KeyValidation.ValidateX25519PublicKey(secondDeviceX25519Public);
@@ -200,10 +200,10 @@ namespace E2EELibraryTests
 
             // Convert Ed25519 keys to X25519 format
             byte[] mainDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceEdKeyPair.privateKey);
-            byte[] mainDeviceX25519Public = ScalarMult.Base(mainDeviceX25519Private);
+            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(mainDeviceX25519Private);
 
             byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceEdKeyPair.privateKey);
-            byte[] secondDeviceX25519Public = ScalarMult.Base(secondDeviceX25519Private);
+            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
 
             Console.WriteLine($"Derived X25519 keys - Main X25519 pub key length: {mainDeviceX25519Public.Length}, Second X25519 pub key length: {secondDeviceX25519Public.Length}");
 
@@ -271,8 +271,8 @@ namespace E2EELibraryTests
 
             // Convert to X25519 keys
             byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
-            byte[] secondDeviceX25519Public = ScalarMult.Base(secondDeviceX25519Private);
-            byte[] mainDeviceX25519Public = ScalarMult.Base(KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
+            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
+            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
 
             // Create managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -317,11 +317,11 @@ namespace E2EELibraryTests
             var fourthDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
 
             // Create X25519 keys for each device for linking
-            byte[] secondDeviceX25519Public = ScalarMult.Base(
+            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey));
-            byte[] thirdDeviceX25519Public = ScalarMult.Base(
+            byte[] thirdDeviceX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(thirdDeviceKeyPair.privateKey));
-            byte[] fourthDeviceX25519Public = ScalarMult.Base(
+            byte[] fourthDeviceX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(fourthDeviceKeyPair.privateKey));
 
             // Create device manager for main device
@@ -371,9 +371,9 @@ namespace E2EELibraryTests
             var thirdDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
 
             // Create X25519 keys for each device for linking
-            byte[] secondDeviceX25519Public = ScalarMult.Base(
+            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey));
-            byte[] thirdDeviceX25519Public = ScalarMult.Base(
+            byte[] thirdDeviceX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(thirdDeviceKeyPair.privateKey));
 
             // Create device manager for main device
@@ -419,8 +419,8 @@ namespace E2EELibraryTests
 
             // Convert to X25519 keys
             byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
-            byte[] secondDeviceX25519Public = ScalarMult.Base(secondDeviceX25519Private);
-            byte[] mainDeviceX25519Public = ScalarMult.Base(KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
+            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
+            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
 
             // Create managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -483,7 +483,7 @@ namespace E2EELibraryTests
             var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
 
             // Create X25519 keys
-            byte[] secondDeviceX25519Public = ScalarMult.Base(
+            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey));
 
             // Create device manager

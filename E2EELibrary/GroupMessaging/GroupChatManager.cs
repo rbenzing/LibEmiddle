@@ -706,10 +706,16 @@ namespace E2EELibrary.GroupMessaging
 
             // IMPORTANT: Forward secrecy check - reject messages sent before joining
             // Only do this if both timestamps are valid (greater than zero)
-            if (encryptedMessage.Timestamp > 0 && joinTimestamp > 0 && encryptedMessage.Timestamp < joinTimestamp)
+            if (encryptedMessage.Timestamp > 0 && joinTimestamp > 0)
             {
-                // Message was sent before we joined - reject it to maintain forward secrecy
-                return null;
+                // If the message timestamp is before our join timestamp,
+                // reject the message to maintain forward secrecy
+                if (encryptedMessage.Timestamp < joinTimestamp)
+                {
+                    // Message was sent before we joined - reject it
+                    Console.WriteLine($"Rejecting message: sent at {encryptedMessage.Timestamp}, joined at {joinTimestamp}");
+                    return null;
+                }
             }
 
             // Generate a unique message identifier for replay protection

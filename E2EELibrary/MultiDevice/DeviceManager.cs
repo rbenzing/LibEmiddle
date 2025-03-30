@@ -1,14 +1,13 @@
 ﻿using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
 using System.Security.Cryptography;
-using Sodium;
 using E2EELibrary.Core;
 using E2EELibrary.Communication;
 using E2EELibrary.Encryption;
 using E2EELibrary.Models;
 using E2EELibrary.KeyExchange;
 using E2EELibrary.KeyManagement;
-using System.Text.Json;
 
 namespace E2EELibrary.MultiDevice
 {
@@ -66,7 +65,7 @@ namespace E2EELibrary.MultiDevice
             // Convert key to X25519 if needed
             byte[] finalKey = devicePublicKey.Length == Constants.X25519_KEY_SIZE ?
                 devicePublicKey :
-                ScalarMult.Base(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
+                Sodium.ScalarMultBase(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
 
             // Create a deep copy of the key to prevent any external modification
             byte[] keyCopy = new byte[finalKey.Length];
@@ -90,7 +89,7 @@ namespace E2EELibrary.MultiDevice
             // Convert key to X25519 if needed
             byte[] finalKey = devicePublicKey.Length == Constants.X25519_KEY_SIZE ?
                 devicePublicKey :
-                ScalarMult.Base(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
+                Sodium.ScalarMultBase(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
 
             // Use Base64 representation as dictionary key
             string keyBase64 = Convert.ToBase64String(finalKey);
@@ -146,7 +145,7 @@ namespace E2EELibrary.MultiDevice
                     else if (deviceKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                     {
                         // Convert Ed25519 public key to X25519
-                        x25519PublicKey = ScalarMult.Base(
+                        x25519PublicKey = Sodium.ScalarMultBase(
                             KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceKey)
                         );
                     }
@@ -267,7 +266,7 @@ namespace E2EELibrary.MultiDevice
                     KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.privateKey) : _deviceKeyPair.privateKey;
 
                 byte[] x25519PublicKey = deviceKey.Length != Constants.X25519_KEY_SIZE ?
-                    ScalarMult.Base(KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceKey)) : deviceKey;
+                    Sodium.ScalarMultBase(KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceKey)) : deviceKey;
 
                 // For debugging purposes
                 Console.WriteLine($"X25519 Private Key Length: {x25519PrivateKey.Length}");
@@ -419,7 +418,7 @@ namespace E2EELibrary.MultiDevice
             // Convert key to X25519 format if needed
             byte[] finalKey = devicePublicKey.Length == Constants.X25519_KEY_SIZE ?
                 devicePublicKey :
-                ScalarMult.Base(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
+                Sodium.ScalarMultBase(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
 
             string keyBase64 = Convert.ToBase64String(finalKey);
             return _linkedDevices.ContainsKey(keyBase64);

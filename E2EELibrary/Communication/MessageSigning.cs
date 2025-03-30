@@ -1,6 +1,5 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
-using Sodium;
 using E2EELibrary.Core;
 
 namespace E2EELibrary.Communication
@@ -38,10 +37,10 @@ namespace E2EELibrary.Communication
                         .CopyTo(expandedKey.AsSpan(Constants.X25519_KEY_SIZE, Constants.X25519_KEY_SIZE));
                 }
 
-                return PublicKeyAuth.SignDetached(message, expandedKey);
+                return KeyAuth.SignDetached(message, expandedKey);
             }
 
-            return PublicKeyAuth.SignDetached(message, privateKey);
+            return KeyAuth.SignDetached(message, privateKey);
         }
 
         /// <summary>
@@ -57,7 +56,7 @@ namespace E2EELibrary.Communication
             ArgumentNullException.ThrowIfNull(signature, nameof(signature));
             ArgumentNullException.ThrowIfNull(publicKey, nameof(publicKey));
 
-            return PublicKeyAuth.VerifyDetached(signature, message, publicKey);
+            return KeyAuth.VerifyDetached(signature, message, publicKey);
         }
 
         /// <summary>

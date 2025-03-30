@@ -1,6 +1,5 @@
 ﻿using System.Security.Cryptography;
 using E2EELibrary.Core;
-using Sodium;
 
 namespace E2EELibrary.KeyManagement
 {
@@ -23,7 +22,7 @@ namespace E2EELibrary.KeyManagement
             byte[] x25519Private = DeriveX25519PrivateKey(ed25519PrivateKey);
 
             // Compute corresponding X25519 public key
-            return ScalarMult.Base(x25519Private);
+            return Sodium.ScalarMultBase(x25519Private);
         }
 
         /// <summary>

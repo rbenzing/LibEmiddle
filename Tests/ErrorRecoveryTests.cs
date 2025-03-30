@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using System.Security.Cryptography;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
-using Sodium;
 using E2EELibrary;
 using E2EELibrary.Communication;
 using E2EELibrary.Models;
@@ -448,8 +447,8 @@ namespace E2EELibraryTests
 
             // Create X25519 keys for the secondary device
             byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
-            byte[] secondDeviceX25519Public = ScalarMult.Base(secondDeviceX25519Private);
-            byte[] mainDeviceX25519Public = ScalarMult.Base(
+            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
+            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
 
             // Create device managers

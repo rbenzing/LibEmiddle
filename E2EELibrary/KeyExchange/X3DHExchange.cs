@@ -1,6 +1,5 @@
 ﻿using System.Text;
 using System.Security.Cryptography;
-using Sodium;
 using E2EELibrary.Core;
 using E2EELibrary.Models;
 using E2EELibrary.KeyManagement;
@@ -52,7 +51,7 @@ namespace E2EELibrary.KeyExchange
                 }
 
                 // Perform the actual key exchange
-                return ScalarMult.Mult(senderX25519PrivateKey, recipientPublicKey);
+                return Sodium.ScalarMult(senderX25519PrivateKey, recipientPublicKey);
             }
             finally
             {
@@ -72,7 +71,7 @@ namespace E2EELibrary.KeyExchange
 
             // Store both the Ed25519 identity key (for verification) and X25519 key (for key exchange)
             byte[] identityX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(privateKey);
-            byte[] identityX25519Public = ScalarMult.Base(identityX25519Private);
+            byte[] identityX25519Public = Sodium.ScalarMultBase(identityX25519Private);
 
             // Generate the signed prekey pair
             var signedPreKeyPair = KeyGenerator.GenerateX25519KeyPair();

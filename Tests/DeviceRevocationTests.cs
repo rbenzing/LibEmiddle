@@ -6,7 +6,6 @@ using E2EELibrary.MultiDevice;
 using E2EELibrary.Models;
 using E2EELibrary.KeyManagement;
 using E2EELibrary.Core;
-using Sodium;
 
 namespace E2EELibraryTests
 {
@@ -117,7 +116,7 @@ namespace E2EELibraryTests
             var deviceToRevokeKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
             // Create X25519 key for the device to revoke
-            byte[] deviceToRevokeX25519Public = ScalarMult.Base(
+            byte[] deviceToRevokeX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.privateKey));
 
             // Create a device manager and link a device
@@ -161,7 +160,7 @@ namespace E2EELibraryTests
             var deviceToRevokeKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
             // Create X25519 key for the device to revoke
-            byte[] deviceToRevokeX25519Public = ScalarMult.Base(
+            byte[] deviceToRevokeX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.privateKey));
 
             // Create two device managers
@@ -193,7 +192,7 @@ namespace E2EELibraryTests
             var deviceToRevokeKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
             // Create X25519 key for the device to revoke
-            byte[] deviceToRevokeX25519Public = ScalarMult.Base(
+            byte[] deviceToRevokeX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.privateKey));
 
             // Create two device managers
@@ -232,7 +231,7 @@ namespace E2EELibraryTests
             var deviceToRevokeKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
             // Create X25519 key for the device to revoke
-            byte[] deviceToRevokeX25519Public = ScalarMult.Base(
+            byte[] deviceToRevokeX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.privateKey));
 
             // Create a device manager without linking the device
