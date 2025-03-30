@@ -3,6 +3,10 @@ using E2EELibrary.Models;
 
 namespace E2EELibrary.Encryption
 {
+    /// <summary>
+    /// Provides functionality for encrypting and decrypting messages in group conversations.
+    /// Uses a shared sender key for secure group communications while maintaining efficiency.
+    /// </summary>
     public static class GroupMessage
     {
         /// <summary>

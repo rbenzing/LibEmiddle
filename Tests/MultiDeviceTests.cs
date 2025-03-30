@@ -72,7 +72,7 @@ namespace E2EELibraryTests
                 newDeviceKeyPair.publicKey);
 
             // Act
-            byte[]? result = DeviceLinking.ProcessDeviceLinkMessage(
+            byte[] result = DeviceLinking.ProcessDeviceLinkMessage(
                 encryptedMessage,
                 newDeviceKeyPair,
                 mainDeviceKeyPair.publicKey);
@@ -111,7 +111,7 @@ namespace E2EELibraryTests
             tamperedMessage.Ciphertext[tamperedMessage.Ciphertext.Length / 2] ^= 0xFF;
 
             // Act - Pass the wrong public key (unrelatedKeyPair) to simulate wrong main device
-            byte[]? result = DeviceLinking.ProcessDeviceLinkMessage(
+            byte[] result = DeviceLinking.ProcessDeviceLinkMessage(
                 tamperedMessage,  // Use the tampered message
                 newDeviceKeyPair,
                 unrelatedKeyPair.publicKey);  // Use unrelated key to simulate wrong device
@@ -250,7 +250,7 @@ namespace E2EELibraryTests
 
             // Act
             Console.WriteLine("Attempting to process sync message on second device...");
-            byte[]? receivedData = secondDeviceManager.ProcessSyncMessage(
+            byte[] receivedData = secondDeviceManager.ProcessSyncMessage(
                 syncMessageForSecondDevice,
                 mainDeviceX25519Public); // Use the X25519 public key as the sender hint
 

@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security;
+﻿using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using E2EELibrary.Core;
@@ -11,6 +8,11 @@ using E2EELibrary.Models;
 
 namespace E2EELibrary.Encryption
 {
+    /// <summary>
+    /// Implements the Double Ratchet algorithm for end-to-end encrypted communications.
+    /// The Double Ratchet algorithm provides secure messaging with forward secrecy and break-in recovery
+    /// properties, continuously refreshing encryption keys as messages are exchanged.
+    /// </summary>
     public static class DoubleRatchet
     {
         /// <summary>

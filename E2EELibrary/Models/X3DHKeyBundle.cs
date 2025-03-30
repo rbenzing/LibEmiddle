@@ -8,17 +8,34 @@ namespace E2EELibrary.Models
     /// </summary>
     public class X3DHKeyBundle
     {
-        // Public properties remain the same
+        /// <summary>
+        /// The identity key pair
+        /// </summary>
         public byte[]? IdentityKey { get; set; }
+
+        /// <summary>
+        /// The signed prekey
+        /// </summary>
         public byte[]? SignedPreKey { get; set; }
+
+        /// <summary>
+        /// The signed prekey signature
+        /// </summary>
         public byte[]? SignedPreKeySignature { get; set; }
+
+        /// <summary>
+        /// The one time prekey
+        /// </summary>
         public List<byte[]>? OneTimePreKeys { get; set; }
 
         // Private fields instead of properties
         private byte[]? _identityKeyPrivate;
         private byte[]? _signedPreKeyPrivate;
 
-        // Public access methods for tests and internal usage
+        /// <summary>
+        /// Gets the private identity key
+        /// </summary>
+        /// <returns>The private identity key</returns>
         public byte[]? GetIdentityKeyPrivate()
         {
             // Return a copy to prevent modification of the original
@@ -28,6 +45,10 @@ namespace E2EELibrary.Models
             return copy;
         }
 
+        /// <summary>
+        /// Sets the private identity key
+        /// </summary>
+        /// <param name="value"></param>
         public void SetIdentityKeyPrivate(byte[]? value)
         {
             if (_identityKeyPrivate != null)
@@ -45,6 +66,10 @@ namespace E2EELibrary.Models
             value.AsSpan().CopyTo(_identityKeyPrivate.AsSpan());
         }
 
+        /// <summary>
+        /// Gets the signed private prekey
+        /// </summary>
+        /// <returns></returns>
         public byte[]? GetSignedPreKeyPrivate()
         {
             if (_signedPreKeyPrivate == null) return null;
@@ -53,6 +78,10 @@ namespace E2EELibrary.Models
             return copy;
         }
 
+        /// <summary>
+        /// Sets the signed private prekey
+        /// </summary>
+        /// <param name="value"></param>
         public void SetSignedPreKeyPrivate(byte[]? value)
         {
             if (_signedPreKeyPrivate != null)
@@ -70,7 +99,11 @@ namespace E2EELibrary.Models
             value.AsSpan().CopyTo(_signedPreKeyPrivate.AsSpan());
         }
 
-        // Method to securely clear private keys when no longer needed
+        /// <summary>
+        /// Securely clears all private key material from memory when no longer needed.
+        /// This should be called as soon as the key bundle is no longer required
+        /// to minimize the time sensitive data remains in memory.
+        /// </summary>
         public void ClearPrivateKeys()
         {
             if (_identityKeyPrivate != null)

@@ -4,6 +4,11 @@ using E2EELibrary.Models;
 
 namespace E2EELibrary.Encryption
 {
+    /// <summary>
+    /// Handles the secure distribution of sender keys to group members.
+    /// Enables secure sharing of cryptographic keys required for group communications
+    /// while preventing unauthorized access to the encrypted group messages.
+    /// </summary>
     public static class SenderKeyDistribution
     {
         /// <summary>
