@@ -82,9 +82,15 @@ namespace E2EELibrary.Models
                     return false;
             }
 
+            // Combine device key and timestamp for verification
+            byte[] timestampBytes = BitConverter.GetBytes(RevocationTimestamp);
+            byte[] dataToVerify = new byte[RevokedDeviceKey.Length + timestampBytes.Length];
+
+            Buffer.BlockCopy(RevokedDeviceKey, 0, dataToVerify, 0, RevokedDeviceKey.Length);
+            Buffer.BlockCopy(timestampBytes, 0, dataToVerify, RevokedDeviceKey.Length, timestampBytes.Length);
+
             // Verify the signature
-            byte[] signedData = CombineForVerification();
-            return MessageSigning.VerifySignature(signedData, Signature, trustedPublicKey);
+            return MessageSigning.VerifySignature(dataToVerify, Signature, trustedPublicKey);
         }
 
         /// <summary>

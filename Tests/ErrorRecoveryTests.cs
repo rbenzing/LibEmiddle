@@ -446,11 +446,13 @@ namespace E2EELibraryTests
             var mainDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
             var secondDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
-            // Create X25519 keys for the secondary device
+            // Convert to X25519 keys
             byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
             byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(
                 KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
+
+            Console.WriteLine("Created X25519 keys for both devices");
 
             // Create device managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -459,25 +461,36 @@ namespace E2EELibraryTests
             // Link devices
             mainDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
             secondDeviceManager.AddLinkedDevice(mainDeviceX25519Public);
+            Console.WriteLine("Linked both devices successfully");
 
             // Create sync data
             byte[] syncData = Encoding.UTF8.GetBytes("Important sync data");
+            Console.WriteLine($"Created sync data of length {syncData.Length}");
 
-            // Act
             // Create sync messages
             var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
+            Console.WriteLine($"Created {syncMessages.Count} sync messages");
 
             // Get the sync message for the second device
             string secondDeviceId = Convert.ToBase64String(secondDeviceX25519Public);
+            Console.WriteLine($"Second device ID: {secondDeviceId}");
             Assert.IsTrue(syncMessages.ContainsKey(secondDeviceId), "Should have sync message for second device");
 
             var syncMessageForSecondDevice = syncMessages[secondDeviceId];
+            Console.WriteLine($"Got sync message with ciphertext length: {syncMessageForSecondDevice.Ciphertext?.Length}");
 
             // Simulate main device sending a corrupted message - create a tampered copy
             var tamperedMessage = new EncryptedMessage
             {
                 Ciphertext = new byte[syncMessageForSecondDevice.Ciphertext.Length],
-                Nonce = syncMessageForSecondDevice.Nonce
+                Nonce = syncMessageForSecondDevice.Nonce,
+                MessageNumber = syncMessageForSecondDevice.MessageNumber,
+                SenderDHKey = syncMessageForSecondDevice.SenderDHKey,
+                Timestamp = syncMessageForSecondDevice.Timestamp,
+                MessageId = syncMessageForSecondDevice.MessageId,
+                SessionId = syncMessageForSecondDevice.SessionId,
+                ProtocolMajorVersion = syncMessageForSecondDevice.ProtocolMajorVersion,
+                ProtocolMinorVersion = syncMessageForSecondDevice.ProtocolMinorVersion
             };
 
             // Copy the ciphertext and tamper with it
@@ -487,20 +500,28 @@ namespace E2EELibraryTests
             // Tamper with the middle part
             int middleIndex = tamperedMessage.Ciphertext.Length / 2;
             tamperedMessage.Ciphertext[middleIndex] ^= 0xFF;
+            Console.WriteLine($"Created tampered message by modifying byte at index {middleIndex}");
 
             // Try to process the tampered message - should fail
+            Console.WriteLine("Attempting to process tampered message...");
             byte[] result1 = secondDeviceManager.ProcessSyncMessage(tamperedMessage, mainDeviceX25519Public);
+            Console.WriteLine($"Tampered message processing result: {(result1 == null ? "null" : "success")}");
 
             // Main device notices failure (no acknowledgment) and resends the correct message
+            Console.WriteLine("Attempting to process valid message...");
             byte[] result2 = secondDeviceManager.ProcessSyncMessage(syncMessageForSecondDevice, mainDeviceX25519Public);
+            Console.WriteLine($"Valid message processing result: {(result2 == null ? "null" : "success")}");
 
             // Assert
             Assert.IsNull(result1, "Processing tampered sync message should fail");
             Assert.IsNotNull(result2, "Processing valid sync message should succeed");
 
-            // Verify the received data matches the original
-            Assert.IsTrue(SecureMemory.SecureCompare(syncData, result2),
-                "Received sync data should match original after recovery");
+            if (result2 != null)
+            {
+                // Verify the received data matches the original
+                Assert.IsTrue(SecureMemory.SecureCompare(syncData, result2),
+                    "Received sync data should match original after recovery");
+            }
         }
 
         [TestMethod]
