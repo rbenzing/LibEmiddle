@@ -1,60 +1,74 @@
 E2EELibrary/
-├── Communication/
-│   ├── Abstract/
-│   │   ├── IMailboxTransport.cs
-│   │   ├── IWebSocketClient.cs
-│   ├── HttpMailboxTransport.cs
-│   ├── InMemoryMailboxTransport.cs
-│   ├── MailboxManager.cs
-│   ├── MessageSigning.cs
-│   ├── SecureWebSocketClient.cs
-│   ├── StandardWebSocketClient.cs
-├── Core/
-│   ├── Constants.cs
-│   ├── Enums.cs
-│   ├── Helpers.cs
-│   ├── JsonSerialization.cs
-│   ├── SecureMemory.cs
-│   └── Sodium.cs         						
-├── Encryption/
-│   ├── AES.cs
-│   ├── DoubleRatchet.cs
-│   └── NonceGenerator.cs
-├── GroupMessaging/
-│   ├── GroupChatManager.cs
-│   ├── GroupKeyManager.cs
-│   ├── GroupMemberManager.cs
-│   ├── GroupMessageCrypto.cs
-│   ├── GroupSecurityValidator.cs
-│   ├── GroupSessionPersistence.cs
-│   └── SenderKeyDistribution.cs
-├── KeyExchange/
-│   ├── DoubleRatchetExchange.cs
-│   ├── SessionPersistence.cs
-│   └── X3DHExchange.cs
-├── KeyManagement/
-│   ├── KeyAuth.cs
-│   ├── KeyConversion.cs
-│   ├── KeyGenerator.cs
-│   ├── KeyPair.cs
-│   ├── KeyStorage.cs
-│   └── KeyValidation.cs
-├── Models/
-│   ├── DeviceLinkMessage.cs
-│   ├── DeviceRevocationMessage.cs
-│   ├── DeviceSyncMessage.cs 
-│   ├── DoubleRatchetSession.cs
-│   ├── EncryptedGroupMessage.cs
-│   ├── EncryptedMessage.cs
-│   ├── EncryptedSenderKeyDistribution.cs
-│   ├── GroupSession.cs
-│   ├── KeyFileMetadata.cs
-│   ├── MailboxMessage.cs
-│   ├── SenderKeyDistributionMessage.cs
-│   ├── X3DHKeyBundle.cs
-│   ├── X3DHPublicBundle.cs
-│   └── X3DHSession.cs
-├── MultiDevice/
-│   ├── DeviceLinking.cs
-│   └── DeviceManager.cs
-└── E2EEClient.cs
+├── src/
+│   ├── E2EELibrary/
+│   │   ├── Communication/
+│   │   │   ├── Abstract/
+│   │   │   │   ├── IMailboxTransport.cs
+│   │   │   │   └── IWebSocketClient.cs
+│   │   │   ├── HttpMailboxTransport.cs
+│   │   │   ├── InMemoryMailboxTransport.cs
+│   │   │   ├── MailboxManager.cs
+│   │   │   ├── MessageSigning.cs
+│   │   │   ├── SecureWebSocketClient.cs
+│   │   │   └── StandardWebSocketClient.cs
+│   │   ├── Core/
+│   │   │   ├── Constants.cs
+│   │   │   ├── Enums.cs
+│   │   │   ├── Helpers.cs
+│   │   │   ├── JsonSerialization.cs
+│   │   │   ├── ProtocolVersion.cs
+│   │   │   ├── SecureMemory.cs
+│   │   │   └── Sodium.cs
+│   │   ├── Encryption/
+│   │   │   ├── AES.cs
+│   │   │   ├── DoubleRatchet.cs
+│   │   │   └── NonceGenerator.cs
+│   │   ├── GroupMessaging/
+│   │   │   ├── GroupChatManager.cs
+│   │   │   ├── GroupKeyManager.cs
+│   │   │   ├── GroupMemberManager.cs
+│   │   │   ├── GroupMessageCrypto.cs
+│   │   │   ├── GroupSecurityValidator.cs
+│   │   │   ├── GroupSessionPersistence.cs
+│   │   │   └── SenderKeyDistribution.cs
+│   │   ├── KeyExchange/
+│   │   │   ├── DoubleRatchetExchange.cs
+│   │   │   ├── SessionPersistence.cs
+│   │   │   └── X3DHExchange.cs
+│   │   ├── KeyManagement/
+│   │   │   ├── KeyAuth.cs
+│   │   │   ├── KeyConversion.cs
+│   │   │   ├── KeyGenerator.cs
+│   │   │   ├── KeyPair.cs
+│   │   │   ├── KeyStorage.cs
+│   │   │   └── KeyValidation.cs
+│   │   ├── Models/
+│   │   │   ├── DeviceLinkMessage.cs
+│   │   │   ├── DeviceRevocationMessage.cs
+│   │   │   ├── DeviceSyncMessage.cs
+│   │   │   ├── DoubleRatchetSession.cs
+│   │   │   ├── EncryptedGroupMessage.cs
+│   │   │   ├── EncryptedMessage.cs
+│   │   │   ├── EncryptedSenderKeyDistribution.cs
+│   │   │   ├── GroupSession.cs
+│   │   │   ├── KeyFileMetadata.cs
+│   │   │   ├── MailboxMessage.cs
+│   │   │   ├── SenderKeyDistributionMessage.cs
+│   │   │   ├── X3DHKeyBundle.cs
+│   │   │   ├── X3DHPublicBundle.cs
+│   │   │   └── X3DHSession.cs
+│   │   ├── MultiDevice/
+│   │   │   ├── DeviceLinking.cs
+│   │   │   └── DeviceManager.cs
+│   │   └── E2EEClient.cs
+├── tests/
+│   └── E2EELibrary.Tests/
+│       ├── [Test files would go here]
+│       └── 
+└── runtimes/
+    ├── win-x64/
+    │   └── native/
+    │       └── libsodium.dll
+    └── win-x86/
+        └── native/
+            └── libsodium.dll

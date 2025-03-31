@@ -36,10 +36,12 @@ namespace E2EELibrary.Encryption
                 // Get next message key and update chain key
                 var (newChainKey, messageKey) = DoubleRatchetExchange.RatchetStep(session.SendingChainKey);
 
+                using var secureMessageKey = new SecureMemory.SecureArray<byte>(messageKey);
+
                 // Encrypt message
                 byte[] plaintext = Encoding.UTF8.GetBytes(message);
                 byte[] nonce = NonceGenerator.GenerateNonce();
-                byte[] ciphertext = AES.AESEncrypt(plaintext, messageKey, nonce);
+                byte[] ciphertext = AES.AESEncrypt(plaintext, secureMessageKey.Value, nonce);
 
                 // Create encrypted message object
                 var encryptedMessage = new EncryptedMessage
@@ -61,7 +63,7 @@ namespace E2EELibrary.Encryption
                 );
 
                 // Securely clear the message key when done
-                SecureMemory.SecureClear(messageKey);
+                SecureMemory.SecureClear(secureMessageKey.Value);
 
                 return (updatedSession, encryptedMessage);
             }
@@ -164,11 +166,13 @@ namespace E2EELibrary.Encryption
                     );
                 }
 
+                using var secureMessageKey = new SecureMemory.SecureArray<byte>(messageKey);
+
                 // Decrypt the message
                 try
                 {
                     byte[] plaintext = AES.AESDecrypt(
-                        encryptedMessage.Ciphertext, messageKey, encryptedMessage.Nonce);
+                        encryptedMessage.Ciphertext, secureMessageKey.Value, encryptedMessage.Nonce);
 
                     // Convert to string
                     string decryptedMessage = Encoding.UTF8.GetString(plaintext);
@@ -186,8 +190,8 @@ namespace E2EELibrary.Encryption
                 finally
                 {
                     // Clean up sensitive data
-                    if (messageKey != null)
-                        SecureMemory.SecureClear(messageKey);
+                    if (secureMessageKey.Value != null)
+                        SecureMemory.SecureClear(secureMessageKey.Value);
                 }
             }
             catch (CryptographicException ex)

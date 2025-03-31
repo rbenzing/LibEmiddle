@@ -29,10 +29,10 @@
 
 	<ItemGroup>
 		<None Include="../README.md" Pack="true" PackagePath="/" />
-	</ItemGroup>
-
-	<ItemGroup>
+		<None Include="../LICENSE" Pack="true" PackagePath="/" />
+		<None Include="../NOTICE" Pack="true" PackagePath="/" />
 		<None Include="../structure.txt" Pack="true" PackagePath="/" />
+		<None Include=".editorconfig" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -46,6 +46,10 @@
 	<ItemGroup>
 		<PackageReference Include="Microsoft.TestPlatform" Version="17.13.0" />
 		<PackageReference Include="libsodium" Version="1.0.20" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <EditorConfigFiles Remove="C:\GIT\eMiddle-E2EE-Library\E2EELibrary\.editorconfig" />
 	</ItemGroup>
 
 </Project>

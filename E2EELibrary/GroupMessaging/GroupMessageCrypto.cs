@@ -94,30 +94,32 @@ namespace E2EELibrary.GroupMessaging
             ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, nameof(encryptedMessage.Ciphertext));
             ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce, nameof(encryptedMessage.Nonce));
             ArgumentNullException.ThrowIfNull(senderKey, nameof(senderKey));
-            ArgumentNullException.ThrowIfNull(encryptedMessage.GroupId, nameof(encryptedMessage.GroupId));
 
             try
             {
-                // Get the lock for this specific group
-                object groupLock = GetGroupLock(encryptedMessage.GroupId);
-
-                // Use the lock to ensure thread-safety when checking for replays
-                // and processing messages for a specific group
-                lock (groupLock)
+                // Check for message replay
+                if (IsReplayedMessage(encryptedMessage))
                 {
-                    // Check for message replay
-                    if (IsReplayedMessage(encryptedMessage))
+                    return null;
+                }
+
+                // Forward secrecy check - don't decrypt messages sent before joining the group
+                if (encryptedMessage.GroupId != null &&
+                    _groupJoinTimestamps.TryGetValue(encryptedMessage.GroupId, out long joinTimestamp))
+                {
+                    // If message was sent before we joined the group, reject it
+                    if (encryptedMessage.Timestamp < joinTimestamp)
                     {
+                        Console.WriteLine($"Rejecting message sent before joining group: message timestamp {encryptedMessage.Timestamp}, joined at {joinTimestamp}");
                         return null;
                     }
-
-                    // Decrypt the message - this operation itself is thread-safe
-                    // as it doesn't modify shared state
-                    byte[] plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, senderKey, encryptedMessage.Nonce);
-
-                    // Convert to string
-                    return System.Text.Encoding.UTF8.GetString(plaintext);
                 }
+
+                // Decrypt the message
+                byte[] plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, senderKey, encryptedMessage.Nonce);
+
+                // Convert to string
+                return System.Text.Encoding.UTF8.GetString(plaintext);
             }
             catch (CryptographicException)
             {

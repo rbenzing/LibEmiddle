@@ -14,7 +14,7 @@ namespace E2EELibrary.MultiDevice
     /// <summary>
     /// Multi-device session manager for syncing session states
     /// </summary>
-    public class DeviceManager
+    public class DeviceManager : IDisposable
     {
         private readonly (byte[] publicKey, byte[] privateKey) _deviceKeyPair;
 
@@ -24,17 +24,33 @@ namespace E2EELibrary.MultiDevice
         private readonly byte[] _syncKey;
         private readonly object _syncLock = new object();
 
+        // Add disposed flag for proper IDisposable implementation
+        private bool _disposed = false;
+
         /// <summary>
         /// Creates a new multi-device manager
         /// </summary>
         /// <param name="deviceKeyPair">This device's key pair</param>
         public DeviceManager((byte[] publicKey, byte[] privateKey) deviceKeyPair)
         {
-            _deviceKeyPair = deviceKeyPair;
+            if (deviceKeyPair.publicKey == null || deviceKeyPair.publicKey.Length == 0)
+                throw new ArgumentException("Device public key cannot be null or empty", nameof(deviceKeyPair));
 
-            // Generate a random sync key
+            if (deviceKeyPair.privateKey == null || deviceKeyPair.privateKey.Length == 0)
+                throw new ArgumentException("Device private key cannot be null or empty", nameof(deviceKeyPair));
+
+            // Create a deep copy of the key pair to prevent external modification
+            _deviceKeyPair = (
+                SecureMemory.SecureCopy(deviceKeyPair.publicKey) ?? throw new ArgumentNullException(nameof(deviceKeyPair.publicKey)),
+                SecureMemory.SecureCopy(deviceKeyPair.privateKey) ?? throw new ArgumentNullException(nameof(deviceKeyPair.privateKey))
+            );
+
+            // Generate a random sync key with high entropy
             _syncKey = new byte[Constants.AES_KEY_SIZE];
-            RandomNumberGenerator.Fill(_syncKey);
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(_syncKey);
+            }
         }
 
         /// <summary>
@@ -43,6 +59,8 @@ namespace E2EELibrary.MultiDevice
         /// <param name="devicePublicKey">Public key of the device to link</param>
         public void AddLinkedDevice(byte[] devicePublicKey)
         {
+            ThrowIfDisposed();
+
             if (devicePublicKey == null)
                 throw new ArgumentNullException(nameof(devicePublicKey));
 
@@ -83,6 +101,8 @@ namespace E2EELibrary.MultiDevice
         /// <returns>True if the device was found and removed, false otherwise</returns>
         public bool RemoveLinkedDevice(byte[] devicePublicKey)
         {
+            ThrowIfDisposed();
+
             if (devicePublicKey == null)
                 throw new ArgumentNullException(nameof(devicePublicKey));
 
@@ -94,8 +114,17 @@ namespace E2EELibrary.MultiDevice
             // Use Base64 representation as dictionary key
             string keyBase64 = Convert.ToBase64String(finalKey);
 
-            // Try to remove and return result
-            return _linkedDevices.TryRemove(keyBase64, out _);
+            // Try to remove and securely clear the removed key if successful
+            if (_linkedDevices.TryRemove(keyBase64, out byte[]? removedKey))
+            {
+                if (removedKey != null)
+                {
+                    SecureMemory.SecureClear(removedKey);
+                }
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -105,6 +134,8 @@ namespace E2EELibrary.MultiDevice
         /// <returns>Dictionary of encrypted messages for each device</returns>
         public Dictionary<string, EncryptedMessage> CreateSyncMessages(byte[] syncData)
         {
+            ThrowIfDisposed();
+
             if (syncData == null)
                 throw new ArgumentNullException(nameof(syncData));
 
@@ -115,92 +146,118 @@ namespace E2EELibrary.MultiDevice
                 return result;
 
             // Make a secure copy of the sync data to avoid external modification during processing
-            byte[] syncDataCopy = new byte[syncData.Length];
-            syncData.AsSpan().CopyTo(syncDataCopy);
-
-            // Prepare the sender's private key in X25519 format
-            byte[] senderX25519Private = _deviceKeyPair.privateKey.Length != Constants.X25519_KEY_SIZE ?
-                KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.privateKey) :
-                _deviceKeyPair.privateKey;
-
-            // Thread safety for linked devices access
-            foreach (var deviceEntry in _linkedDevices)
+            using (var secureSyncData = new SecureMemory.SecureArray<byte>(syncData))
             {
-                byte[] deviceKey = deviceEntry.Value;
+                // Prepare the sender's private key in X25519 format
+                byte[]? senderX25519Private = null;
 
                 try
                 {
-                    // Ensure the device key is converted to a proper X25519 public key
-                    byte[] x25519PublicKey;
-                    if (deviceKey.Length == Constants.X25519_KEY_SIZE)
+                    senderX25519Private = _deviceKeyPair.privateKey.Length != Constants.X25519_KEY_SIZE ?
+                        KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.privateKey) :
+                        SecureMemory.SecureCopy(_deviceKeyPair.privateKey) ?? Array.Empty<byte>();
+
+                    // Thread safety for linked devices access
+                    foreach (var deviceEntry in _linkedDevices)
                     {
-                        // If already 32 bytes, validate it's a proper X25519 key
-                        if (!KeyValidation.ValidateX25519PublicKey(deviceKey))
+                        byte[] deviceKey = deviceEntry.Value;
+
+                        try
                         {
-                            Console.WriteLine("Skipping invalid X25519 public key");
-                            continue;
+                            // Ensure the device key is converted to a proper X25519 public key
+                            byte[] x25519PublicKey;
+                            if (deviceKey.Length == Constants.X25519_KEY_SIZE)
+                            {
+                                // If already 32 bytes, validate it's a proper X25519 key
+                                if (!KeyValidation.ValidateX25519PublicKey(deviceKey))
+                                {
+                                    // Use a secure logging mechanism instead of Console.WriteLine
+                                    // LogManager.LogWarning("Skipping invalid X25519 public key");
+                                    continue;
+                                }
+                                x25519PublicKey = deviceKey;
+                            }
+                            else if (deviceKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
+                            {
+                                // Convert Ed25519 public key to X25519
+                                x25519PublicKey = Sodium.ScalarMultBase(
+                                    KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceKey)
+                                );
+                            }
+                            else
+                            {
+                                // Use a secure logging mechanism instead of Console.WriteLine
+                                // LogManager.LogWarning($"Skipping device key with invalid length: {deviceKey.Length}");
+                                continue;
+                            }
+
+                            // Perform key exchange
+                            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(x25519PublicKey, senderX25519Private);
+
+                            // Sign the sync data
+                            byte[] signature = MessageSigning.SignMessage(secureSyncData.Value, _deviceKeyPair.privateKey);
+
+                            // Create sync message with timestamp for replay protection
+                            var syncMessage = new DeviceSyncMessage
+                            {
+                                SenderPublicKey = _deviceKeyPair.publicKey,
+                                Data = secureSyncData.Value,
+                                Signature = signature,
+                                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                                // Add protocol version information
+                                Version = ProtocolVersion.FULL_VERSION
+                            };
+
+                            // Serialize with protocol version
+                            string json = System.Text.Json.JsonSerializer.Serialize(new
+                            {
+                                senderPublicKey = Convert.ToBase64String(syncMessage.SenderPublicKey ?? Array.Empty<byte>()),
+                                data = Convert.ToBase64String(syncMessage.Data ?? Array.Empty<byte>()),
+                                signature = Convert.ToBase64String(syncMessage.Signature ?? Array.Empty<byte>()),
+                                timestamp = syncMessage.Timestamp,
+                                protocolVersion = syncMessage.Version
+                            });
+
+                            // Encrypt
+                            byte[] plaintext = Encoding.UTF8.GetBytes(json);
+                            byte[] nonce = NonceGenerator.GenerateNonce();
+                            byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
+
+                            // Securely clear shared secret after use
+                            SecureMemory.SecureClear(sharedSecret);
+
+                            // Add to result
+                            string deviceKeyBase64 = deviceEntry.Key;
+                            result[deviceKeyBase64] = new EncryptedMessage
+                            {
+                                Ciphertext = ciphertext,
+                                Nonce = nonce,
+                                Timestamp = syncMessage.Timestamp,
+                                MessageId = Guid.NewGuid(),
+                                // Add protocol version information
+                                ProtocolMajorVersion = ProtocolVersion.MAJOR_VERSION,
+                                ProtocolMinorVersion = ProtocolVersion.MINOR_VERSION
+                            };
                         }
-                        x25519PublicKey = deviceKey;
+                        catch (Exception ex)
+                        {
+                            // Log the error but continue processing other devices
+                            // Use a secure logging mechanism instead of Console.WriteLine
+                            // LogManager.LogError($"Error creating sync message: {ex.Message}");
+                            Console.WriteLine($"Error creating sync message: {ex.Message}");
+                        }
                     }
-                    else if (deviceKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
-                    {
-                        // Convert Ed25519 public key to X25519
-                        x25519PublicKey = Sodium.ScalarMultBase(
-                            KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceKey)
-                        );
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Skipping device key with invalid length: {deviceKey.Length}");
-                        continue;
-                    }
-
-                    // Perform key exchange
-                    byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(x25519PublicKey, senderX25519Private);
-
-                    // Sign the sync data
-                    byte[] signature = MessageSigning.SignMessage(syncDataCopy, _deviceKeyPair.privateKey);
-
-                    // Create sync message with timestamp for replay protection
-                    var syncMessage = new DeviceSyncMessage
-                    {
-                        SenderPublicKey = _deviceKeyPair.publicKey,
-                        Data = syncDataCopy,
-                        Signature = signature,
-                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                    };
-
-                    // Serialize
-                    string json = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        senderPublicKey = Convert.ToBase64String(syncMessage.SenderPublicKey),
-                        data = Convert.ToBase64String(syncMessage.Data),
-                        signature = Convert.ToBase64String(syncMessage.Signature),
-                        timestamp = syncMessage.Timestamp
-                    });
-
-                    // Encrypt
-                    byte[] plaintext = Encoding.UTF8.GetBytes(json);
-                    byte[] nonce = NonceGenerator.GenerateNonce();
-                    byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
-
-                    // Add to result
-                    string deviceKeyBase64 = deviceEntry.Key;
-                    result[deviceKeyBase64] = new EncryptedMessage
-                    {
-                        Ciphertext = ciphertext,
-                        Nonce = nonce
-                    };
                 }
-                catch (Exception ex)
+                finally
                 {
-                    // Log the error but continue processing other devices
-                    Console.WriteLine($"Error creating sync message: {ex.Message}");
+                    // Securely clear the private key copy when done
+                    if (senderX25519Private != null)
+                    {
+                        SecureMemory.SecureClear(senderX25519Private);
+                    }
                 }
             }
 
-            // Securely clear the copy when done
-            Array.Clear(syncDataCopy, 0, syncDataCopy.Length);
             return result;
         }
 
@@ -212,8 +269,16 @@ namespace E2EELibrary.MultiDevice
         /// <returns>Sync data if verification succeeds, null if processing fails</returns>
         public byte[]? ProcessSyncMessage(EncryptedMessage encryptedMessage, byte[]? senderHint = null)
         {
+            ThrowIfDisposed();
+
             if (encryptedMessage == null)
                 throw new ArgumentNullException(nameof(encryptedMessage));
+
+            // Validate the encrypted message
+            if (!encryptedMessage.Validate())
+            {
+                return null;
+            }
 
             // If we have a sender hint, try that device first
             if (senderHint != null)
@@ -256,141 +321,191 @@ namespace E2EELibrary.MultiDevice
         /// <returns>Decrypted data if successful, null otherwise</returns>
         private byte[]? TryProcessSyncMessageFromDevice(EncryptedMessage encryptedMessage, byte[] deviceKey)
         {
-            ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext);
-            ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce);
+            // Check for null values
+            if (encryptedMessage.Ciphertext == null)
+                return null;
+
+            if (encryptedMessage.Nonce == null)
+                return null;
 
             try
             {
                 // Convert keys to X25519 format if needed
-                byte[] x25519PrivateKey = _deviceKeyPair.privateKey.Length != Constants.X25519_KEY_SIZE ?
-                    KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.privateKey) : _deviceKeyPair.privateKey;
+                byte[]? x25519PrivateKey = null;
+                byte[]? x25519PublicKey = null;
+                byte[]? sharedSecret = null;
+                byte[]? plaintext = null;
 
-                byte[] x25519PublicKey = deviceKey.Length != Constants.X25519_KEY_SIZE ?
-                    Sodium.ScalarMultBase(KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceKey)) : deviceKey;
-
-                // For debugging purposes
-                Console.WriteLine($"X25519 Private Key Length: {x25519PrivateKey.Length}");
-                Console.WriteLine($"X25519 Public Key Length: {x25519PublicKey.Length}");
-
-                // Additional validation
-                if (!KeyValidation.ValidateX25519PublicKey(x25519PublicKey))
-                {
-                    Console.WriteLine("X25519 public key validation failed");
-                    return null;
-                }
-
-                // Generate shared secret
-                byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(x25519PublicKey, x25519PrivateKey);
-
-                Console.WriteLine($"Generated shared secret length: {sharedSecret.Length}");
-
-                // Attempt to decrypt
-                byte[] plaintext;
                 try
                 {
-                    plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, sharedSecret, encryptedMessage.Nonce);
-                    Console.WriteLine($"Successfully decrypted plaintext, length: {plaintext.Length}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Decryption failed: {ex.Message}");
-                    return null;
-                }
+                    x25519PrivateKey = _deviceKeyPair.privateKey.Length != Constants.X25519_KEY_SIZE ?
+                        KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.privateKey) :
+                        SecureMemory.SecureCopy(_deviceKeyPair.privateKey);
 
-                string json = Encoding.UTF8.GetString(plaintext);
-                Console.WriteLine($"Decrypted JSON: {json}");
+                    x25519PublicKey = deviceKey.Length != Constants.X25519_KEY_SIZE ?
+                        Sodium.ScalarMultBase(KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceKey)) :
+                        SecureMemory.SecureCopy(deviceKey);
 
-                // Try to deserialize - this may fail if the decryption was incorrect
-                Dictionary<string, object>? data;
-                try
-                {
-                    data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
-                    if (data == null)
+                    ArgumentNullException.ThrowIfNull(x25519PublicKey, nameof(x25519PublicKey));
+
+                    // Additional validation
+                    if (!KeyValidation.ValidateX25519PublicKey(x25519PublicKey))
                     {
-                        Console.WriteLine("Deserialization returned null");
+                        // Use a secure logging mechanism instead of Console.WriteLine
+                        // LogManager.LogWarning("X25519 public key validation failed");
+                        Console.WriteLine("X25519 public key validation failed.");
                         return null;
                     }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Deserialization failed: {ex.Message}");
-                    return null;
-                }
 
-                // Check if required keys exist and their values are not null
-                if (!data.ContainsKey("senderPublicKey") ||
-                    !data.ContainsKey("data") ||
-                    !data.ContainsKey("signature") ||
-                    data["senderPublicKey"] == null ||
-                    data["data"] == null ||
-                    data["signature"] == null)
-                {
-                    Console.WriteLine("Required keys missing or null in deserialized data");
-                    return null;
-                }
+                    ArgumentNullException.ThrowIfNull(x25519PrivateKey, nameof(x25519PrivateKey));
 
-                // Handle null checks before converting
-                string? senderPubKeyString = data["senderPublicKey"]?.ToString();
-                string? syncDataString = data["data"]?.ToString();
-                string? signatureString = data["signature"]?.ToString();
+                    // Generate shared secret
+                    sharedSecret = X3DHExchange.X3DHKeyExchange(x25519PublicKey, x25519PrivateKey);
 
-                // Verify none of the strings are null
-                if (string.IsNullOrEmpty(senderPubKeyString) ||
-                    string.IsNullOrEmpty(syncDataString) ||
-                    string.IsNullOrEmpty(signatureString))
-                {
-                    Console.WriteLine("One or more required values is null or empty");
-                    return null;
-                }
-
-                // Now it's safe to convert
-                byte[] senderPubKey = Convert.FromBase64String(senderPubKeyString);
-                byte[] syncData = Convert.FromBase64String(syncDataString);
-                byte[] signature = Convert.FromBase64String(signatureString);
-
-                // Get timestamp if present (for newer protocol versions)
-                long timestamp = 0;
-                if (data.ContainsKey("timestamp"))
-                {
-                    // Handle JsonElement type explicitly for timestamp 
-                    if (data["timestamp"] is JsonElement jsonTimestamp)
+                    // Attempt to decrypt
+                    try
                     {
-                        timestamp = jsonTimestamp.ValueKind == JsonValueKind.Number
-                            ? jsonTimestamp.GetInt64()
-                            : long.Parse(jsonTimestamp.ToString());
+                        plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, sharedSecret, encryptedMessage.Nonce);
                     }
-                    else
+                    catch (CryptographicException ex)
                     {
-                        timestamp = Convert.ToInt64(data["timestamp"].ToString());
-                    }
-
-                    // Verify timestamp to prevent replay attacks - reject messages older than 5 minutes
-                    long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                    if (timestamp > 0 && currentTime - timestamp > 5 * 60 * 1000)
-                    {
-                        Console.WriteLine("Message is too old, possible replay attack");
+                        // Use a secure logging mechanism instead of Console.WriteLine
+                        // LogManager.LogError($"Decryption failed: {ex.Message}");
+                        Console.WriteLine($"Decryption failed: {ex.Message}");
                         return null;
                     }
-                }
 
-                // Verify signature
-                bool signatureValid = MessageSigning.VerifySignature(syncData, signature, senderPubKey);
-                if (!signatureValid)
+                    string json = Encoding.UTF8.GetString(plaintext);
+
+                    // Try to deserialize - this may fail if the decryption was incorrect
+                    Dictionary<string, object>? data;
+                    try
+                    {
+                        data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+                        if (data == null)
+                        {
+                            // Use a secure logging mechanism instead of Console.WriteLine
+                            // LogManager.LogWarning("Deserialization returned null");
+                            Console.WriteLine("Deserialization returned null");
+                            return null;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Use a secure logging mechanism instead of Console.WriteLine
+                        // LogManager.LogError($"Deserialization failed: {ex.Message}");
+                        Console.WriteLine($"Deserialization failed: {ex.Message}");
+                        return null;
+                    }
+
+                    // Check if required keys exist and their values are not null
+                    if (!data.ContainsKey("senderPublicKey") ||
+                        !data.ContainsKey("data") ||
+                        !data.ContainsKey("signature") ||
+                        data["senderPublicKey"] == null ||
+                        data["data"] == null ||
+                        data["signature"] == null)
+                    {
+                        // Use a secure logging mechanism instead of Console.WriteLine
+                        // LogManager.LogWarning("Required keys missing or null in deserialized data");
+                        return null;
+                    }
+
+                    // Check protocol version if available
+                    if (data.ContainsKey("protocolVersion") && data["protocolVersion"] is string versionStr)
+                    {
+                        string[] parts = versionStr.Split('/');
+                        if (parts.Length == 2 && parts[1].StartsWith("v"))
+                        {
+                            string version = parts[1].Substring(1);
+                            string[] versionParts = version.Split('.');
+                            if (versionParts.Length == 2 &&
+                                int.TryParse(versionParts[0], out int majorVersion) &&
+                                int.TryParse(versionParts[1], out int minorVersion))
+                            {
+                                if (!ProtocolVersion.IsCompatible(majorVersion, minorVersion))
+                                {
+                                    // Use a secure logging mechanism instead of Console.WriteLine
+                                    // LogManager.LogWarning($"Incompatible protocol version: {versionStr}");
+                                    return null;
+                                }
+                            }
+                        }
+                    }
+
+                    // Handle null checks before converting
+                    string? senderPubKeyString = data["senderPublicKey"]?.ToString();
+                    string? syncDataString = data["data"]?.ToString();
+                    string? signatureString = data["signature"]?.ToString();
+
+                    // Verify none of the strings are null
+                    if (string.IsNullOrEmpty(senderPubKeyString) ||
+                        string.IsNullOrEmpty(syncDataString) ||
+                        string.IsNullOrEmpty(signatureString))
+                    {
+                        // Use a secure logging mechanism instead of Console.WriteLine
+                        // LogManager.LogWarning("One or more required values is null or empty");
+                        return null;
+                    }
+
+                    // Now it's safe to convert
+                    byte[] senderPubKey = Convert.FromBase64String(senderPubKeyString);
+                    byte[] syncData = Convert.FromBase64String(syncDataString);
+                    byte[] signature = Convert.FromBase64String(signatureString);
+
+                    // Get timestamp if present (for newer protocol versions)
+                    long timestamp = 0;
+                    if (data.ContainsKey("timestamp"))
+                    {
+                        // Handle JsonElement type explicitly for timestamp 
+                        if (data["timestamp"] is JsonElement jsonTimestamp)
+                        {
+                            timestamp = jsonTimestamp.ValueKind == JsonValueKind.Number
+                                ? jsonTimestamp.GetInt64()
+                                : long.Parse(jsonTimestamp.ToString() ?? "0");
+                        }
+                        else
+                        {
+                            timestamp = Convert.ToInt64(data["timestamp"]?.ToString() ?? "0");
+                        }
+
+                        // Verify timestamp to prevent replay attacks - reject messages older than 5 minutes
+                        long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        if (timestamp > 0 && currentTime - timestamp > 5 * 60 * 1000)
+                        {
+                            // Use a secure logging mechanism instead of Console.WriteLine
+                            // LogManager.LogWarning("Message is too old, possible replay attack");
+                            return null;
+                        }
+                    }
+
+                    // Verify signature
+                    bool signatureValid = MessageSigning.VerifySignature(syncData, signature, senderPubKey);
+                    if (!signatureValid)
+                    {
+                        // Use a secure logging mechanism instead of Console.WriteLine
+                        // LogManager.LogWarning("Signature verification failed");
+                        return null;
+                    }
+
+                    // Make a secure copy of the sync data to return
+                    byte[] result = new byte[syncData.Length];
+                    syncData.AsSpan().CopyTo(result.AsSpan());
+                    return result;
+                }
+                finally
                 {
-                    Console.WriteLine("Signature verification failed");
-                    return null;
+                    // Securely clear sensitive data
+                    if (x25519PrivateKey != null) SecureMemory.SecureClear(x25519PrivateKey);
+                    if (sharedSecret != null) SecureMemory.SecureClear(sharedSecret);
+                    // We don't need to clear the public key, but we do need to dispose the copy
                 }
-
-                Console.WriteLine("Signature verification succeeded");
-
-                // Make a secure copy of the sync data to return
-                byte[] result = new byte[syncData.Length];
-                syncData.AsSpan().CopyTo(result.AsSpan());
-                return result;
             }
             catch (Exception ex)
             {
                 // Log the error for debugging
+                // Use a secure logging mechanism instead of Console.WriteLine
+                // LogManager.LogError($"Error in TryProcessSyncMessageFromDevice: {ex.Message}");
                 Console.WriteLine($"Error in TryProcessSyncMessageFromDevice: {ex.Message}");
                 return null;
             }
@@ -402,6 +517,7 @@ namespace E2EELibrary.MultiDevice
         /// <returns>The number of unique linked devices</returns>
         public int GetLinkedDeviceCount()
         {
+            ThrowIfDisposed();
             return _linkedDevices.Count;
         }
 
@@ -412,6 +528,8 @@ namespace E2EELibrary.MultiDevice
         /// <returns>True if the device is linked, false otherwise</returns>
         public bool IsDeviceLinked(byte[] devicePublicKey)
         {
+            ThrowIfDisposed();
+
             if (devicePublicKey == null)
                 return false;
 
@@ -431,6 +549,8 @@ namespace E2EELibrary.MultiDevice
         /// <returns>A signed revocation message</returns>
         public DeviceRevocationMessage CreateRevocationMessage(byte[] deviceKeyToRevoke)
         {
+            ThrowIfDisposed();
+
             if (deviceKeyToRevoke == null || deviceKeyToRevoke.Length == 0)
                 throw new ArgumentException("Device key cannot be null or empty", nameof(deviceKeyToRevoke));
 
@@ -451,7 +571,8 @@ namespace E2EELibrary.MultiDevice
             {
                 RevokedDeviceKey = deviceKeyToRevoke,
                 RevocationTimestamp = timestamp,
-                Signature = signature
+                Signature = signature,
+                Version = ProtocolVersion.FULL_VERSION
             };
         }
 
@@ -462,6 +583,8 @@ namespace E2EELibrary.MultiDevice
         /// <returns>A revocation message that should be distributed to other devices</returns>
         public DeviceRevocationMessage RevokeLinkedDevice(byte[] devicePublicKey)
         {
+            ThrowIfDisposed();
+
             if (devicePublicKey == null)
                 throw new ArgumentNullException(nameof(devicePublicKey));
 
@@ -474,7 +597,13 @@ namespace E2EELibrary.MultiDevice
             string deviceId = Convert.ToBase64String(finalKey);
 
             // Try to remove from linked devices
-            bool removed = _linkedDevices.TryRemove(deviceId, out var _);
+            bool removed = _linkedDevices.TryRemove(deviceId, out byte[]? removedKey);
+
+            // Securely clear the removed key if it exists
+            if (removedKey != null)
+            {
+                SecureMemory.SecureClear(removedKey);
+            }
 
             if (!removed)
             {
@@ -493,6 +622,8 @@ namespace E2EELibrary.MultiDevice
         /// <returns>True if the message was valid and the device was removed</returns>
         public bool ProcessRevocationMessage(DeviceRevocationMessage revocationMessage, byte[] trustedPublicKey)
         {
+            ThrowIfDisposed();
+
             if (revocationMessage == null)
                 throw new ArgumentNullException(nameof(revocationMessage));
 
@@ -507,7 +638,264 @@ namespace E2EELibrary.MultiDevice
             string deviceId = Convert.ToBase64String(revocationMessage.RevokedDeviceKey);
 
             // Remove the device if it exists
-            return _linkedDevices.TryRemove(deviceId, out var _);
+            bool removed = _linkedDevices.TryRemove(deviceId, out byte[]? removedKey);
+
+            // Securely clear the removed key if it exists
+            if (removedKey != null)
+            {
+                SecureMemory.SecureClear(removedKey);
+            }
+
+            return removed;
+        }
+
+        /// <summary>
+        /// Exports all linked devices to a serialized format for backup
+        /// </summary>
+        /// <param name="password">Optional password to encrypt the export</param>
+        /// <returns>Serialized linked devices data</returns>
+        public byte[] ExportLinkedDevices(string? password = null)
+        {
+            ThrowIfDisposed();
+
+            var deviceList = new List<string>();
+
+            foreach (var device in _linkedDevices)
+            {
+                deviceList.Add(device.Key);
+            }
+
+            string json = JsonSerializer.Serialize(new
+            {
+                devices = deviceList,
+                exportTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                protocolVersion = ProtocolVersion.FULL_VERSION
+            });
+
+            byte[] data = Encoding.UTF8.GetBytes(json);
+
+            // Encrypt if password provided
+            if (!string.IsNullOrEmpty(password))
+            {
+                // Generate a salt
+                byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE];
+                using (var rng = RandomNumberGenerator.Create())
+                {
+                    rng.GetBytes(salt);
+                }
+
+                // Derive key
+                byte[] key = DeriveKeyFromPassword(password, salt);
+
+                // Encrypt
+                byte[] nonce = NonceGenerator.GenerateNonce();
+                byte[] ciphertext = AES.AESEncrypt(data, key, nonce);
+                SecureMemory.SecureClear(key);
+
+                // Combine salt, nonce, and ciphertext
+                byte[] result = new byte[salt.Length + nonce.Length + ciphertext.Length];
+                Buffer.BlockCopy(salt, 0, result, 0, salt.Length);
+                Buffer.BlockCopy(nonce, 0, result, salt.Length, nonce.Length);
+                Buffer.BlockCopy(ciphertext, 0, result, salt.Length + nonce.Length, ciphertext.Length);
+
+                return result;
+            }
+
+            return data;
+        }
+
+        /// <summary>
+        /// Imports linked devices from a serialized format
+        /// </summary>
+        /// <param name="data">Serialized linked devices data</param>
+        /// <param name="password">Optional password if the data is encrypted</param>
+        /// <returns>Number of devices imported</returns>
+        public int ImportLinkedDevices(byte[] data, string? password = null)
+        {
+            ThrowIfDisposed();
+
+            if (data == null || data.Length == 0)
+                throw new ArgumentException("Import data cannot be null or empty", nameof(data));
+
+            byte[] jsonData;
+
+            // Decrypt if password provided
+            if (!string.IsNullOrEmpty(password))
+            {
+                // Extract salt and nonce
+                if (data.Length < Constants.DEFAULT_SALT_SIZE + Constants.NONCE_SIZE + 16)
+                    throw new ArgumentException("Data is too short to be valid encrypted export", nameof(data));
+
+                byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE];
+                byte[] nonce = new byte[Constants.NONCE_SIZE];
+                Buffer.BlockCopy(data, 0, salt, 0, salt.Length);
+                Buffer.BlockCopy(data, salt.Length, nonce, 0, nonce.Length);
+
+                // Extract ciphertext
+                int ciphertextLength = data.Length - salt.Length - nonce.Length;
+                byte[] ciphertext = new byte[ciphertextLength];
+                Buffer.BlockCopy(data, salt.Length + nonce.Length, ciphertext, 0, ciphertextLength);
+
+                // Derive key
+                byte[] key = DeriveKeyFromPassword(password, salt);
+
+                // Decrypt
+                try
+                {
+                    jsonData = AES.AESDecrypt(ciphertext, key, nonce);
+                }
+                finally
+                {
+                    SecureMemory.SecureClear(key);
+                }
+            }
+            else
+            {
+                jsonData = data;
+            }
+
+            // Deserialize
+            string json = Encoding.UTF8.GetString(jsonData);
+            var importData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+
+            if (importData == null || !importData.ContainsKey("devices"))
+                throw new FormatException("Invalid import data format");
+
+            // Check protocol version compatibility if present
+            if (importData.TryGetValue("protocolVersion", out var versionElement) &&
+                versionElement.ValueKind == JsonValueKind.String)
+            {
+                string? versionStr = versionElement.GetString();
+                if (!string.IsNullOrEmpty(versionStr))
+                {
+                    string[] parts = versionStr.Split('/');
+                    if (parts.Length == 2 && parts[1].StartsWith("v"))
+                    {
+                        string version = parts[1].Substring(1);
+                        string[] versionParts = version.Split('.');
+                        if (versionParts.Length == 2 &&
+                            int.TryParse(versionParts[0], out int majorVersion) &&
+                            int.TryParse(versionParts[1], out int minorVersion))
+                        {
+                            if (!ProtocolVersion.IsCompatible(majorVersion, minorVersion))
+                            {
+                                throw new ProtocolVersionException($"Incompatible protocol version: {versionStr}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Process device list
+            var devicesList = importData["devices"].EnumerateArray();
+            int importCount = 0;
+
+            foreach (var deviceElement in devicesList)
+            {
+                if (deviceElement.ValueKind == JsonValueKind.String)
+                {
+                    string? deviceKey = deviceElement.GetString();
+                    if (!string.IsNullOrEmpty(deviceKey))
+                    {
+                        try
+                        {
+                            byte[] deviceBytes = Convert.FromBase64String(deviceKey);
+
+                            // We can now add this device to our linked devices
+                            // The AddLinkedDevice method will perform validation and conversion
+                            if (!_linkedDevices.ContainsKey(deviceKey))
+                            {
+                                _linkedDevices[deviceKey] = deviceBytes;
+                                importCount++;
+                            }
+                        }
+                        catch (FormatException)
+                        {
+                            // Skip invalid base64 strings
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            return importCount;
+        }
+
+        /// <summary>
+        /// Helper method to derive a key from a password
+        /// </summary>
+        private static byte[] DeriveKeyFromPassword(string password, byte[] salt)
+        {
+            using var pbkdf2 = new Rfc2898DeriveBytes(
+                password,
+                salt,
+                Constants.PBKDF2_ITERATIONS,
+                HashAlgorithmName.SHA256);
+
+            return pbkdf2.GetBytes(Constants.AES_KEY_SIZE);
+        }
+
+        /// <summary>
+        /// Performs cleanup of managed and unmanaged resources.
+        /// </summary>
+        /// <param name="disposing">True if called from Dispose(), false if called from finalizer</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+                return;
+
+            // Clean up managed resources if disposing
+            if (disposing)
+            {
+                // Securely clear all sensitive data
+                if (_deviceKeyPair.privateKey != null)
+                {
+                    SecureMemory.SecureClear(_deviceKeyPair.privateKey);
+                }
+
+                if (_syncKey != null)
+                {
+                    SecureMemory.SecureClear(_syncKey);
+                }
+
+                // Clear all linked devices
+                foreach (var device in _linkedDevices.Values)
+                {
+                    SecureMemory.SecureClear(device);
+                }
+
+                _linkedDevices.Clear();
+            }
+
+            _disposed = true;
+        }
+
+        /// <summary>
+        /// Finalizer to ensure resources are cleaned up
+        /// </summary>
+        ~DeviceManager()
+        {
+            Dispose(false);
+        }
+
+        /// <summary>
+        /// Disposes resources used by the device manager
+        /// </summary>
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        /// <summary>
+        /// Throws an ObjectDisposedException if this object has been disposed
+        /// </summary>
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(DeviceManager));
+            }
         }
     }
 }

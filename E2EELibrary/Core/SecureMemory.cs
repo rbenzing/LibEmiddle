@@ -202,5 +202,59 @@ namespace E2EELibrary.Core
                 }
             }
         }
+
+        /// <summary>
+        /// Secure array implementation
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        public sealed class SecureArray<T> : IDisposable where T : struct
+        {
+            private T[] _array;
+            private bool _disposed = false;
+
+            /// <summary>
+            /// Secure array by length
+            /// </summary>
+            /// <param name="length"></param>
+            public SecureArray(int length)
+            {
+                _array = new T[length];
+            }
+
+            /// <summary>
+            /// Secure array from existing
+            /// </summary>
+            /// <param name="existingArray"></param>
+            public SecureArray(T[] existingArray)
+            {
+                _array = new T[existingArray.Length];
+                existingArray.CopyTo(_array, 0);
+            }
+
+            /// <summary>
+            /// Check if value is disposed
+            /// </summary>
+            public T[] Value => _disposed ? throw new ObjectDisposedException(nameof(SecureArray<T>)) : _array;
+
+            /// <summary>
+            /// Memory cleanup
+            /// </summary>
+            public void Dispose()
+            {
+                if (!_disposed)
+                {
+                    if (typeof(T) == typeof(byte))
+                    {
+                        SecureClear((byte[])(object)_array);
+                    }
+                    else
+                    {
+                        Array.Clear(_array, 0, _array.Length);
+                    }
+                    _disposed = true;
+                }
+            }
+        }
+
     }
 }

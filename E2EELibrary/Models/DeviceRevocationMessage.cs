@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Text;
 using E2EELibrary.Communication;
+using E2EELibrary.Core;
 
 namespace E2EELibrary.Models
 {
@@ -22,6 +24,11 @@ namespace E2EELibrary.Models
         /// Signature of the revoked device key and timestamp, signed by the authorizing device
         /// </summary>
         public byte[] Signature { get; set; }
+
+        /// <summary>
+        /// Protocol version information for compatibility checking
+        /// </summary>
+        public string Version { get; set; } = ProtocolVersion.FULL_VERSION;
 
         /// <summary>
         /// Creates a new device revocation message with empty non-null properties.
@@ -63,23 +70,133 @@ namespace E2EELibrary.Models
             if (RevocationTimestamp <= 0)
                 return false;
 
+            // Check for expired revocation (> 30 days old)
+            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (currentTime - RevocationTimestamp > 30 * 24 * 60 * 60 * 1000L) // 30 days in milliseconds
+                return false;
+
+            // Check protocol version compatibility if set
+            if (!string.IsNullOrEmpty(Version))
+            {
+                if (!IsValidProtocolVersion(Version))
+                    return false;
+            }
+
             // Verify the signature
             byte[] signedData = CombineForVerification();
             return MessageSigning.VerifySignature(signedData, Signature, trustedPublicKey);
         }
 
         /// <summary>
-        /// Combines device key and timestamp for signature verification.
+        /// Validates the protocol version format and compatibility
+        /// </summary>
+        /// <param name="version">Protocol version string to check</param>
+        /// <returns>True if the version is compatible</returns>
+        private bool IsValidProtocolVersion(string version)
+        {
+            // Check format (e.g., "E2EELibrary/v1.0")
+            string[] parts = version.Split('/');
+            if (parts.Length != 2 || !parts[1].StartsWith("v"))
+                return false;
+
+            // Parse version number
+            string versionNumber = parts[1].Substring(1);
+            string[] versionParts = versionNumber.Split('.');
+            if (versionParts.Length != 2)
+                return false;
+
+            if (!int.TryParse(versionParts[0], out int majorVersion) ||
+                !int.TryParse(versionParts[1], out int minorVersion))
+                return false;
+
+            // Check compatibility
+            return ProtocolVersion.IsCompatible(majorVersion, minorVersion);
+        }
+
+        /// <summary>
+        /// Combines device key, timestamp, and optional version for signature verification.
         /// </summary>
         private byte[] CombineForVerification()
         {
+            using var ms = new MemoryStream();
+
+            // Add the revoked device key
+            ms.Write(RevokedDeviceKey, 0, RevokedDeviceKey.Length);
+
+            // Add the timestamp
             byte[] timestampBytes = BitConverter.GetBytes(RevocationTimestamp);
-            byte[] combined = new byte[RevokedDeviceKey.Length + timestampBytes.Length];
+            ms.Write(timestampBytes, 0, timestampBytes.Length);
 
-            RevokedDeviceKey.AsSpan().CopyTo(combined.AsSpan(0, RevokedDeviceKey.Length));
-            timestampBytes.AsSpan().CopyTo(combined.AsSpan(RevokedDeviceKey.Length));
+            // If using protocol v1.1+, also include the protocol version in the data to sign
+            if (!string.Equals(Version, ProtocolVersion.LEGACY_VERSION, StringComparison.Ordinal))
+            {
+                byte[] versionBytes = Encoding.UTF8.GetBytes(Version);
+                ms.Write(versionBytes, 0, versionBytes.Length);
+            }
 
-            return combined;
+            return ms.ToArray();
+        }
+
+        /// <summary>
+        /// Serializes this message to a dictionary for transport
+        /// </summary>
+        public Dictionary<string, string> ToDictionary()
+        {
+            var dict = new Dictionary<string, string>
+            {
+                ["revokedDeviceKey"] = Convert.ToBase64String(RevokedDeviceKey),
+                ["revocationTimestamp"] = RevocationTimestamp.ToString(),
+                ["signature"] = Convert.ToBase64String(Signature),
+                ["protocolVersion"] = Version
+            };
+
+            return dict;
+        }
+
+        /// <summary>
+        /// Creates a DeviceRevocationMessage from a dictionary
+        /// </summary>
+        public static DeviceRevocationMessage FromDictionary(Dictionary<string, string> dict)
+        {
+            if (!dict.TryGetValue("revokedDeviceKey", out string? keyBase64) ||
+                !dict.TryGetValue("signature", out string? sigBase64) ||
+                !dict.TryGetValue("revocationTimestamp", out string? timestampStr))
+            {
+                throw new ArgumentException("Missing required fields in dictionary", nameof(dict));
+            }
+
+            byte[] deviceKey = Convert.FromBase64String(keyBase64);
+            byte[] signature = Convert.FromBase64String(sigBase64);
+            long timestamp = long.Parse(timestampStr);
+
+            var message = new DeviceRevocationMessage(deviceKey, signature, timestamp);
+
+            // Set protocol version if present
+            if (dict.TryGetValue("protocolVersion", out string? version))
+            {
+                message.Version = version;
+            }
+
+            return message;
+        }
+
+        /// <summary>
+        /// Serializes this message to JSON
+        /// </summary>
+        public string ToJson()
+        {
+            return JsonSerialization.Serialize(ToDictionary());
+        }
+
+        /// <summary>
+        /// Creates a DeviceRevocationMessage from JSON
+        /// </summary>
+        public static DeviceRevocationMessage FromJson(string json)
+        {
+            var dict = JsonSerialization.Deserialize<Dictionary<string, string>>(json)
+                ?? throw new ArgumentException("Failed to deserialize JSON", nameof(json));
+
+            return FromDictionary(dict);
         }
     }
 }

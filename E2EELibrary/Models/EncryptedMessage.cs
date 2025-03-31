@@ -4,7 +4,7 @@ using E2EELibrary.Core;
 namespace E2EELibrary.Models
 {
     /// <summary>
-    /// Encrypted message container with enhanced security features
+    /// Encrypted message container with enhanced security features and protocol versioning
     /// </summary>
     public class EncryptedMessage
     {
@@ -39,11 +39,25 @@ namespace E2EELibrary.Models
         /// </summary>
         public Guid MessageId { get; set; } = Guid.NewGuid();
 
-        // Add a session ID to group messages by conversation
         /// <summary>
         /// Session identifier to track different conversations
         /// </summary>
         public string? SessionId { get; set; }
+
+        /// <summary>
+        /// Major version of the protocol used to create this message
+        /// </summary>
+        public int ProtocolMajorVersion { get; set; } = ProtocolVersion.MAJOR_VERSION;
+
+        /// <summary>
+        /// Minor version of the protocol used to create this message
+        /// </summary>
+        public int ProtocolMinorVersion { get; set; } = ProtocolVersion.MINOR_VERSION;
+
+        /// <summary>
+        /// Full protocol version as a string
+        /// </summary>
+        public string Version => $"{ProtocolMajorVersion}.{ProtocolMinorVersion}";
 
         /// <summary>
         /// Creates a copy of this message with new ciphertext and nonce
@@ -60,7 +74,10 @@ namespace E2EELibrary.Models
                 MessageNumber = this.MessageNumber,
                 SenderDHKey = this.SenderDHKey,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                MessageId = this.MessageId
+                MessageId = this.MessageId,
+                SessionId = this.SessionId,
+                ProtocolMajorVersion = this.ProtocolMajorVersion,
+                ProtocolMinorVersion = this.ProtocolMinorVersion
             };
         }
 
@@ -85,6 +102,14 @@ namespace E2EELibrary.Models
             if (Timestamp > currentTime + (60 * 1000))
                 return false;
 
+            // Reject messages that are too old (replay protection)
+            if (currentTime - Timestamp > Constants.MAX_MESSAGE_AGE_MS)
+                return false;
+
+            // Check protocol version compatibility
+            if (!ProtocolVersion.IsCompatible(ProtocolMajorVersion, ProtocolMinorVersion))
+                return false;
+
             return true;
         }
 
@@ -106,7 +131,8 @@ namespace E2EELibrary.Models
                 ["messageNumber"] = MessageNumber,
                 ["senderDHKey"] = Convert.ToBase64String(SenderDHKey),
                 ["timestamp"] = Timestamp,
-                ["messageId"] = MessageId.ToString()
+                ["messageId"] = MessageId.ToString(),
+                ["protocolVersion"] = Version
             };
 
             // Add optional fields only if they have values
@@ -160,7 +186,32 @@ namespace E2EELibrary.Models
                 if (dict.ContainsKey("sessionId") && dict["sessionId"] != null)
                     message.SessionId = dict["sessionId"].ToString();
 
+                // Parse version if present
+                if (dict.TryGetValue("protocolVersion", out var versionObj) &&
+                    versionObj is string versionStr &&
+                    versionStr.Split('.').Length == 2)
+                {
+                    string[] parts = versionStr.Split('.');
+                    if (int.TryParse(parts[0], out int majorVersion) &&
+                        int.TryParse(parts[1], out int minorVersion))
+                    {
+                        message.ProtocolMajorVersion = majorVersion;
+                        message.ProtocolMinorVersion = minorVersion;
+
+                        // Check compatibility
+                        if (!ProtocolVersion.IsCompatible(majorVersion, minorVersion))
+                        {
+                            throw new ProtocolVersionException($"Incompatible protocol version: {versionStr}");
+                        }
+                    }
+                }
+
                 return message;
+            }
+            catch (ProtocolVersionException)
+            {
+                // Re-throw version exceptions directly
+                throw;
             }
             catch (Exception ex)
             {
@@ -182,7 +233,8 @@ namespace E2EELibrary.Models
                 ["messageNumber"] = MessageNumber,
                 ["senderDHKey"] = Convert.ToBase64String(SenderDHKey ?? Array.Empty<byte>()),
                 ["timestamp"] = Timestamp,
-                ["messageId"] = MessageId.ToString()
+                ["messageId"] = MessageId.ToString(),
+                ["protocolVersion"] = Version
             };
 
             // Add optional fields only if they have values
@@ -230,7 +282,35 @@ namespace E2EELibrary.Models
                     message.SessionId = sessionIdElement.GetString();
                 }
 
+                // Parse protocol version
+                if (dict.TryGetValue("protocolVersion", out JsonElement versionElement) &&
+                    versionElement.ValueKind == JsonValueKind.String)
+                {
+                    string? versionStr = versionElement.GetString();
+                    if (!string.IsNullOrEmpty(versionStr) && versionStr.Split('.').Length == 2)
+                    {
+                        string[] parts = versionStr.Split('.');
+                        if (int.TryParse(parts[0], out int majorVersion) &&
+                            int.TryParse(parts[1], out int minorVersion))
+                        {
+                            message.ProtocolMajorVersion = majorVersion;
+                            message.ProtocolMinorVersion = minorVersion;
+
+                            // Check compatibility
+                            if (!ProtocolVersion.IsCompatible(majorVersion, minorVersion))
+                            {
+                                throw new ProtocolVersionException($"Incompatible protocol version: {versionStr}");
+                            }
+                        }
+                    }
+                }
+
                 return message;
+            }
+            catch (ProtocolVersionException)
+            {
+                // Re-throw version exceptions directly
+                throw;
             }
             catch (Exception ex)
             {
@@ -367,5 +447,25 @@ namespace E2EELibrary.Models
 
             throw new FormatException($"Cannot convert {value} to Int64");
         }
+    }
+
+    /// <summary>
+    /// Exception thrown when incompatible protocol versions are detected
+    /// </summary>
+    public class ProtocolVersionException : Exception
+    {
+        /// <summary>
+        /// Creates a new ProtocolVersionException with the specified message
+        /// </summary>
+        /// <param name="message">Exception message</param>
+        public ProtocolVersionException(string message) : base(message) { }
+
+        /// <summary>
+        /// Creates a new ProtocolVersionException with the specified message and inner exception
+        /// </summary>
+        /// <param name="message">Exception message</param>
+        /// <param name="innerException">Inner exception</param>
+        public ProtocolVersionException(string message, Exception innerException)
+            : base(message, innerException) { }
     }
 }
