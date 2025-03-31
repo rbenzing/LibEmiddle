@@ -5,26 +5,12 @@ using E2EELibrary.Encryption;
 using E2EELibrary.KeyExchange;
 using E2EELibrary.GroupMessaging;
 using E2EELibrary.Models;
-using E2EELibrary.Core;
 
 namespace E2EELibraryTests
 {
     [TestClass]
     public class IntegrationTests
     {
-        #region Helper Methods
-
-        /// <summary>
-        /// Helper method for byte array comparison
-        /// </summary>
-        private bool AreByteArraysEqual(byte[] a, byte[] b)
-        {
-            // Use the secure comparison even in tests to ensure consistent behavior
-            return SecureMemory.SecureCompare(a, b);
-        }
-
-        #endregion
-
         [TestMethod]
         public void FullE2EEFlow_ShouldWorkEndToEnd()
         {
@@ -126,9 +112,9 @@ namespace E2EELibraryTests
             Assert.AreEqual(1, bobRepliedSession.MessageNumber, "Bob's message number should be incremented");
 
             // Verify chain keys changed
-            Assert.IsFalse(AreByteArraysEqual(aliceDRSession.SendingChainKey, aliceUpdatedSession.SendingChainKey),
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(aliceDRSession.SendingChainKey, aliceUpdatedSession.SendingChainKey),
                 "Alice's sending chain key should change after encryption");
-            Assert.IsFalse(AreByteArraysEqual(bobDRSession.SendingChainKey, bobRepliedSession.SendingChainKey),
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(bobDRSession.SendingChainKey, bobRepliedSession.SendingChainKey),
                 "Bob's sending chain key should change after encryption");
 
             // Clean up sensitive key material

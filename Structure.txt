@@ -11,16 +11,15 @@ E2EELibrary/
 │   ├── StandardWebSocketClient.cs
 ├── Core/
 │   ├── Constants.cs
+│   ├── Enums.cs
+│   ├── Helpers.cs
 │   ├── JsonSerialization.cs
 │   ├── SecureMemory.cs
-│   ├── Sodium.cs
-│   └── Utils.cs         						
+│   └── Sodium.cs         						
 ├── Encryption/
 │   ├── AES.cs
 │   ├── DoubleRatchet.cs
-│   ├── GroupMessage.cs
-│   ├── NonceGenerator.cs
-│   └── SenderKeyDistribution.cs
+│   └── NonceGenerator.cs
 ├── GroupMessaging/
 │   ├── GroupChatManager.cs
 │   ├── GroupKeyManager.cs

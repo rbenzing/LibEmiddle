@@ -3,22 +3,6 @@ using System.Runtime.InteropServices;
 
 namespace E2EELibrary.Core
 {
-    static class NativeLibrary
-    {
-        public const string LibraryName =
-#if NET
-            "libsodium";
-#elif WIN32
-        "libsodium.dll";
-#elif LINUX
-        "libsodium.so";
-#elif OSX
-        "libsodium.dylib";
-#else
-        "libsodium";
-#endif
-    }
-
     /// <summary>
     /// Provides a native interface to the libsodium cryptographic library.
     /// This class ensures the library is properly initialized before use.
@@ -31,6 +15,39 @@ namespace E2EELibrary.Core
         private const int SODIUM_LIBRARY_VERSION_MINOR = 3;
 
         private static int s_initialized;
+        private static bool s_loadAttempted;
+        private static string s_libraryPath = string.Empty;
+
+        // Library name based on platform
+        private const string LibraryName =
+#if NET
+            "libsodium";
+#elif WIN32
+            "libsodium.dll";
+#elif LINUX
+            "libsodium.so";
+#elif OSX
+            "libsodium.dylib";
+#else
+            "libsodium";
+#endif
+
+        static Sodium()
+        {
+            try
+            {
+                // Try to load the library from platform-specific locations
+                if (!TryLoadNativeLibrary())
+                {
+                    throw new DllNotFoundException("Could not load libsodium native library");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error loading libsodium: {ex.Message}");
+                throw;
+            }
+        }
 
         /// <summary>
         /// Initializes the libsodium library. This method is thread-safe and ensures
@@ -53,14 +70,20 @@ namespace E2EELibrary.Core
         {
             try
             {
-                if (sodium_library_version_major() != SODIUM_LIBRARY_VERSION_MAJOR ||
-                    sodium_library_version_minor() != SODIUM_LIBRARY_VERSION_MINOR)
+                // Make version check more lenient - allow newer versions
+                int major = sodium_library_version_major();
+                int minor = sodium_library_version_minor();
+
+                if (major < SODIUM_LIBRARY_VERSION_MAJOR ||
+                    (major == SODIUM_LIBRARY_VERSION_MAJOR && minor < SODIUM_LIBRARY_VERSION_MINOR))
                 {
                     string? version = Marshal.PtrToStringAnsi(sodium_version_string());
-                    throw (version != null && version != SODIUM_VERSION_STRING)
-                        ? new InvalidOperationException($"Sodium library version mismatch. Expected: {SODIUM_VERSION_STRING}, Actual: {version}")
-                        : new InvalidOperationException("Failed to initialize Sodium library due to version mismatch.");
+                    throw new InvalidOperationException($"Sodium library version too old. Expected at least: {SODIUM_VERSION_STRING}, Actual: {version}");
                 }
+
+                // Log the actual version for diagnostic purposes
+                string? actualVersion = Marshal.PtrToStringAnsi(sodium_version_string());
+                Console.WriteLine($"Loaded libsodium version: {actualVersion} (major={major}, minor={minor})");
 
                 if (sodium_set_misuse_handler(&InternalError) != 0)
                 {
@@ -77,14 +100,86 @@ namespace E2EELibrary.Core
             }
             catch (DllNotFoundException e)
             {
-                throw new PlatformNotSupportedException("The Sodium library is not available on this platform.", e);
+                throw new PlatformNotSupportedException($"The Sodium library is not available on this platform. Attempted to load from: {s_libraryPath}", e);
             }
             catch (BadImageFormatException e)
             {
-                throw new PlatformNotSupportedException("The Sodium library format is incompatible with this platform.", e);
+                throw new PlatformNotSupportedException($"The Sodium library format is incompatible with this platform. Attempted to load from: {s_libraryPath}", e);
             }
 
             Interlocked.Exchange(ref s_initialized, 1);
+        }
+
+        private static bool TryLoadNativeLibrary()
+        {
+            if (s_loadAttempted)
+                return true;
+
+            s_loadAttempted = true;
+
+            try
+            {
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
+                        return LoadLibraryFromPath("runtimes/win-x64/native/libsodium.dll");
+                    else if (RuntimeInformation.ProcessArchitecture == Architecture.X86)
+                        return LoadLibraryFromPath("runtimes/win-x86/native/libsodium.dll");
+                    else if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+                        return LoadLibraryFromPath("runtimes/win-arm64/native/libsodium.dll");
+                }
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                {
+                    if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
+                        return LoadLibraryFromPath("runtimes/linux-x64/native/libsodium.so");
+                    else if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+                        return LoadLibraryFromPath("runtimes/linux-arm64/native/libsodium.so");
+                }
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                {
+                    if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
+                        return LoadLibraryFromPath("runtimes/osx-x64/native/libsodium.dylib");
+                    else if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+                        return LoadLibraryFromPath("runtimes/osx-arm64/native/libsodium.dylib");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error during explicit library load: {ex.Message}");
+                // Continue to default loading mechanism
+            }
+
+            // Fall back to default loading mechanism - we've marked the load as attempted,
+            // so the DllImport attributes will try to load the library by name
+            return true;
+        }
+
+        private static bool LoadLibraryFromPath(string relativePath)
+        {
+            try
+            {
+                s_libraryPath = Path.Combine(AppContext.BaseDirectory, relativePath);
+
+                if (File.Exists(s_libraryPath))
+                {
+                    // Use .NET Core 3.0+ API
+                    IntPtr handle = System.Runtime.InteropServices.NativeLibrary.Load(s_libraryPath);
+
+                    // If we get here, the library loaded successfully
+                    Console.WriteLine($"Successfully loaded libsodium from: {s_libraryPath}");
+                    return true;
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Library file not found at: {s_libraryPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to load library from {s_libraryPath}: {ex.Message}");
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -98,19 +193,19 @@ namespace E2EELibrary.Core
 
         #region Native library imports
 
-        [DllImport(NativeLibrary.LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern int sodium_init();
 
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern IntPtr sodium_version_string();
 
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern int sodium_library_version_major();
 
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern int sodium_library_version_minor();
 
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern unsafe int sodium_set_misuse_handler(delegate* unmanaged[Cdecl]<void> handler);
 
         #endregion
@@ -122,7 +217,7 @@ namespace E2EELibrary.Core
         /// </summary>
         /// <param name="buffer">The memory region to zero.</param>
         /// <param name="length"></param>
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void sodium_memzero(IntPtr buffer, UIntPtr length);
 
         /// <summary>
@@ -132,7 +227,7 @@ namespace E2EELibrary.Core
         /// <param name="b2">Second memory region.</param>
         /// <param name="length">Length to compare.</param>
         /// <returns>0 if the regions are equal, non-zero otherwise.</returns>
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int sodium_memcmp(IntPtr b1, IntPtr b2, UIntPtr length);
 
         /// <summary>
@@ -140,7 +235,7 @@ namespace E2EELibrary.Core
         /// </summary>
         /// <param name="buffer">The buffer to fill with random bytes.</param>
         /// <param name="size">The number of bytes to fill.</param>
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void randombytes_buf(IntPtr buffer, UIntPtr size);
 
         #endregion
@@ -152,13 +247,13 @@ namespace E2EELibrary.Core
         /// <summary>
         /// Computes a shared secret using X25519 key exchange.
         /// </summary>
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_scalarmult_curve25519(byte[] q, byte[] n, byte[] p);
 
         /// <summary>
         /// Computes the public key from a private key using X25519.
         /// </summary>
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_scalarmult_curve25519_base(byte[] q, byte[] n);
 
         #endregion
@@ -168,7 +263,7 @@ namespace E2EELibrary.Core
         /// <summary>
         /// Signs a message using Ed25519.
         /// </summary>
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_sign_ed25519_detached(
             byte[] signature, out ulong signatureLength,
             byte[] message, ulong messageLength,
@@ -177,7 +272,7 @@ namespace E2EELibrary.Core
         /// <summary>
         /// Verifies a message signature using Ed25519.
         /// </summary>
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_sign_ed25519_verify_detached(
             byte[] signature,
             byte[] message, ulong messageLength,
@@ -186,35 +281,35 @@ namespace E2EELibrary.Core
         /// <summary>
         /// Generates an Ed25519 key pair.
         /// </summary>
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_sign_ed25519_keypair(byte[] publicKey, byte[] secretKey);
 
         /// <summary>
         /// Converts an Ed25519 public key to an X25519 public key.
         /// </summary>
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_sign_ed25519_pk_to_curve25519(byte[] curve25519_pk, byte[] ed25519_pk);
 
         /// <summary>
         /// Converts an Ed25519 secret key to an X25519 secret key.
         /// </summary>
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_sign_ed25519_sk_to_curve25519(byte[] curve25519_sk, byte[] ed25519_sk);
 
         #endregion
 
         #region Public Key Authentication
 
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern int crypto_sign_keypair(byte[] publicKey, byte[] secretKey);
 
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern int crypto_sign_detached(
             byte[] signature, out ulong signatureLength,
             byte[] message, ulong messageLength,
             byte[] secretKey);
 
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern int crypto_sign_verify_detached(
             byte[] signature,
             byte[] message, ulong messageLength,

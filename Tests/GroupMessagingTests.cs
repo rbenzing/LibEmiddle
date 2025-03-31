@@ -1,15 +1,9 @@
 ﻿using System;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Reflection;
 using E2EELibrary;
 using E2EELibrary.Core;
-using E2EELibrary.Encryption;
 using E2EELibrary.GroupMessaging;
-using E2EELibrary.Models;
-using System.Collections.Concurrent;
-using System.IO;
-using System.Text;
-using System.Reflection;
-using SenderKeyDistribution = E2EELibrary.GroupMessaging.SenderKeyDistribution;
 
 namespace E2EELibraryTests
 {
@@ -39,8 +33,8 @@ namespace E2EELibraryTests
             // Assert
             Assert.IsNotNull(newKey);
             Assert.AreEqual(32, newKey.Length);
-            Assert.IsFalse(AreByteArraysEqual(originalKey, newKey));
-            Assert.IsTrue(AreByteArraysEqual(newKey, storedKey));
+            Assert.IsFalse(SecureMemory.SecureCompare(originalKey, newKey));
+            Assert.IsTrue(SecureMemory.SecureCompare(newKey, storedKey));
         }
 
         [TestMethod]
@@ -104,7 +98,7 @@ namespace E2EELibraryTests
             // Assert
             Assert.IsTrue(result);
             Assert.IsFalse(isMember);
-            Assert.IsFalse(AreByteArraysEqual(originalKey, newKey)); // Key should have been rotated
+            Assert.IsFalse(SecureMemory.SecureCompare(originalKey, newKey)); // Key should have been rotated
         }
 
         [TestMethod]
@@ -114,22 +108,43 @@ namespace E2EELibraryTests
             var keyPair = E2EEClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(keyPair);
             string groupId = "test-replay-protection";
-            groupManager.CreateGroup(groupId);
+            byte[] senderKey = groupManager.CreateGroup(groupId);
 
             // Create and encrypt a message
             string originalMessage = "Hello, secure group!";
             var encryptedMessage = groupManager.EncryptGroupMessage(groupId, originalMessage);
 
-            // Decrypt the message once - should succeed
+            // Log details to help diagnose the issue
+            Console.WriteLine($"Group ID: {groupId}");
+            Console.WriteLine($"Message ID: {encryptedMessage.MessageId}");
+            Console.WriteLine($"Sender Identity Key Length: {encryptedMessage.SenderIdentityKey?.Length ?? 0}");
+            Console.WriteLine($"Ciphertext Length: {encryptedMessage.Ciphertext?.Length ?? 0}");
+            Console.WriteLine($"Nonce Length: {encryptedMessage.Nonce?.Length ?? 0}");
+
+            // Act & Assert - First decryption with detailed logging
             string firstDecryption = groupManager.DecryptGroupMessage(encryptedMessage);
 
-            // Act - attempt to decrypt the same message again (simulating replay)
-            string secondDecryption = groupManager.DecryptGroupMessage(encryptedMessage);
+            // If firstDecryption is null, log additional details to help diagnose
+            if (firstDecryption == null)
+            {
+                Console.WriteLine("First decryption FAILED - returned null");
 
-            // Assert
-            Assert.IsNotNull(firstDecryption);
+                // Try direct decryption via the underlying components to isolate the issue
+                var messageCrypto = new GroupMessageCrypto();
+                var directDecrypt = messageCrypto.DecryptMessage(encryptedMessage, senderKey);
+                Console.WriteLine($"Direct decryption via GroupMessageCrypto: {(directDecrypt != null ? "SUCCESS" : "FAILED")}");
+            }
+            else
+            {
+                Console.WriteLine("First decryption SUCCESS");
+            }
+
+            Assert.IsNotNull(firstDecryption, "First decryption should succeed");
             Assert.AreEqual(originalMessage, firstDecryption);
-            Assert.IsNull(secondDecryption); // Should be null on replay attempt
+
+            // Act & Assert - Second decryption (simulating replay)
+            string secondDecryption = groupManager.DecryptGroupMessage(encryptedMessage);
+            Assert.IsNull(secondDecryption, "Replay attack should be detected and result in null return value");
         }
 
         [TestMethod]
@@ -237,11 +252,18 @@ namespace E2EELibraryTests
         {
             // Arrange
             string message = "This is a group message";
+            string groupId = "test-group-123";
             byte[] senderKey = E2EEClient.GenerateSenderKey();
 
+            // Create identity key pair for signing
+            var identityKeyPair = E2EEClient.GenerateSignatureKeyPair();
+
+            // Create an instance of GroupMessageCrypto
+            var messageCrypto = new GroupMessageCrypto();
+
             // Act
-            var encryptedMessage = GroupMessage.EncryptGroupMessage(message, senderKey);
-            string decryptedMessage = GroupMessage.DecryptGroupMessage(encryptedMessage, senderKey);
+            var encryptedMessage = messageCrypto.EncryptMessage(groupId, message, senderKey, identityKeyPair);
+            var decryptedMessage = messageCrypto.DecryptMessage(encryptedMessage, senderKey);
 
             // Assert
             Assert.AreEqual(message, decryptedMessage);
@@ -275,8 +297,8 @@ namespace E2EELibraryTests
             var session = sessionPersistence.GetGroupSession(groupId);
             byte[] storedKey = session.SenderKey;
 
-            Assert.IsTrue(AreByteArraysEqual(storedKey, distributionMessage.SenderKey));
-            Assert.IsTrue(AreByteArraysEqual(senderKeyPair.publicKey, distributionMessage.SenderIdentityKey));
+            Assert.IsTrue(SecureMemory.SecureCompare(storedKey, distributionMessage.SenderKey));
+            Assert.IsTrue(SecureMemory.SecureCompare(senderKeyPair.publicKey, distributionMessage.SenderIdentityKey));
 
             // Get the distribution manager via reflection to verify signature
             var distributionManagerField = typeof(GroupChatManager).GetField("_distributionManager",
@@ -305,16 +327,16 @@ namespace E2EELibraryTests
             var distributionMessage = groupChatManager.CreateDistributionMessage(groupId);
 
             // Act
-            var encryptedDistribution = E2EELibrary.Encryption.SenderKeyDistribution.EncryptSenderKeyDistribution(
+            var encryptedDistribution = SenderKeyDistribution.EncryptSenderKeyDistribution(
                 distributionMessage, recipientKeyPair.publicKey, senderKeyPair.privateKey);
-            var decryptedDistribution = E2EELibrary.Encryption.SenderKeyDistribution.DecryptSenderKeyDistribution(
+            var decryptedDistribution = SenderKeyDistribution.DecryptSenderKeyDistribution(
                 encryptedDistribution, recipientKeyPair.privateKey);
 
             // Assert
             Assert.AreEqual(distributionMessage.GroupId, decryptedDistribution.GroupId);
-            Assert.IsTrue(AreByteArraysEqual(distributionMessage.SenderKey, decryptedDistribution.SenderKey));
-            Assert.IsTrue(AreByteArraysEqual(distributionMessage.SenderIdentityKey, decryptedDistribution.SenderIdentityKey));
-            Assert.IsTrue(AreByteArraysEqual(distributionMessage.Signature, decryptedDistribution.Signature));
+            Assert.IsTrue(SecureMemory.SecureCompare(distributionMessage.SenderKey, decryptedDistribution.SenderKey));
+            Assert.IsTrue(SecureMemory.SecureCompare(distributionMessage.SenderIdentityKey, decryptedDistribution.SenderIdentityKey));
+            Assert.IsTrue(SecureMemory.SecureCompare(distributionMessage.Signature, decryptedDistribution.Signature));
         }
 
         [TestMethod]
@@ -643,12 +665,6 @@ namespace E2EELibraryTests
             // Assert
             Assert.IsTrue(result);
             Assert.IsFalse(groupManager.GroupExists(groupId));
-        }
-
-        // Helper method for byte array comparison
-        private bool AreByteArraysEqual(byte[] a, byte[] b)
-        {
-            return SecureMemory.SecureCompare(a, b);
         }
     }
 }

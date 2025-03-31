@@ -316,43 +316,44 @@ namespace E2EELibraryTests
             // Arrange
             var aliceKeyPair = E2EEClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(aliceKeyPair);
-            string nonExistentGroupId = "non-existent-group-id";
+            string nonExistentGroupId = "test-group-123"; // Using a valid format for group ID based on validation
 
-            // Act
-
-            // Attempt to create a distribution message for a non-existent group
+            // Act & Assert
+            // 1. Attempt to create a distribution message for a non-existent group
             try
             {
                 groupManager.CreateDistributionMessage(nonExistentGroupId);
-                Assert.Fail("Should throw an exception for non-existent group");
-            }
-            catch (ArgumentException ex)
-            {
-                // Expected exception
-                StringAssert.Contains(ex.Message, "not created yet",
-                    "Exception should indicate group doesn't exist");
-            }
-
-            // Attempt to encrypt for non-existent group
-            try
-            {
-                groupManager.EncryptGroupMessage(nonExistentGroupId, "Test message");
-                Assert.Fail("Should throw an exception for non-existent group");
+                Assert.Fail("Should throw an InvalidOperationException for non-existent group");
             }
             catch (InvalidOperationException ex)
             {
                 // Expected exception
-                StringAssert.Contains(ex.Message, "not created yet",
+                StringAssert.Contains(ex.Message, "does not exist",
                     "Exception should indicate group doesn't exist");
             }
 
-            // Attempt to decrypt a message for a non-existent group
+            // 2. Attempt to encrypt for non-existent group
+            try
+            {
+                groupManager.EncryptGroupMessage(nonExistentGroupId, "Test message");
+                Assert.Fail("Should throw an InvalidOperationException for non-existent group");
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Expected exception
+                StringAssert.Contains(ex.Message, "does not exist",
+                    "Exception should indicate group doesn't exist");
+            }
+
+            // 3. Attempt to decrypt a message for a non-existent group
             var encryptedMessage = new EncryptedGroupMessage
             {
                 GroupId = nonExistentGroupId,
                 SenderIdentityKey = aliceKeyPair.publicKey,
                 Ciphertext = new byte[64],
-                Nonce = new byte[12]
+                Nonce = new byte[12],
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), // Adding timestamp required by validation
+                MessageId = Guid.NewGuid().ToString() // Adding message ID required by validation
             };
 
             string decryptedMessage = groupManager.DecryptGroupMessage(encryptedMessage);

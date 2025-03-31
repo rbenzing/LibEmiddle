@@ -29,5 +29,12 @@
         /// Message identifier
         /// </summary>
         public string? MessageId { get; set; }
+
+        /// <summary>
+        /// Timestamp for this distribution (milliseconds since Unix epoch)
+        /// Used to implement backward secrecy - new members can only decrypt
+        /// messages sent after they received the key
+        /// </summary>
+        public long Timestamp { get; set; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     }
 }

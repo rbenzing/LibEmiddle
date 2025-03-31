@@ -3,6 +3,7 @@ using E2EELibrary.Core;
 using E2EELibrary.Encryption;
 using E2EELibrary.Models;
 using E2EELibrary.Communication;
+using System.Collections.Concurrent;
 
 namespace E2EELibrary.GroupMessaging
 {
@@ -13,6 +14,16 @@ namespace E2EELibrary.GroupMessaging
     {
         // Track counters for each group to prevent replay attacks
         private readonly Dictionary<string, long> _messageCounters = new Dictionary<string, long>();
+
+        private readonly ConcurrentDictionary<string, HashSet<string>> _processedMessageIds =
+            new ConcurrentDictionary<string, HashSet<string>>();
+
+        // Track when we joined groups to enforce backward secrecy
+        private readonly ConcurrentDictionary<string, long> _groupJoinTimestamps =
+            new ConcurrentDictionary<string, long>();
+
+        private readonly ConcurrentDictionary<string, object> _groupLocks =
+            new ConcurrentDictionary<string, object>();
 
         /// <summary>
         /// Encrypts a message for a group using the provided sender key
@@ -63,6 +74,15 @@ namespace E2EELibrary.GroupMessaging
         }
 
         /// <summary>
+        /// Records that we've joined a group at the current time 
+        /// </summary>
+        /// <param name="groupId">The group ID</param>
+        public void RecordGroupJoin(string groupId)
+        {
+            _groupJoinTimestamps[groupId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        }
+
+        /// <summary>
         /// Decrypts a group message using the provided sender key
         /// </summary>
         /// <param name="encryptedMessage">Message to decrypt</param>
@@ -74,20 +94,30 @@ namespace E2EELibrary.GroupMessaging
             ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, nameof(encryptedMessage.Ciphertext));
             ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce, nameof(encryptedMessage.Nonce));
             ArgumentNullException.ThrowIfNull(senderKey, nameof(senderKey));
+            ArgumentNullException.ThrowIfNull(encryptedMessage.GroupId, nameof(encryptedMessage.GroupId));
 
             try
             {
-                // Check for message replay
-                if (IsReplayedMessage(encryptedMessage))
+                // Get the lock for this specific group
+                object groupLock = GetGroupLock(encryptedMessage.GroupId);
+
+                // Use the lock to ensure thread-safety when checking for replays
+                // and processing messages for a specific group
+                lock (groupLock)
                 {
-                    return null;
+                    // Check for message replay
+                    if (IsReplayedMessage(encryptedMessage))
+                    {
+                        return null;
+                    }
+
+                    // Decrypt the message - this operation itself is thread-safe
+                    // as it doesn't modify shared state
+                    byte[] plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, senderKey, encryptedMessage.Nonce);
+
+                    // Convert to string
+                    return System.Text.Encoding.UTF8.GetString(plaintext);
                 }
-
-                // Decrypt the message
-                byte[] plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, senderKey, encryptedMessage.Nonce);
-
-                // Convert to string
-                return System.Text.Encoding.UTF8.GetString(plaintext);
             }
             catch (CryptographicException)
             {
@@ -103,103 +133,47 @@ namespace E2EELibrary.GroupMessaging
         /// <returns>True if the message appears to be a replay</returns>
         private bool IsReplayedMessage(EncryptedGroupMessage message)
         {
-            // For simplicity, we just check the timestamp
-            // In a production system, you would maintain a set of recently received message IDs
+            ArgumentNullException.ThrowIfNull(message.MessageId, nameof(message.MessageId));
+            ArgumentNullException.ThrowIfNull(message.GroupId, nameof(message.GroupId));
 
-            // Reject messages older than 5 minutes
-            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            long fiveMinutesAgo = currentTime - (5 * 60 * 1000);
+            // Get or create a set of processed IDs for this group
+            var processedIds = _processedMessageIds.GetOrAdd(message.GroupId, _ => new HashSet<string>());
 
-            return message.Timestamp < fiveMinutesAgo;
-        }
-
-        /// <summary>
-        /// Encrypts a file for a group
-        /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="fileData">File data to encrypt</param>
-        /// <param name="senderKey">Sender key for this group</param>
-        /// <param name="identityKeyPair">Sender's identity key pair for signing</param>
-        /// <returns>Encrypted file message</returns>
-        public EncryptedGroupMessage EncryptFile(string groupId, byte[] fileData, byte[] senderKey,
-            (byte[] publicKey, byte[] privateKey) identityKeyPair)
-        {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(fileData, nameof(fileData));
-            ArgumentNullException.ThrowIfNull(senderKey, nameof(senderKey));
-
-            // Generate a random nonce
-            byte[] nonce = NonceGenerator.GenerateNonce();
-
-            // Encrypt the file data
-            byte[] ciphertext = AES.AESEncrypt(fileData, senderKey, nonce);
-
-            // Create the encrypted message
-            var encryptedMessage = new EncryptedGroupMessage
+            // Thread-safe check for replay
+            lock (processedIds)
             {
-                GroupId = groupId,
-                SenderIdentityKey = identityKeyPair.publicKey,
-                Ciphertext = ciphertext,
-                Nonce = nonce,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                MessageId = Guid.NewGuid().ToString()
-            };
-
-            return encryptedMessage;
-        }
-
-        /// <summary>
-        /// Decrypts a file from an encrypted group message
-        /// </summary>
-        /// <param name="encryptedMessage">Encrypted file message</param>
-        /// <param name="senderKey">Sender key for the group</param>
-        /// <returns>Decrypted file data, or null if decryption fails</returns>
-        public byte[]? DecryptFile(EncryptedGroupMessage encryptedMessage, byte[] senderKey)
-        {
-            ArgumentNullException.ThrowIfNull(encryptedMessage, nameof(encryptedMessage));
-            ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, nameof(encryptedMessage.Ciphertext));
-            ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce, nameof(encryptedMessage.Nonce));
-            ArgumentNullException.ThrowIfNull(senderKey, nameof(senderKey));
-
-            try
-            {
-                // Check for message replay
-                if (IsReplayedMessage(encryptedMessage))
+                // If we've seen this message ID before, it's a replay
+                if (processedIds.Contains(message.MessageId))
                 {
-                    return null;
+                    return true;
                 }
 
-                // Decrypt the file data
-                return AES.AESDecrypt(encryptedMessage.Ciphertext, senderKey, encryptedMessage.Nonce);
-            }
-            catch (CryptographicException)
-            {
-                // Decryption failed
-                return null;
+                // Otherwise, add it to our tracking and continue
+                processedIds.Add(message.MessageId);
+
+                // Limit the size of the set to prevent memory growth
+                if (processedIds.Count > Constants.MAX_TRACKED_MESSAGE_IDS)
+                {
+                    // Remove oldest IDs (this is simplistic - a more sophisticated
+                    // approach would use timestamps or a queue)
+                    while (processedIds.Count > Constants.MAX_TRACKED_MESSAGE_IDS / 2)
+                    {
+                        processedIds.Remove(processedIds.First());
+                    }
+                }
+
+                return false;
             }
         }
 
         /// <summary>
-        /// Signs a message for authenticity verification
+        /// Gets the group lock
         /// </summary>
-        /// <param name="message">Message to sign</param>
-        /// <param name="privateKey">Private key for signing</param>
-        /// <returns>Signature bytes</returns>
-        public byte[] SignMessage(byte[] message, byte[] privateKey)
+        /// <param name="groupId"></param>
+        /// <returns></returns>
+        private object GetGroupLock(string groupId)
         {
-            return MessageSigning.SignMessage(message, privateKey);
-        }
-
-        /// <summary>
-        /// Verifies the signature of a message
-        /// </summary>
-        /// <param name="message">Original message</param>
-        /// <param name="signature">Signature to verify</param>
-        /// <param name="publicKey">Public key of the signer</param>
-        /// <returns>True if signature is valid</returns>
-        public bool VerifySignature(byte[] message, byte[] signature, byte[] publicKey)
-        {
-            return MessageSigning.VerifySignature(message, signature, publicKey);
+            return _groupLocks.GetOrAdd(groupId, _ => new object());
         }
     }
 }

@@ -1,5 +1,4 @@
-﻿
-namespace E2EELibrary.Models
+﻿namespace E2EELibrary.Models
 {
     /// <summary>
     /// Encrypted group message
@@ -27,12 +26,13 @@ namespace E2EELibrary.Models
         public byte[]? Nonce { get; set; }
 
         /// <summary>
-        /// Timestamp to prevent replay attacks (milliseconds since Unix epoch)
+        /// Timestamp to prevent replay attacks and ensure backward secrecy
+        /// (milliseconds since Unix epoch)
         /// </summary>
         public long Timestamp { get; set; }
 
         /// <summary>
-        /// Message identifier for access control
+        /// Message identifier for access control and replay protection
         /// </summary>
         public string? MessageId { get; set; }
     }
