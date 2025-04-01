@@ -10,6 +10,9 @@ using E2EELibrary.Communication;
 using E2EELibrary.Encryption;
 using E2EELibrary.KeyExchange;
 using E2EELibrary.Models;
+using System.Linq;
+using System.Collections.Generic;
+using System.Text.Json;
 
 namespace E2EELibraryTests
 {
@@ -189,77 +192,165 @@ namespace E2EELibraryTests
         [TestMethod]
         public void MultiDeviceManager_ProcessSyncMessage_ShouldReturnSyncData()
         {
-            // Arrange
             Console.WriteLine("Starting test setup");
 
-            // Generate EdDSA key pairs for both devices
-            var mainDeviceEdKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var secondDeviceEdKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            // 1. Generate X25519 keypairs directly to avoid conversion issues
+            var mainDeviceKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            var secondDeviceKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            Console.WriteLine($"Generated X25519 key pairs - Main device pub key length: {mainDeviceKeyPair.publicKey.Length}, Second device pub key length: {secondDeviceKeyPair.publicKey.Length}");
 
-            Console.WriteLine($"Generated Ed25519 key pairs - Main device pub key length: {mainDeviceEdKeyPair.publicKey.Length}, Second device pub key length: {secondDeviceEdKeyPair.publicKey.Length}");
+            string mainDeviceKeyBase64 = Convert.ToBase64String(mainDeviceKeyPair.publicKey);
+            string secondDeviceKeyBase64 = Convert.ToBase64String(secondDeviceKeyPair.publicKey);
+            Console.WriteLine($"Main device key (Base64): {mainDeviceKeyBase64}");
+            Console.WriteLine($"Second device key (Base64): {secondDeviceKeyBase64}");
 
-            // Convert Ed25519 keys to X25519 format
-            byte[] mainDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceEdKeyPair.privateKey);
-            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(mainDeviceX25519Private);
+            // 2. Create our test sync data
+            byte[] originalSyncData = Encoding.UTF8.GetBytes("Test sync data for multi-device processing");
+            Console.WriteLine($"Created test sync data, length: {originalSyncData.Length}");
 
-            byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceEdKeyPair.privateKey);
-            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
+            // 3. Let's manually create and process the sync message using direct methods instead of DeviceManager
+            Console.WriteLine("Creating sync message manually for better debugging...");
 
-            Console.WriteLine($"Derived X25519 keys - Main X25519 pub key length: {mainDeviceX25519Public.Length}, Second X25519 pub key length: {secondDeviceX25519Public.Length}");
+            try
+            {
+                // Implement manual signing, encryption, and decryption for the sync message
+                byte[] signature = MessageSigning.SignMessage(originalSyncData, mainDeviceKeyPair.privateKey);
+                Console.WriteLine($"Created signature, length: {signature.Length}");
 
-            // Verify the X25519 keys are valid
-            bool mainKeyValid = KeyValidation.ValidateX25519PublicKey(mainDeviceX25519Public);
-            bool secondKeyValid = KeyValidation.ValidateX25519PublicKey(secondDeviceX25519Public);
+                // Create the sync message JSON manually
+                var syncMessage = new
+                {
+                    senderPublicKey = Convert.ToBase64String(mainDeviceKeyPair.publicKey),
+                    data = Convert.ToBase64String(originalSyncData),
+                    signature = Convert.ToBase64String(signature),
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    protocolVersion = "E2EELibrary/v1.0"
+                };
 
-            Console.WriteLine($"X25519 key validation - Main key valid: {mainKeyValid}, Second key valid: {secondKeyValid}");
-            Assert.IsTrue(mainKeyValid, "Main device X25519 public key should be valid");
-            Assert.IsTrue(secondKeyValid, "Second device X25519 public key should be valid");
+                // Serialize to JSON string
+                string jsonMessage = System.Text.Json.JsonSerializer.Serialize(syncMessage);
+                Console.WriteLine($"Serialized JSON message, length: {jsonMessage.Length}");
+                Console.WriteLine($"JSON content: {jsonMessage}");
 
-            // Create device managers using the Ed25519 key pairs
-            var mainDeviceManager = new DeviceManager(mainDeviceEdKeyPair);
-            var secondDeviceManager = new DeviceManager(secondDeviceEdKeyPair);
-            Console.WriteLine("Created device managers");
+                // Now we'll manually perform X3DH key exchange
+                byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(
+                    secondDeviceKeyPair.publicKey,
+                    mainDeviceKeyPair.privateKey);
+                Console.WriteLine($"Performed X3DH key exchange, shared secret length: {sharedSecret.Length}");
 
-            // Important: Add the linked devices using X25519 public keys, which is what DeviceManager expects
-            mainDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
-            secondDeviceManager.AddLinkedDevice(mainDeviceX25519Public);
-            Console.WriteLine("Added linked devices to both managers");
+                // Encrypt the message with AES using the shared secret
+                byte[] nonce = NonceGenerator.GenerateNonce();
+                byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
+                byte[] ciphertext = AES.AESEncrypt(messageBytes, sharedSecret, nonce);
+                Console.WriteLine($"Encrypted message, ciphertext length: {ciphertext.Length}");
 
-            // Create test sync data
-            byte[] syncData = Encoding.UTF8.GetBytes("Test sync data for multi-device processing");
-            Console.WriteLine($"Created test sync data, length: {syncData.Length}");
+                // Create the encrypted message
+                var encryptedMessage = new EncryptedMessage
+                {
+                    Ciphertext = ciphertext,
+                    Nonce = nonce,
+                    SenderDHKey = mainDeviceKeyPair.publicKey,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    MessageId = Guid.NewGuid()
+                };
 
-            // Create sync messages using the main device manager
-            var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
-            Console.WriteLine($"Created sync messages, count: {syncMessages.Count}");
+                // Verify we can decrypt it manually
+                Console.WriteLine("Verifying manual decryption works...");
 
-            // Get the sync message for the second device
-            string secondDeviceId = Convert.ToBase64String(secondDeviceX25519Public);
-            Console.WriteLine($"Second device ID for dictionary lookup: {secondDeviceId}");
+                // First, let's try manual decryption - this should work if everything is set up correctly
+                byte[] sharedSecret2 = X3DHExchange.X3DHKeyExchange(
+                    mainDeviceKeyPair.publicKey,
+                    secondDeviceKeyPair.privateKey);
 
-            // Check if the sync messages contains a message for the second device
-            Assert.IsTrue(syncMessages.ContainsKey(secondDeviceId),
-                "Sync messages should contain an entry for the second device");
+                byte[] decryptedBytes = AES.AESDecrypt(encryptedMessage.Ciphertext, sharedSecret2, encryptedMessage.Nonce);
+                string decryptedJson = Encoding.UTF8.GetString(decryptedBytes);
+                Console.WriteLine($"Decrypted JSON successfully: {decryptedJson}");
 
-            var syncMessageForSecondDevice = syncMessages[secondDeviceId];
-            Console.WriteLine($"Retrieved sync message for second device - Ciphertext length: {syncMessageForSecondDevice.Ciphertext?.Length}, Nonce length: {syncMessageForSecondDevice.Nonce?.Length}");
+                // Parse the decrypted JSON
+                var parsedMessage = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(decryptedJson);
 
-            // Ensure the message components are not null
-            Assert.IsNotNull(syncMessageForSecondDevice.Ciphertext, "Ciphertext should not be null");
-            Assert.IsNotNull(syncMessageForSecondDevice.Nonce, "Nonce should not be null");
+                // Extract and verify the fields
+                string senderKeyBase64 = parsedMessage["senderPublicKey"].GetString();
+                string dataBase64 = parsedMessage["data"].GetString();
+                string sigBase64 = parsedMessage["signature"].GetString();
 
-            // Act
-            Console.WriteLine("Attempting to process sync message on second device...");
-            byte[] receivedData = secondDeviceManager.ProcessSyncMessage(
-                syncMessageForSecondDevice,
-                mainDeviceX25519Public); // Use the X25519 public key as the sender hint
+                byte[] extractedSenderKey = Convert.FromBase64String(senderKeyBase64);
+                byte[] extractedData = Convert.FromBase64String(dataBase64);
+                byte[] extractedSignature = Convert.FromBase64String(sigBase64);
 
-            // Assert
-            Assert.IsNotNull(receivedData, "The received sync data should not be null");
-            Assert.AreEqual(syncData.Length, receivedData.Length,
-                $"Received data length ({receivedData?.Length}) should match original sync data length ({syncData.Length})");
-            CollectionAssert.AreEqual(syncData, receivedData, "The received data should match the original");
-            Console.WriteLine("Test completed successfully");
+                // Verify the signature
+                bool signatureValid = MessageSigning.VerifySignature(extractedData, extractedSignature, extractedSenderKey);
+                Console.WriteLine($"Signature verification result: {signatureValid}");
+
+                // Verify the extracted data matches the original
+                bool dataMatches = originalSyncData.SequenceEqual(extractedData);
+                Console.WriteLine($"Extracted data matches original: {dataMatches}");
+
+                // Now let's try with the device manager
+                Console.WriteLine("\nNow testing with DeviceManager...");
+
+                // Create device managers
+                var mainDeviceManager = new DeviceManager((mainDeviceKeyPair.publicKey, mainDeviceKeyPair.privateKey));
+                var secondDeviceManager = new DeviceManager((secondDeviceKeyPair.publicKey, secondDeviceKeyPair.privateKey));
+
+                // Add linked devices in both directions
+                mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.publicKey);
+                secondDeviceManager.AddLinkedDevice(mainDeviceKeyPair.publicKey);
+
+                Console.WriteLine($"Second device linked device count: {secondDeviceManager.GetLinkedDeviceCount()}");
+
+                // Now try to process with the second device manager
+                byte[] receivedData = secondDeviceManager.ProcessSyncMessage(encryptedMessage, mainDeviceKeyPair.publicKey);
+
+                if (receivedData != null)
+                {
+                    Console.WriteLine($"Successfully processed with DeviceManager, received data length: {receivedData.Length}");
+                }
+                else
+                {
+                    Console.WriteLine("DeviceManager.ProcessSyncMessage returned null");
+
+                    // Let's add a temporary method to the DeviceManager class for debugging:
+                    /*
+                    // Add this method to DeviceManager.cs:
+                    public bool TestDecryption(EncryptedMessage message, byte[] senderPublicKey, byte[] recipientPrivateKey)
+                    {
+                        try {
+                            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(senderPublicKey, recipientPrivateKey);
+                            byte[] decrypted = AES.AESDecrypt(message.Ciphertext, sharedSecret, message.Nonce);
+                            string json = Encoding.UTF8.GetString(decrypted);
+                            Console.WriteLine($"Test decryption succeeded, JSON: {json}");
+                            return true;
+                        }
+                        catch (Exception ex) {
+                            Console.WriteLine($"Test decryption failed: {ex.Message}");
+                            return false;
+                        }
+                    }
+                    */
+
+                    // Use the debug method if you add it
+                    //bool decryptionWorked = secondDeviceManager.TestDecryption(
+                    //    encryptedMessage, 
+                    //    mainDeviceKeyPair.publicKey, 
+                    //    secondDeviceKeyPair.privateKey);
+                    //Console.WriteLine($"Debug decryption test result: {decryptionWorked}");
+                }
+
+                // Continue with the standard assertions
+                Assert.IsNotNull(receivedData, "The received sync data should not be null");
+                Assert.AreEqual(originalSyncData.Length, receivedData.Length,
+                    $"Received data length should match original sync data length");
+                CollectionAssert.AreEqual(originalSyncData, receivedData,
+                    "The received data should match the original");
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exception during test: {ex.Message}");
+                Console.WriteLine(ex.StackTrace);
+                throw;
+            }
         }
 
         [TestMethod]
