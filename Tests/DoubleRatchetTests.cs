@@ -22,8 +22,8 @@ namespace E2EELibraryTests
         /// </summary>
         private (DoubleRatchetSession aliceSession, DoubleRatchetSession bobSession, string sessionId) CreateTestSessions()
         {
-            var aliceKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);

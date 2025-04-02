@@ -14,11 +14,11 @@ namespace E2EELibraryTests
         {
             // Arrange
             byte[] message = Encoding.UTF8.GetBytes("This is a message to be signed");
-            var (publicKey, privateKey) = E2EEClient.GenerateSignatureKeyPair();
+            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Act
-            byte[] signature = E2EEClient.SignMessage(message, privateKey);
-            bool isValid = E2EEClient.VerifySignature(message, signature, publicKey);
+            byte[] signature = LibEmiddleClient.SignMessage(message, privateKey);
+            bool isValid = LibEmiddleClient.VerifySignature(message, signature, publicKey);
 
             // Assert
             Assert.IsTrue(isValid);
@@ -30,11 +30,11 @@ namespace E2EELibraryTests
             // Arrange
             byte[] originalMessage = Encoding.UTF8.GetBytes("This is a message to be signed");
             byte[] tamperedMessage = Encoding.UTF8.GetBytes("This is a tampered message");
-            var (publicKey, privateKey) = E2EEClient.GenerateSignatureKeyPair();
+            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Act
-            byte[] signature = E2EEClient.SignMessage(originalMessage, privateKey);
-            bool isValid = E2EEClient.VerifySignature(tamperedMessage, signature, publicKey);
+            byte[] signature = LibEmiddleClient.SignMessage(originalMessage, privateKey);
+            bool isValid = LibEmiddleClient.VerifySignature(tamperedMessage, signature, publicKey);
 
             // Assert
             Assert.IsFalse(isValid);
@@ -45,11 +45,11 @@ namespace E2EELibraryTests
         {
             // Arrange
             string message = "This is a text message to be signed";
-            var (publicKey, privateKey) = E2EEClient.GenerateSignatureKeyPair();
+            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Act
-            string signatureBase64 = E2EEClient.SignTextMessage(message, privateKey);
-            bool isValid = E2EEClient.VerifyTextMessage(message, signatureBase64, publicKey);
+            string signatureBase64 = LibEmiddleClient.SignTextMessage(message, privateKey);
+            bool isValid = LibEmiddleClient.VerifyTextMessage(message, signatureBase64, publicKey);
 
             // Assert
             Assert.IsTrue(isValid);
@@ -63,7 +63,7 @@ namespace E2EELibraryTests
             byte[] message = Encoding.UTF8.GetBytes("Test message");
 
             // Act & Assert - Should throw ArgumentNullException
-            E2EEClient.SignMessage(message, null);
+            LibEmiddleClient.SignMessage(message, null);
         }
 
         [TestMethod]
@@ -71,11 +71,11 @@ namespace E2EELibraryTests
         {
             // Arrange
             string message = "Test message";
-            var (publicKey, _) = E2EEClient.GenerateSignatureKeyPair();
+            var (publicKey, _) = LibEmiddleClient.GenerateSignatureKeyPair();
             string invalidBase64 = "not valid base64!@#$";
 
             // Act
-            bool result = E2EEClient.VerifyTextMessage(message, invalidBase64, publicKey);
+            bool result = LibEmiddleClient.VerifyTextMessage(message, invalidBase64, publicKey);
 
             // Assert
             Assert.IsFalse(result);
@@ -86,7 +86,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             byte[] message = Encoding.UTF8.GetBytes("Message to sign with X25519 key");
-            var (publicKey, privateKey) = E2EEClient.GenerateKeyExchangeKeyPair(); // X25519 key pair
+            var (publicKey, privateKey) = LibEmiddleClient.GenerateKeyExchangeKeyPair(); // X25519 key pair
 
             // Act
             byte[] signature = MessageSigning.SignMessage(message, privateKey);
@@ -111,33 +111,33 @@ namespace E2EELibraryTests
             random.NextBytes(mediumMessage);
             random.NextBytes(largeMessage);
 
-            var (publicKey, privateKey) = E2EEClient.GenerateSignatureKeyPair();
+            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Act - Measure signing time
             System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
 
             // Small message
             stopwatch.Start();
-            byte[] smallSignature = E2EEClient.SignMessage(smallMessage, privateKey);
+            byte[] smallSignature = LibEmiddleClient.SignMessage(smallMessage, privateKey);
             stopwatch.Stop();
             long smallSignTime = stopwatch.ElapsedMilliseconds;
 
             // Medium message
             stopwatch.Restart();
-            byte[] mediumSignature = E2EEClient.SignMessage(mediumMessage, privateKey);
+            byte[] mediumSignature = LibEmiddleClient.SignMessage(mediumMessage, privateKey);
             stopwatch.Stop();
             long mediumSignTime = stopwatch.ElapsedMilliseconds;
 
             // Large message
             stopwatch.Restart();
-            byte[] largeSignature = E2EEClient.SignMessage(largeMessage, privateKey);
+            byte[] largeSignature = LibEmiddleClient.SignMessage(largeMessage, privateKey);
             stopwatch.Stop();
             long largeSignTime = stopwatch.ElapsedMilliseconds;
 
             // Assert - Verify signatures and check performance is reasonable
-            Assert.IsTrue(E2EEClient.VerifySignature(smallMessage, smallSignature, publicKey));
-            Assert.IsTrue(E2EEClient.VerifySignature(mediumMessage, mediumSignature, publicKey));
-            Assert.IsTrue(E2EEClient.VerifySignature(largeMessage, largeSignature, publicKey));
+            Assert.IsTrue(LibEmiddleClient.VerifySignature(smallMessage, smallSignature, publicKey));
+            Assert.IsTrue(LibEmiddleClient.VerifySignature(mediumMessage, mediumSignature, publicKey));
+            Assert.IsTrue(LibEmiddleClient.VerifySignature(largeMessage, largeSignature, publicKey));
 
             // Small message should be fast (we're using a loose constraint to allow for slow CI environments)
             Assert.IsTrue(smallSignTime < 500, $"Small message signing took {smallSignTime}ms");
@@ -156,9 +156,9 @@ namespace E2EELibraryTests
         public void LongTermCryptographicIdentity_ShouldBeSecure()
         {
             // Generate multiple key pairs
-            var keyPair1 = E2EEClient.GenerateSignatureKeyPair();
-            var keyPair2 = E2EEClient.GenerateSignatureKeyPair();
-            var keyPair3 = E2EEClient.GenerateSignatureKeyPair();
+            var keyPair1 = LibEmiddleClient.GenerateSignatureKeyPair();
+            var keyPair2 = LibEmiddleClient.GenerateSignatureKeyPair();
+            var keyPair3 = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Ensure keys meet minimum security requirements
             Assert.AreEqual(32, keyPair1.publicKey.Length, "Ed25519 public key should be 32 bytes");
@@ -177,9 +177,9 @@ namespace E2EELibraryTests
             string message = "Cryptographic identity test message";
             byte[] messageBytes = Encoding.UTF8.GetBytes(message);
 
-            byte[] signature1 = E2EEClient.SignMessage(messageBytes, keyPair1.privateKey);
-            byte[] signature2 = E2EEClient.SignMessage(messageBytes, keyPair2.privateKey);
-            byte[] signature3 = E2EEClient.SignMessage(messageBytes, keyPair3.privateKey);
+            byte[] signature1 = LibEmiddleClient.SignMessage(messageBytes, keyPair1.privateKey);
+            byte[] signature2 = LibEmiddleClient.SignMessage(messageBytes, keyPair2.privateKey);
+            byte[] signature3 = LibEmiddleClient.SignMessage(messageBytes, keyPair3.privateKey);
 
             // Ensure signatures are different for different keys
             CollectionAssert.AreNotEqual(signature1, signature2);
@@ -187,14 +187,14 @@ namespace E2EELibraryTests
             CollectionAssert.AreNotEqual(signature2, signature3);
 
             // Ensure signatures verify correctly
-            Assert.IsTrue(E2EEClient.VerifySignature(messageBytes, signature1, keyPair1.publicKey));
-            Assert.IsTrue(E2EEClient.VerifySignature(messageBytes, signature2, keyPair2.publicKey));
-            Assert.IsTrue(E2EEClient.VerifySignature(messageBytes, signature3, keyPair3.publicKey));
+            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature1, keyPair1.publicKey));
+            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature2, keyPair2.publicKey));
+            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature3, keyPair3.publicKey));
 
             // Ensure signatures don't verify with the wrong key
-            Assert.IsFalse(E2EEClient.VerifySignature(messageBytes, signature1, keyPair2.publicKey));
-            Assert.IsFalse(E2EEClient.VerifySignature(messageBytes, signature2, keyPair3.publicKey));
-            Assert.IsFalse(E2EEClient.VerifySignature(messageBytes, signature3, keyPair1.publicKey));
+            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature1, keyPair2.publicKey));
+            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature2, keyPair3.publicKey));
+            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature3, keyPair1.publicKey));
         }
     }
 }

@@ -1,6 +1,6 @@
-E2EELibrary/
+LibEmiddle/
 ├── src/
-│   ├── E2EELibrary/
+│   ├── LibEmiddle/
 │   │   ├── Communication/
 │   │   │   ├── Abstract/
 │   │   │   │   ├── IMailboxTransport.cs
@@ -60,9 +60,9 @@ E2EELibrary/
 │   │   ├── MultiDevice/
 │   │   │   ├── DeviceLinking.cs
 │   │   │   └── DeviceManager.cs
-│   │   └── E2EEClient.cs
+│   │   └── LibEmiddleClient.cs
 ├── tests/
-│   └── E2EELibrary.Tests/
+│   └── LibEmiddle.Tests/
 │       ├── [Test files would go here]
 │       └── 
 └── runtimes/

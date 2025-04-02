@@ -14,7 +14,7 @@ namespace E2EELibraryTests
         public void RotateGroupKey_ShouldGenerateNewKey()
         {
             // Arrange
-            var keyPair = E2EEClient.GenerateSignatureKeyPair();
+            var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(keyPair);
             string groupId = "test-key-rotation";
             byte[] originalKey = groupManager.CreateGroup(groupId);
@@ -41,8 +41,8 @@ namespace E2EELibraryTests
         public void AddGroupMember_ShouldAddMemberToAuthorizedList()
         {
             // Arrange
-            var adminKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var memberKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = "test-authorization";
             groupManager.CreateGroup(groupId);
@@ -66,8 +66,8 @@ namespace E2EELibraryTests
         public void RemoveGroupMember_ShouldRemoveMemberAndRotateKey()
         {
             // Arrange
-            var adminKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var memberKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = "test-revocation";
             groupManager.CreateGroup(groupId);
@@ -105,7 +105,7 @@ namespace E2EELibraryTests
         public void DecryptGroupMessage_ShouldRejectReplayedMessage()
         {
             // Arrange
-            var keyPair = E2EEClient.GenerateSignatureKeyPair();
+            var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(keyPair);
             string groupId = "test-replay-protection";
             byte[] senderKey = groupManager.CreateGroup(groupId);
@@ -151,8 +151,8 @@ namespace E2EELibraryTests
         public void ForwardSecrecy_RemovedMemberCannotDecryptNewMessages()
         {
             // Arrange
-            var adminKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var memberKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var adminManager = new GroupChatManager(adminKeyPair);
             var memberManager = new GroupChatManager(memberKeyPair);
 
@@ -202,9 +202,9 @@ namespace E2EELibraryTests
         public void ProcessSenderKeyDistribution_ShouldRejectUntrustedSenders()
         {
             // Arrange
-            var adminKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var memberKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var untrustedKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var untrustedKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             var adminManager = new GroupChatManager(adminKeyPair);
             var memberManager = new GroupChatManager(memberKeyPair);
@@ -240,7 +240,7 @@ namespace E2EELibraryTests
         public void GenerateSenderKey_ShouldReturnValidKey()
         {
             // Act
-            byte[] senderKey = E2EEClient.GenerateSenderKey();
+            byte[] senderKey = LibEmiddleClient.GenerateSenderKey();
 
             // Assert
             Assert.IsNotNull(senderKey);
@@ -253,10 +253,10 @@ namespace E2EELibraryTests
             // Arrange
             string message = "This is a group message";
             string groupId = "test-group-123";
-            byte[] senderKey = E2EEClient.GenerateSenderKey();
+            byte[] senderKey = LibEmiddleClient.GenerateSenderKey();
 
             // Create identity key pair for signing
-            var identityKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var identityKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Create an instance of GroupMessageCrypto
             var messageCrypto = new GroupMessageCrypto();
@@ -274,7 +274,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             string groupId = "test-group-123";
-            var senderKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var senderKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Create an instance of GroupChatManager
             var groupChatManager = new GroupChatManager(senderKeyPair);
@@ -314,8 +314,8 @@ namespace E2EELibraryTests
         {
             // Arrange
             string groupId = "test-group-456";
-            var senderKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var recipientKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var senderKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var recipientKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Create an instance of GroupChatManager
             var groupChatManager = new GroupChatManager(senderKeyPair);
@@ -343,8 +343,8 @@ namespace E2EELibraryTests
         public void GroupChatManager_ShouldHandleMessageExchange()
         {
             // Arrange
-            var aliceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var bobKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -383,7 +383,7 @@ namespace E2EELibraryTests
         public void GroupChatManager_CreateDistribution_WithNonExistentGroup_ShouldThrowException()
         {
             // Arrange
-            var keyPair = E2EEClient.GenerateSignatureKeyPair();
+            var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var manager = new GroupChatManager(keyPair);
 
             // Act & Assert - Should throw InvalidOperationException
@@ -394,9 +394,9 @@ namespace E2EELibraryTests
         public void GroupMultiSenderDeduplication_ShouldHandleSimultaneousMessages()
         {
             // Arrange - Create three participants
-            var aliceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var bobKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var charlieKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var charlieKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -468,9 +468,9 @@ namespace E2EELibraryTests
         public void GroupMemberAddition_ShouldAllowNewMemberToReceiveMessages()
         {
             // Create test participants
-            var aliceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var bobKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var daveKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var daveKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -566,9 +566,9 @@ namespace E2EELibraryTests
             // This test simulates a group chat between Alice, Bob, and Charlie
 
             // Step 1: Generate identity keys for the participants
-            var aliceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var bobKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var charlieKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var charlieKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Step 2: Create group chat managers for each participant
             var aliceManager = new GroupChatManager(aliceKeyPair);
@@ -646,8 +646,8 @@ namespace E2EELibraryTests
         public void DeleteGroup_ShouldWorkCorrectly()
         {
             // Arrange
-            var adminKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var memberKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = "test-delete-group";

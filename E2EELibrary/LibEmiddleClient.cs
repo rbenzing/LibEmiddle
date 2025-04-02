@@ -13,7 +13,7 @@ namespace E2EELibrary
     /// Main entry point for the E2EE library, providing a simplified API for common operations.
     /// This class serves as a facade for the various components of the library.
     /// </summary>
-    public class E2EEClient
+    public class LibEmiddleClient
     {
         private readonly GroupChatManager _groupChatManager;
         private readonly DeviceManager _deviceManager;
@@ -21,7 +21,7 @@ namespace E2EELibrary
         /// <summary>
         /// Creates a new E2EE client with default settings
         /// </summary>
-        public E2EEClient()
+        public LibEmiddleClient()
         {
             // Generate an identity key pair for this client
             var identityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
@@ -33,7 +33,7 @@ namespace E2EELibrary
         /// Creates a new E2EE client with an existing identity key pair
         /// </summary>
         /// <param name="identityKeyPair">Identity key pair to use</param>
-        public E2EEClient((byte[] publicKey, byte[] privateKey) identityKeyPair)
+        public LibEmiddleClient((byte[] publicKey, byte[] privateKey) identityKeyPair)
         {
             _groupChatManager = new GroupChatManager(identityKeyPair);
             _deviceManager = new DeviceManager(identityKeyPair);

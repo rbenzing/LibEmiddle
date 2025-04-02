@@ -20,7 +20,7 @@ namespace E2EELibraryTests
             var deviceToRevokeKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
             // Act
-            var revocationMessage = E2EEClient.CreateDeviceRevocationMessage(
+            var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
                 deviceToRevokeKeyPair.publicKey,
                 authorityKeyPair);
 
@@ -46,12 +46,12 @@ namespace E2EELibraryTests
             var authorityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
             var deviceToRevokeKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
-            var revocationMessage = E2EEClient.CreateDeviceRevocationMessage(
+            var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
                 deviceToRevokeKeyPair.publicKey,
                 authorityKeyPair);
 
             // Act
-            bool isValid = E2EEClient.ValidateDeviceRevocationMessage(
+            bool isValid = LibEmiddleClient.ValidateDeviceRevocationMessage(
                 revocationMessage,
                 authorityKeyPair.publicKey);
 
@@ -67,12 +67,12 @@ namespace E2EELibraryTests
             var differentKeyPair = KeyGenerator.GenerateEd25519KeyPair();
             var deviceToRevokeKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
-            var revocationMessage = E2EEClient.CreateDeviceRevocationMessage(
+            var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
                 deviceToRevokeKeyPair.publicKey,
                 authorityKeyPair);
 
             // Act - Validate with a different public key than the one that signed
-            bool isValid = E2EEClient.ValidateDeviceRevocationMessage(
+            bool isValid = LibEmiddleClient.ValidateDeviceRevocationMessage(
                 revocationMessage,
                 differentKeyPair.publicKey);
 
@@ -87,7 +87,7 @@ namespace E2EELibraryTests
             var authorityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
             var deviceToRevokeKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
-            var revocationMessage = E2EEClient.CreateDeviceRevocationMessage(
+            var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
                 deviceToRevokeKeyPair.publicKey,
                 authorityKeyPair);
 
@@ -100,7 +100,7 @@ namespace E2EELibraryTests
             };
 
             // Act
-            bool isValid = E2EEClient.ValidateDeviceRevocationMessage(
+            bool isValid = LibEmiddleClient.ValidateDeviceRevocationMessage(
                 tamperedMessage,
                 authorityKeyPair.publicKey);
 
@@ -288,7 +288,7 @@ namespace E2EELibraryTests
             var deviceToRevokeKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
             // Act
-            var revocationMessage = E2EEClient.CreateDeviceRevocationMessage(
+            var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
                 deviceToRevokeKeyPair.publicKey,
                 authorityKeyPair);
 
@@ -300,7 +300,7 @@ namespace E2EELibraryTests
             timestampBytes.AsSpan().CopyTo(dataToSign.AsSpan(deviceToRevokeKeyPair.publicKey.Length));
 
             // Verify the signature directly
-            bool isValidManually = E2EEClient.VerifySignature(dataToSign, revocationMessage.Signature, authorityKeyPair.publicKey);
+            bool isValidManually = LibEmiddleClient.VerifySignature(dataToSign, revocationMessage.Signature, authorityKeyPair.publicKey);
 
             // Assert
             Assert.IsTrue(isValidManually, "Signature validation should pass with manually combined data");

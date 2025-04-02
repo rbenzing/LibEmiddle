@@ -39,38 +39,38 @@ namespace E2EELibraryTests
 
             // Small message
             stopwatch.Restart();
-            var smallEncrypted = E2EEClient.EncryptMessage(smallMessage, key);
+            var smallEncrypted = LibEmiddleClient.EncryptMessage(smallMessage, key);
             stopwatch.Stop();
             long smallEncryptTime = stopwatch.ElapsedMilliseconds;
 
             // Medium message
             stopwatch.Restart();
-            var mediumEncrypted = E2EEClient.EncryptMessage(mediumMessage, key);
+            var mediumEncrypted = LibEmiddleClient.EncryptMessage(mediumMessage, key);
             stopwatch.Stop();
             long mediumEncryptTime = stopwatch.ElapsedMilliseconds;
 
             // Large message
             stopwatch.Restart();
-            var largeEncrypted = E2EEClient.EncryptMessage(largeMessage, key);
+            var largeEncrypted = LibEmiddleClient.EncryptMessage(largeMessage, key);
             stopwatch.Stop();
             long largeEncryptTime = stopwatch.ElapsedMilliseconds;
 
             // Measure decryption time
             // Small message
             stopwatch.Restart();
-            string smallDecrypted = E2EEClient.DecryptMessage(smallEncrypted, key);
+            string smallDecrypted = LibEmiddleClient.DecryptMessage(smallEncrypted, key);
             stopwatch.Stop();
             long smallDecryptTime = stopwatch.ElapsedMilliseconds;
 
             // Medium message
             stopwatch.Restart();
-            string mediumDecrypted = E2EEClient.DecryptMessage(mediumEncrypted, key);
+            string mediumDecrypted = LibEmiddleClient.DecryptMessage(mediumEncrypted, key);
             stopwatch.Stop();
             long mediumDecryptTime = stopwatch.ElapsedMilliseconds;
 
             // Large message
             stopwatch.Restart();
-            string largeDecrypted = E2EEClient.DecryptMessage(largeEncrypted, key);
+            string largeDecrypted = LibEmiddleClient.DecryptMessage(largeEncrypted, key);
             stopwatch.Stop();
             long largeDecryptTime = stopwatch.ElapsedMilliseconds;
 
@@ -109,7 +109,7 @@ namespace E2EELibraryTests
             stopwatch.Start();
             for (int i = 0; i < iterations; i++)
             {
-                var keyPair = E2EEClient.GenerateSignatureKeyPair();
+                var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             }
             stopwatch.Stop();
 
@@ -119,7 +119,7 @@ namespace E2EELibraryTests
             stopwatch.Restart();
             for (int i = 0; i < iterations; i++)
             {
-                var keyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+                var keyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
             }
             stopwatch.Stop();
 
@@ -134,7 +134,7 @@ namespace E2EELibraryTests
         public void Performance_GroupMessageEncryptionTest()
         {
             // Arrange
-            var aliceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var groupChatManager = new E2EELibrary.GroupMessaging.GroupChatManager(aliceKeyPair);
             string groupId = "performance-test-group";
             groupChatManager.CreateGroup(groupId);
@@ -169,8 +169,8 @@ namespace E2EELibraryTests
         public void Performance_DoubleRatchetMessageExchangeTest()
         {
             // Arrange - Set up Double Ratchet sessions
-            var aliceKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = E2EELibrary.KeyExchange.X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);

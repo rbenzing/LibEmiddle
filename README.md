@@ -1,4 +1,4 @@
-# E2EELibrary - Secure End-to-End Encryption for .NET
+# LibEmiddle - Secure End-to-End Encryption for .NET
 
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)

@@ -27,8 +27,8 @@ namespace E2EELibraryTests
         public void DoubleRatchetExchange_ResumeSession_WithValidSession_ShouldReturn()
         {
             // Arrange
-            var aliceKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
@@ -47,7 +47,7 @@ namespace E2EELibraryTests
             );
 
             // Act
-            var resumedSession = E2EEClient.ResumeDoubleRatchetSession(originalSession);
+            var resumedSession = LibEmiddleClient.ResumeDoubleRatchetSession(originalSession);
 
             // Assert
             Assert.IsNotNull(resumedSession, "Session should be resumed successfully");
@@ -75,8 +75,8 @@ namespace E2EELibraryTests
         public void DoubleRatchetExchange_ResumeSession_WithLastProcessedMessageId_ShouldAddToProcessedIds()
         {
             // Arrange
-            var aliceKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
@@ -99,7 +99,7 @@ namespace E2EELibraryTests
             Guid lastProcessedId = Guid.NewGuid();
 
             // Act
-            var resumedSession = E2EEClient.ResumeDoubleRatchetSession(originalSession, lastProcessedId);
+            var resumedSession = LibEmiddleClient.ResumeDoubleRatchetSession(originalSession, lastProcessedId);
 
             // Assert
             Assert.IsNotNull(resumedSession, "Session should be resumed successfully");
@@ -244,8 +244,8 @@ namespace E2EELibraryTests
         public void DecryptionFailure_ShouldNotAffectSubsequentDecryption()
         {
             // Arrange
-            var aliceKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
@@ -315,7 +315,7 @@ namespace E2EELibraryTests
         public void GroupChatManager_HandleMissingGroup_ShouldFailGracefully()
         {
             // Arrange
-            var aliceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(aliceKeyPair);
             string nonExistentGroupId = "test-group-123"; // Using a valid format for group ID based on validation
 
@@ -515,7 +515,7 @@ namespace E2EELibraryTests
 
                 // Parse the JSON to extract the data field
                 var jsonDoc = System.Text.Json.JsonDocument.Parse(jsonContent);
-                string? dataBase64 = jsonDoc.RootElement.GetProperty("data").GetString();
+                string dataBase64 = jsonDoc.RootElement.GetProperty("data").GetString();
 
                 if (dataBase64 != null)
                 {
@@ -588,7 +588,7 @@ namespace E2EELibraryTests
                         syncMessageForSecondDevice.Nonce);
 
                     var jsonDoc = System.Text.Json.JsonDocument.Parse(Encoding.UTF8.GetString(extractedPlaintext));
-                    string? dataBase64 = jsonDoc.RootElement.GetProperty("data").GetString();
+                    string dataBase64 = jsonDoc.RootElement.GetProperty("data").GetString();
 
                     if (dataBase64 != null)
                     {
@@ -626,8 +626,8 @@ namespace E2EELibraryTests
         public void CrossDeviceSessionRestoration_ShouldWorkCorrectly()
         {
             // Arrange
-            var aliceKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
@@ -667,7 +667,7 @@ namespace E2EELibraryTests
 
             // On the "new device", deserialize and resume the session
             var restoredSession = SessionPersistence.DeserializeSession(serializedSession, encryptionKey);
-            var resumedSession = E2EEClient.ResumeDoubleRatchetSession(restoredSession);
+            var resumedSession = LibEmiddleClient.ResumeDoubleRatchetSession(restoredSession);
 
             // Assert
             Assert.IsNotNull(resumedSession, "Session should be resumed successfully on new device");

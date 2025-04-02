@@ -19,8 +19,8 @@ namespace E2EELibraryTests
         public void ForwardSecrecy_CompromisedKeyDoesNotAffectPastMessages()
         {
             // Arrange
-            var aliceKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
@@ -172,7 +172,7 @@ namespace E2EELibraryTests
             }
 
             // Encrypt the message
-            var encryptedMessage = E2EEClient.EncryptMessage(message, key);
+            var encryptedMessage = LibEmiddleClient.EncryptMessage(message, key);
 
             // Make a copy for tampering
             var tamperedMessage = new EncryptedMessage
@@ -189,11 +189,11 @@ namespace E2EELibraryTests
             // Act & Assert
             Assert.ThrowsException<System.Security.Cryptography.CryptographicException>(() =>
             {
-                E2EEClient.DecryptMessage(tamperedMessage, key);
+                LibEmiddleClient.DecryptMessage(tamperedMessage, key);
             }, "Tampered message should fail authentication");
 
             // Original message should still decrypt correctly
-            string decryptedOriginal = E2EEClient.DecryptMessage(encryptedMessage, key);
+            string decryptedOriginal = LibEmiddleClient.DecryptMessage(encryptedMessage, key);
             Assert.AreEqual(message, decryptedOriginal);
         }
 
@@ -201,8 +201,8 @@ namespace E2EELibraryTests
         public void DoubleRatchet_ShouldDetectTamperedMessage()
         {
             // Arrange
-            var aliceKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
@@ -348,9 +348,9 @@ namespace E2EELibraryTests
         public void LongTermCryptographicIdentity_ShouldBeSecure()
         {
             // Generate multiple key pairs
-            var keyPair1 = E2EEClient.GenerateSignatureKeyPair();
-            var keyPair2 = E2EEClient.GenerateSignatureKeyPair();
-            var keyPair3 = E2EEClient.GenerateSignatureKeyPair();
+            var keyPair1 = LibEmiddleClient.GenerateSignatureKeyPair();
+            var keyPair2 = LibEmiddleClient.GenerateSignatureKeyPair();
+            var keyPair3 = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Ensure keys meet minimum security requirements
             Assert.AreEqual(32, keyPair1.publicKey.Length, "Ed25519 public key should be 32 bytes");
@@ -369,9 +369,9 @@ namespace E2EELibraryTests
             string message = "Cryptographic identity test message";
             byte[] messageBytes = Encoding.UTF8.GetBytes(message);
 
-            byte[] signature1 = E2EEClient.SignMessage(messageBytes, keyPair1.privateKey);
-            byte[] signature2 = E2EEClient.SignMessage(messageBytes, keyPair2.privateKey);
-            byte[] signature3 = E2EEClient.SignMessage(messageBytes, keyPair3.privateKey);
+            byte[] signature1 = LibEmiddleClient.SignMessage(messageBytes, keyPair1.privateKey);
+            byte[] signature2 = LibEmiddleClient.SignMessage(messageBytes, keyPair2.privateKey);
+            byte[] signature3 = LibEmiddleClient.SignMessage(messageBytes, keyPair3.privateKey);
 
             // Ensure signatures are different for different keys
             Assert.IsFalse(TestsHelpers.AreByteArraysEqual(signature1, signature2));
@@ -379,14 +379,14 @@ namespace E2EELibraryTests
             Assert.IsFalse(TestsHelpers.AreByteArraysEqual(signature2, signature3));
 
             // Ensure signatures verify correctly
-            Assert.IsTrue(E2EEClient.VerifySignature(messageBytes, signature1, keyPair1.publicKey));
-            Assert.IsTrue(E2EEClient.VerifySignature(messageBytes, signature2, keyPair2.publicKey));
-            Assert.IsTrue(E2EEClient.VerifySignature(messageBytes, signature3, keyPair3.publicKey));
+            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature1, keyPair1.publicKey));
+            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature2, keyPair2.publicKey));
+            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature3, keyPair3.publicKey));
 
             // Ensure signatures don't verify with the wrong key
-            Assert.IsFalse(E2EEClient.VerifySignature(messageBytes, signature1, keyPair2.publicKey));
-            Assert.IsFalse(E2EEClient.VerifySignature(messageBytes, signature2, keyPair3.publicKey));
-            Assert.IsFalse(E2EEClient.VerifySignature(messageBytes, signature3, keyPair1.publicKey));
+            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature1, keyPair2.publicKey));
+            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature2, keyPair3.publicKey));
+            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature3, keyPair1.publicKey));
         }
 
         #endregion
@@ -497,31 +497,31 @@ namespace E2EELibraryTests
             }, "Should throw for null nonce");
 
             // Test input validation for signature methods
-            var (publicKey, privateKey) = E2EEClient.GenerateSignatureKeyPair();
+            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
 
             Assert.ThrowsException<ArgumentNullException>(() =>
             {
-                E2EEClient.SignMessage(null, privateKey);
+                LibEmiddleClient.SignMessage(null, privateKey);
             }, "Should throw for null message in SignMessage");
 
             Assert.ThrowsException<ArgumentNullException>(() =>
             {
-                E2EEClient.SignMessage(messageBytes, null);
+                LibEmiddleClient.SignMessage(messageBytes, null);
             }, "Should throw for null private key in SignMessage");
 
             Assert.ThrowsException<ArgumentNullException>(() =>
             {
-                E2EEClient.VerifySignature(null, new byte[64], publicKey);
+                LibEmiddleClient.VerifySignature(null, new byte[64], publicKey);
             }, "Should throw for null message in VerifySignature");
 
             Assert.ThrowsException<ArgumentNullException>(() =>
             {
-                E2EEClient.VerifySignature(messageBytes, null, publicKey);
+                LibEmiddleClient.VerifySignature(messageBytes, null, publicKey);
             }, "Should throw for null signature in VerifySignature");
 
             Assert.ThrowsException<ArgumentNullException>(() =>
             {
-                E2EEClient.VerifySignature(messageBytes, new byte[64], null);
+                LibEmiddleClient.VerifySignature(messageBytes, new byte[64], null);
             }, "Should throw for null public key in VerifySignature");
         }
 

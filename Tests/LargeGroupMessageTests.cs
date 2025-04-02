@@ -22,7 +22,7 @@ namespace E2EELibraryTests
 
             for (int i = 0; i < memberCount; i++)
             {
-                var keyPair = E2EEClient.GenerateSignatureKeyPair();
+                var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
                 memberKeyPairs.Add(keyPair);
                 groupManagers.Add(new GroupChatManager(keyPair));
             }
@@ -129,10 +129,10 @@ namespace E2EELibraryTests
         public void GroupMember_RemovalSimulation_ShouldNotReceiveNewMessages()
         {
             // Arrange - Create a group with some members
-            var aliceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var bobKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var charlieKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var daveKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var charlieKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var daveKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -264,8 +264,8 @@ namespace E2EELibraryTests
         public void ConcurrentGroupAccess_ShouldHandleThreadSafely()
         {
             // Arrange - Create a group with multiple members
-            var aliceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var bobKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);

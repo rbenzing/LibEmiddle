@@ -17,8 +17,8 @@ namespace E2EELibraryTests
             // This test simulates a full conversation flow between Alice and Bob
 
             // Step 1: Generate identity keys for Alice and Bob
-            var aliceIdentityKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-            var bobIdentityKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var aliceIdentityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var bobIdentityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Step 2: Bob creates his key bundle and uploads to server
             var bobKeyBundle = X3DHExchange.CreateX3DHKeyBundle();
@@ -40,7 +40,7 @@ namespace E2EELibraryTests
 
             // Create Alice's initial DoubleRatchet session using immutable constructor
             var aliceDRSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: E2EEClient.GenerateKeyExchangeKeyPair(),
+                dhRatchetKeyPair: LibEmiddleClient.GenerateKeyExchangeKeyPair(),
                 remoteDHRatchetKey: bobPublicBundle.SignedPreKey,
                 rootKey: aliceSession.RootKey,
                 sendingChainKey: aliceSession.ChainKey,
@@ -127,9 +127,9 @@ namespace E2EELibraryTests
             // This test simulates a group chat between Alice, Bob, and Charlie
 
             // Step 1: Generate identity keys for the participants
-            var aliceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var bobKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var charlieKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var charlieKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Step 2: Create group chat managers for each participant
             var aliceManager = new GroupChatManager(aliceKeyPair);

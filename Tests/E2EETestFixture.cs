@@ -26,7 +26,7 @@ namespace E2EELibraryTests
                 Sodium.Initialize();
 
                 // Then verify key generation works via E2EEClient
-                var keyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+                var keyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
                 if (keyPair.publicKey != null && keyPair.privateKey != null)
                 {
                     Console.WriteLine($"Sodium library initialized successfully. Generated key sizes: Public={keyPair.publicKey.Length}, Private={keyPair.privateKey.Length}");
@@ -41,7 +41,7 @@ namespace E2EELibraryTests
                 Console.WriteLine($"Sodium library not available on this platform: {ex.Message}");
                 Console.WriteLine("You may need to install libsodium for your platform.");
 
-                string runtimeDir = Path.GetDirectoryName(typeof(E2EEClient).Assembly.Location) ?? "";
+                string runtimeDir = Path.GetDirectoryName(typeof(LibEmiddleClient).Assembly.Location) ?? "";
                 Console.WriteLine($"Runtime directory: {runtimeDir}");
                 Console.WriteLine("Available files:");
                 foreach (var file in Directory.GetFiles(runtimeDir, "*.dll"))
@@ -56,7 +56,7 @@ namespace E2EELibraryTests
                 Console.WriteLine($"Sodium library not found: {ex.Message}");
                 Console.WriteLine("Make sure libsodium.dll is available in your application directory or PATH.");
 
-                string runtimeDir = Path.GetDirectoryName(typeof(E2EEClient).Assembly.Location) ?? "";
+                string runtimeDir = Path.GetDirectoryName(typeof(LibEmiddleClient).Assembly.Location) ?? "";
                 string path = Environment.GetEnvironmentVariable("PATH") ?? "";
 
                 Console.WriteLine($"Runtime directory: {runtimeDir}");

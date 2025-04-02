@@ -59,8 +59,8 @@ namespace E2EELibraryTests
             }
 
             // Act
-            var encryptedMessage = E2EEClient.EncryptMessage(message, key);
-            string decryptedMessage = E2EEClient.DecryptMessage(encryptedMessage, key);
+            var encryptedMessage = LibEmiddleClient.EncryptMessage(message, key);
+            string decryptedMessage = LibEmiddleClient.DecryptMessage(encryptedMessage, key);
 
             // Assert
             Assert.AreEqual(message, decryptedMessage);
@@ -107,7 +107,7 @@ namespace E2EELibraryTests
         public void EncryptMessage_WithNullKey_ShouldThrowException()
         {
             // Act & Assert - Should throw ArgumentNullException
-            E2EEClient.EncryptMessage("Test message", null);
+            LibEmiddleClient.EncryptMessage("Test message", null);
         }
 
         [TestMethod]
@@ -122,7 +122,7 @@ namespace E2EELibraryTests
             }
 
             // Act & Assert - Should throw ArgumentException
-            E2EEClient.EncryptMessage("", key);
+            LibEmiddleClient.EncryptMessage("", key);
         }
 
         [TestMethod]
@@ -137,7 +137,7 @@ namespace E2EELibraryTests
             }
 
             // Encrypt the message
-            var encryptedMessage = E2EEClient.EncryptMessage(message, key);
+            var encryptedMessage = LibEmiddleClient.EncryptMessage(message, key);
 
             // Make a copy for tampering
             var tamperedMessage = new EncryptedMessage
@@ -154,11 +154,11 @@ namespace E2EELibraryTests
             // Act & Assert
             Assert.ThrowsException<System.Security.Cryptography.CryptographicException>(() =>
             {
-                E2EEClient.DecryptMessage(tamperedMessage, key);
+                LibEmiddleClient.DecryptMessage(tamperedMessage, key);
             }, "Tampered message should fail authentication");
 
             // Original message should still decrypt correctly
-            string decryptedOriginal = E2EEClient.DecryptMessage(encryptedMessage, key);
+            string decryptedOriginal = LibEmiddleClient.DecryptMessage(encryptedMessage, key);
             Assert.AreEqual(message, decryptedOriginal);
         }
 
@@ -181,13 +181,13 @@ namespace E2EELibraryTests
             string largeMessage = largeMessageBuilder.ToString();
 
             // Act & Assert - Tiny message
-            var tinyEncrypted = E2EEClient.EncryptMessage(tinyMessage, key);
-            string tinyDecrypted = E2EEClient.DecryptMessage(tinyEncrypted, key);
+            var tinyEncrypted = LibEmiddleClient.EncryptMessage(tinyMessage, key);
+            string tinyDecrypted = LibEmiddleClient.DecryptMessage(tinyEncrypted, key);
             Assert.AreEqual(tinyMessage, tinyDecrypted);
 
             // Act & Assert - Large message
-            var largeEncrypted = E2EEClient.EncryptMessage(largeMessage, key);
-            string largeDecrypted = E2EEClient.DecryptMessage(largeEncrypted, key);
+            var largeEncrypted = LibEmiddleClient.EncryptMessage(largeMessage, key);
+            string largeDecrypted = LibEmiddleClient.DecryptMessage(largeEncrypted, key);
             Assert.AreEqual(largeMessage, largeDecrypted);
         }
 

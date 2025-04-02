@@ -16,8 +16,8 @@ namespace E2EELibraryTests
         public void X3DHKeyExchange_ShouldProduceSameKeyForBothParties()
         {
             // Arrange
-            var (alicePublic, alicePrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
-            var (bobPublic, bobPrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var (bobPublic, bobPrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Act
             byte[] aliceSharedSecret = X3DHExchange.X3DHKeyExchange(bobPublic, alicePrivate);
@@ -44,7 +44,7 @@ namespace E2EELibraryTests
             Assert.IsTrue(bundle.OneTimePreKeys.Count > 0);
 
             // Verify signature
-            bool validSignature = E2EEClient.VerifySignature(bundle.SignedPreKey, bundle.SignedPreKeySignature, bundle.IdentityKey);
+            bool validSignature = LibEmiddleClient.VerifySignature(bundle.SignedPreKey, bundle.SignedPreKeySignature, bundle.IdentityKey);
 
             Assert.IsTrue(validSignature);
 
@@ -57,7 +57,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             var bobPublicBundle = new X3DHPublicBundle
             {
@@ -83,7 +83,7 @@ namespace E2EELibraryTests
         public void InitiateX3DHSession_WithNullBundle_ShouldThrowException()
         {
             // Arrange
-            var (alicePublic, alicePrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Act & Assert - Should throw ArgumentNullException
             X3DHExchange.InitiateX3DHSession(null, (alicePublic, alicePrivate));
@@ -94,7 +94,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             var bobPublicBundle = new X3DHPublicBundle
             {
@@ -120,7 +120,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Create a bundle with invalid signed pre-key (all zeros)
             var bobPublicBundle = new X3DHPublicBundle
@@ -141,7 +141,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Tamper with the signature
             byte[] tamperedSignature = new byte[bobBundle.SignedPreKeySignature.Length];

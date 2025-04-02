@@ -19,7 +19,7 @@ namespace E2EELibraryTests
         public void X3DHKeyExchange_NullRecipientKey_ShouldThrowException()
         {
             // Arrange
-            var (_, senderPrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (_, senderPrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Act - should throw ArgumentNullException
             X3DHExchange.X3DHKeyExchange(null, senderPrivate);
@@ -30,7 +30,7 @@ namespace E2EELibraryTests
         public void X3DHKeyExchange_NullSenderKey_ShouldThrowException()
         {
             // Arrange
-            var (recipientPublic, _) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (recipientPublic, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Act - should throw ArgumentNullException
             X3DHExchange.X3DHKeyExchange(recipientPublic, null);
@@ -41,7 +41,7 @@ namespace E2EELibraryTests
         public void X3DHKeyExchange_InvalidRecipientKeyLength_ShouldThrowException()
         {
             // Arrange
-            var (_, senderPrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (_, senderPrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
             byte[] invalidLengthKey = new byte[16]; // Invalid length (should be 32)
 
             // Act - should throw ArgumentException
@@ -53,7 +53,7 @@ namespace E2EELibraryTests
         public void X3DHKeyExchange_InvalidSenderKeyLength_ShouldThrowException()
         {
             // Arrange
-            var (recipientPublic, _) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (recipientPublic, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
             byte[] invalidLengthKey = new byte[16]; // Invalid length (should be 32)
 
             // Act - should throw ArgumentException
@@ -66,7 +66,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Create a bundle with invalid signature
             var invalidBundle = new X3DHPublicBundle
@@ -87,7 +87,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Create a bundle with invalid public key
             var invalidBundle = new X3DHPublicBundle
@@ -107,7 +107,7 @@ namespace E2EELibraryTests
         public void InitiateX3DHSession_MissingRequiredKeys_ShouldThrowException()
         {
             // Arrange
-            var (alicePublic, alicePrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Create a bundle with missing keys
             var invalidBundle = new X3DHPublicBundle
@@ -127,7 +127,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Create a bundle with both valid and invalid one-time pre-keys
             List<byte[]> mixedPreKeys = new List<byte[]>();
@@ -165,8 +165,8 @@ namespace E2EELibraryTests
         public void X3DHKeyExchange_ProvidesForwardSecrecy()
         {
             // Arrange - Create an authentic communication channel
-            var aliceKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
 

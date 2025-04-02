@@ -25,7 +25,7 @@ namespace E2EELibraryTests
         public void LoadKeyFromFile_WrongPassword_ShouldThrowCryptographicException()
         {
             // Arrange
-            var (publicKey, _) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string correctPassword = "CorrectP@ssw0rd";
             string wrongPassword = "WrongP@ssw0rd";
@@ -83,7 +83,7 @@ namespace E2EELibraryTests
         public void KeyStorage_SaltRotation_ShouldUpdateFile()
         {
             // Arrange
-            var (publicKey, _) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "TestP@ssw0rd";
             bool forceRotation = true;

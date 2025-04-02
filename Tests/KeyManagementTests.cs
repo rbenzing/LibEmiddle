@@ -15,7 +15,7 @@ namespace E2EELibraryTests
         public void GenerateSignatureKeyPair_ShouldReturnValidKeyPair()
         {
             // Act
-            var (publicKey, privateKey) = E2EEClient.GenerateSignatureKeyPair();
+            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Assert
             Assert.IsNotNull(publicKey);
@@ -28,7 +28,7 @@ namespace E2EELibraryTests
         public void GenerateKeyExchangeKeyPair_ShouldReturnValidKeyPair()
         {
             // Act
-            var (publicKey, privateKey) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (publicKey, privateKey) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Assert
             Assert.IsNotNull(publicKey);
@@ -41,7 +41,7 @@ namespace E2EELibraryTests
         public void ExportImportKeyToBase64_ShouldReturnOriginalKey()
         {
             // Arrange
-            var (publicKey, _) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Act
             string base64Key = E2EELibrary.KeyManagement.KeyPair.ExportKeyToBase64(publicKey);
@@ -55,14 +55,14 @@ namespace E2EELibraryTests
         public void StoreAndLoadKeyFromFile_WithoutPassword_ShouldReturnOriginalKey()
         {
             // Arrange
-            var (publicKey, _) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
 
             try
             {
                 // Act
-                E2EEClient.StoreKeyToFile(publicKey, filePath);
-                byte[] loadedKey = E2EEClient.LoadKeyFromFile(filePath);
+                LibEmiddleClient.StoreKeyToFile(publicKey, filePath);
+                byte[] loadedKey = LibEmiddleClient.LoadKeyFromFile(filePath);
 
                 // Assert
                 CollectionAssert.AreEqual(publicKey, loadedKey);
@@ -81,15 +81,15 @@ namespace E2EELibraryTests
         public void StoreAndLoadKeyFromFile_WithPassword_ShouldReturnOriginalKey()
         {
             // Arrange
-            var (publicKey, _) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "TestP@ssw0rd";
 
             try
             {
                 // Act
-                E2EEClient.StoreKeyToFile(publicKey, filePath, password);
-                byte[] loadedKey = E2EEClient.LoadKeyFromFile(filePath, password);
+                LibEmiddleClient.StoreKeyToFile(publicKey, filePath, password);
+                byte[] loadedKey = LibEmiddleClient.LoadKeyFromFile(filePath, password);
 
                 // Assert
                 CollectionAssert.AreEqual(publicKey, loadedKey);
@@ -109,7 +109,7 @@ namespace E2EELibraryTests
         public void LoadKeyFromFile_WithNonExistentFile_ShouldThrowException()
         {
             // Act - should throw FileNotFoundException
-            E2EEClient.LoadKeyFromFile("non-existent-file.key");
+            LibEmiddleClient.LoadKeyFromFile("non-existent-file.key");
         }
 
         [TestMethod]
@@ -117,7 +117,7 @@ namespace E2EELibraryTests
         public void LoadKeyFromFile_WithWrongPassword_ShouldThrowException()
         {
             // Arrange
-            var (publicKey, _) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "CorrectP@ssw0rd";
             string wrongPassword = "WrongP@ssw0rd";
@@ -125,10 +125,10 @@ namespace E2EELibraryTests
             try
             {
                 // Act
-                E2EEClient.StoreKeyToFile(publicKey, filePath, password);
+                LibEmiddleClient.StoreKeyToFile(publicKey, filePath, password);
 
                 // Should throw CryptographicException
-                E2EEClient.LoadKeyFromFile(filePath, wrongPassword);
+                LibEmiddleClient.LoadKeyFromFile(filePath, wrongPassword);
             }
             finally
             {
@@ -144,7 +144,7 @@ namespace E2EELibraryTests
         public void ValidateX25519PublicKey_WithValidKey_ShouldReturnTrue()
         {
             // Arrange
-            var (publicKey, _) = E2EEClient.GenerateKeyExchangeKeyPair();
+            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Act
             bool isValid = KeyValidation.ValidateX25519PublicKey(publicKey);
@@ -186,7 +186,7 @@ namespace E2EELibraryTests
         public void DeriveX25519PrivateKeyFromEd25519_ShouldProduceValidKey()
         {
             // Arrange
-            var (_, ed25519PrivateKey) = E2EEClient.GenerateSignatureKeyPair();
+            var (_, ed25519PrivateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Act
             byte[] x25519PrivateKey = KeyConversion.DeriveX25519PrivateKeyFromEd25519(ed25519PrivateKey);

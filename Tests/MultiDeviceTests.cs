@@ -31,7 +31,7 @@ namespace E2EELibraryTests
                 rng.GetBytes(existingSharedKey);
             }
 
-            var newDeviceKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
+            var newDeviceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Act
             byte[] derivedKey1 = DeviceLinking.DeriveSharedKeyForNewDevice(
@@ -48,11 +48,11 @@ namespace E2EELibraryTests
         public void CreateDeviceLinkMessage_ShouldCreateValidMessage()
         {
             // Arrange
-            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var newDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var newDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Act
-            var encryptedMessage = E2EEClient.CreateDeviceLinkMessage(
+            var encryptedMessage = LibEmiddleClient.CreateDeviceLinkMessage(
                 mainDeviceKeyPair, newDeviceKeyPair.publicKey);
 
             // Assert
@@ -144,8 +144,8 @@ namespace E2EELibraryTests
         public void MultiDeviceManager_ShouldCreateValidSyncMessages()
         {
             // Arrange
-            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Derive X25519 keys for the second device
             byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
@@ -182,7 +182,7 @@ namespace E2EELibraryTests
         public void MultiDeviceManager_AddLinkedDevice_WithNull_ShouldThrowException()
         {
             // Arrange
-            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var manager = new DeviceManager(mainDeviceKeyPair);
 
             // Act & Assert - Should throw ArgumentNullException
@@ -357,8 +357,8 @@ namespace E2EELibraryTests
         public void MultiDeviceManager_ProcessSyncMessage_WithTamperedMessage_ShouldReturnNull()
         {
             // Arrange
-            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Convert to X25519 keys
             byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
@@ -402,10 +402,10 @@ namespace E2EELibraryTests
         public void DeviceManager_MultipleLinkedDevices_ShouldCreateMessagesForAll()
         {
             // Arrange - Create a main device and multiple secondary devices
-            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var thirdDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var fourthDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var thirdDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var fourthDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Create X25519 keys for each device for linking
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
@@ -457,9 +457,9 @@ namespace E2EELibraryTests
             // messages wouldn't be created for them
 
             // Arrange - Create devices
-            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var thirdDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var thirdDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Create X25519 keys for each device for linking
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
@@ -505,8 +505,8 @@ namespace E2EELibraryTests
         public void DeviceManager_ExpiredSyncMessage_ShouldReturnNull()
         {
             // Arrange
-            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Convert to X25519 keys
             byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
@@ -570,8 +570,8 @@ namespace E2EELibraryTests
         public void DeviceManager_AddSameDeviceMultipleTimes_ShouldOnlyAddOnce()
         {
             // Arrange
-            var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Create X25519 keys
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
