@@ -10,7 +10,7 @@
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 
 		<!-- NuGet package metadata -->
-		<PackageId>E2EELibrary</PackageId>
+		<PackageId>LibEmiddle</PackageId>
 		<Version>1.0.0</Version>
 		<Authors>Russell Benzing</Authors>
 		<Company>Russell Benzing Inc</Company>
@@ -49,7 +49,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <EditorConfigFiles Remove="C:\GIT\eMiddle-E2EE-Library\E2EELibrary\.editorconfig" />
+	  <EditorConfigFiles Remove="C:\GIT\eMiddle-E2EE-Library\LibEmiddle\.editorconfig" />
 	</ItemGroup>
 
 </Project>

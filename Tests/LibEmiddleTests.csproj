@@ -18,7 +18,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <ProjectReference Include="..\E2EELibrary\LibEmiddle.csproj" />
+	  <ProjectReference Include="..\LibEmiddle\LibEmiddle.csproj" />
 	</ItemGroup>
 
 </Project>
