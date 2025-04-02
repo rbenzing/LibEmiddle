@@ -8,7 +8,7 @@
     <!-- Common assembly info -->
     <Company>Russell Benzing Inc</Company>
     <Copyright>Copyright © $(Company) $([System.DateTime]::Now.Year)</Copyright>
-    <Product>E2EELibrary</Product>
+    <Product>LibEmiddle</Product>
     
     <!-- SourceLink settings -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
