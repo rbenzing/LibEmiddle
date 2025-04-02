@@ -1,7 +1,7 @@
 # E2EELibrary - Secure End-to-End Encryption for .NET
 
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
-![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
 
@@ -17,288 +17,219 @@ A comprehensive, production-ready end-to-end encryption library for .NET applica
 
 ### 💬 Communication Patterns
 - **One-to-One Messaging** - Secure private conversations with forward secrecy
-- **Group Messaging** - Efficient encrypted group chats with sender key distribution
-- **Multi-Device Support** - Seamless synchronization between user devices
-- **Asynchronous Communication** - Support for offline message delivery via mailbox system
+- **Group Messaging** - Efficient encrypted group chats with advanced member management
+- **Multi-Device Support** - Seamless synchronization and device linking
+- **Asynchronous Communication** - Robust mailbox system with delivery and read receipts
 
-### 🛡️ Security Guarantees
-- **Forward Secrecy** - Compromise of current keys doesn't expose past messages
-- **Post-Compromise Security** - Automatic recovery from potential compromise
-- **Message Integrity** - Tamper-evident messaging with authentication
-- **Replay Protection** - Prevents message replay attacks
-- **Secure Memory Handling** - Protection of sensitive data in memory
-
-## 📦 Installation
-
-```
-// Package manager
-Install-Package E2EELibrary
-
-// .NET CLI
-dotnet add package E2EELibrary
-```
-
-## 🚀 Quick Start
-
-### Key Generation
+## 🚀 Multi-Device Management
 
 ```csharp
-// Generate a signature key pair (Ed25519)
-var signatureKeyPair = E2EEClient.GenerateSignatureKeyPair();
-
-// Generate a key exchange key pair (X25519)
-var keyExchangeKeyPair = E2EEClient.GenerateKeyExchangeKeyPair();
-
-// Generate a sender key for group messaging
-byte[] senderKey = E2EEClient.GenerateSenderKey();
-```
-
-### Basic Encryption/Decryption
-
-```csharp
-// Simple encryption with a shared key
-string message = "Secret message";
-byte[] key = new byte[32]; // Generate a proper random key in production
-RandomNumberGenerator.Fill(key);
-
-// Encrypt
-var encryptedMessage = E2EEClient.EncryptMessage(message, key);
-
-// Decrypt
-string decryptedMessage = E2EEClient.DecryptMessage(encryptedMessage, key);
-```
-
-### Digital Signatures
-
-```csharp
-// Sign a message
-byte[] messageBytes = Encoding.UTF8.GetBytes("Message to sign");
-byte[] signature = E2EEClient.SignMessage(messageBytes, signatureKeyPair.privateKey);
-
-// Verify signature
-bool isValid = E2EEClient.VerifySignature(messageBytes, signature, signatureKeyPair.publicKey);
-
-// Text message signing (Base64 signature)
-string textSignature = E2EEClient.SignTextMessage("Text message", signatureKeyPair.privateKey);
-bool textValid = E2EEClient.VerifyTextMessage("Text message", textSignature, signatureKeyPair.publicKey);
-```
-
-### Secure Key Storage
-
-```csharp
-// Store a key securely (with optional password protection)
-E2EEClient.StoreKeyToFile(keyData, "key.dat", "optional-password");
-
-// Load a key
-byte[] loadedKey = E2EEClient.LoadKeyFromFile("key.dat", "optional-password");
-```
-
-### One-to-One Secure Messaging
-
-```csharp
-// 1. Initialize key bundles for both parties
-X3DHKeyBundle aliceBundle = E2EEClient.CreateKeyBundle();
-X3DHKeyBundle bobBundle = E2EEClient.CreateKeyBundle();
-
-// 2. Convert Bob's bundle to public bundle (for sharing)
-var bobPublicBundle = new X3DHPublicBundle {
-    IdentityKey = bobBundle.IdentityKey,
-    SignedPreKey = bobBundle.SignedPreKey,
-    SignedPreKeySignature = bobBundle.SignedPreKeySignature,
-    OneTimePreKeys = bobBundle.OneTimePreKeys
-};
-
-// 3. Alice initiates a session with Bob
-var aliceIdentityKeyPair = (aliceBundle.IdentityKey, aliceBundle.GetIdentityKeyPrivate());
-var session = E2EEClient.InitiateSession(bobPublicBundle, aliceIdentityKeyPair);
-
-// 4. Create a DoubleRatchet session
-var aliceSession = new DoubleRatchetSession(
-    dhRatchetKeyPair: aliceIdentityKeyPair,
-    remoteDHRatchetKey: bobPublicBundle.SignedPreKey,
-    rootKey: session.RootKey,
-    sendingChainKey: session.ChainKey,
-    receivingChainKey: session.ChainKey,
-    messageNumber: 0,
-    sessionId: Guid.NewGuid().ToString()
-);
-
-// 5. Encrypt a message
-string message = "Hello Bob, this is Alice!";
-var (updatedSession, encryptedMessage) = E2EEClient.EncryptWithSession(aliceSession, message);
-
-// 6. Decrypt a message
-var (updatedReceiverSession, decryptedMessage) = E2EEClient.DecryptWithSession(bobSession, encryptedMessage);
-```
-
-### Group Messaging
-
-```csharp
-// Create a group chat manager for each participant
-var aliceManager = new GroupChatManager(aliceKeyPair);
-var bobManager = new GroupChatManager(bobKeyPair);
-var charlieManager = new GroupChatManager(charlieKeyPair);
-
-// Alice creates a group
-string groupId = "friends-group";
-aliceManager.CreateGroup(groupId);
-
-// Alice creates a distribution message
-var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
-
-// Bob and Charlie process Alice's distribution
-bobManager.ProcessSenderKeyDistribution(aliceDistribution);
-charlieManager.ProcessSenderKeyDistribution(aliceDistribution);
-
-// Bob and Charlie create their distributions and share with everyone
-var bobDistribution = bobManager.CreateDistributionMessage(groupId);
-var charlieDistribution = charlieManager.CreateDistributionMessage(groupId);
-
-aliceManager.ProcessSenderKeyDistribution(bobDistribution);
-aliceManager.ProcessSenderKeyDistribution(charlieDistribution);
-// ...and so on for all combinations
-
-// Now anyone can send encrypted messages to the group
-var aliceMessage = aliceManager.EncryptGroupMessage(groupId, "Hello group!");
-
-// Everyone can decrypt
-string bobsDecryption = bobManager.DecryptGroupMessage(aliceMessage);
-string charliesDecryption = charlieManager.DecryptGroupMessage(aliceMessage);
-```
-
-### Multi-Device Support
-
-```csharp
-// Link a new device to a main device
-var mainDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-var newDeviceKeyPair = E2EEClient.GenerateSignatureKeyPair();
-
-// Create a device link message
-var encryptedLinkMessage = E2EEClient.CreateDeviceLinkMessage(
-    mainDeviceKeyPair,
-    newDeviceKeyPair.publicKey
-);
-
-// Set up device managers
+// Main device setup
 var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
-var newDeviceManager = new DeviceManager(newDeviceKeyPair);
 
-// Link the devices
-mainDeviceManager.AddLinkedDevice(newDeviceKeyPair.publicKey);
-newDeviceManager.AddLinkedDevice(mainDeviceKeyPair.publicKey);
-
-// Sync data between devices
-byte[] dataToSync = Encoding.UTF8.GetBytes("Sync data");
-var syncMessages = mainDeviceManager.CreateSyncMessages(dataToSync);
-
-// Process sync messages on the other device
-foreach (var message in syncMessages.Values)
+// Add a new device with comprehensive security checks
+try 
 {
-    byte[] receivedData = newDeviceManager.ProcessSyncMessage(message);
-    // Use the synced data
+    // Generate keys for the new device
+    var newDeviceKeyPair = KeyGenerator.GenerateX25519KeyPair();
+
+    // Create a secure device link message
+    var linkMessage = DeviceLinking.CreateDeviceLinkMessage(
+        mainDeviceKeyPair, 
+        newDeviceKeyPair.publicKey
+    );
+
+    // Process the link message on the new device
+    byte[] mainDevicePublicKey = DeviceLinking.ProcessDeviceLinkMessage(
+        linkMessage, 
+        newDeviceKeyPair, 
+        mainDeviceKeyPair.publicKey
+    );
+
+    // Add the new device with validation
+    mainDeviceManager.AddLinkedDevice(newDeviceKeyPair.publicKey);
+
+    // Create sync messages for the new device
+    byte[] syncData = Encoding.UTF8.GetBytes("Secure device synchronization data");
+    var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
+
+    // Process sync messages across devices
+    foreach (var message in syncMessages.Values)
+    {
+        byte[] processedData = mainDeviceManager.ProcessSyncMessage(message);
+        // Handle synchronized data
+    }
+}
+catch (Exception ex)
+{
+    // Comprehensive error handling for device linking
+    Console.WriteLine($"Device linking failed: {ex.Message}");
 }
 ```
 
-### Mailbox Communication
+## 🔐 Enhanced Group Messaging
 
 ```csharp
-// Create a transport implementation (needs to implement IMailboxTransport)
-var transport = new MyMailboxTransport();
+// Create a group with role-based access control
+var groupManager = new GroupChatManager(userIdentityKeyPair);
+string groupId = "secure-team-chat";
 
-// Create a mailbox manager
-var mailboxManager = E2EEClient.CreateMailboxManager(userKeyPair, transport);
+// Create the group with the current user as owner
+groupManager.CreateGroup(groupId);
 
-// Start mailbox operations
-mailboxManager.Start();
+// Add members with specific roles
+groupManager.AddGroupMember(groupId, member1PublicKey, MemberRole.Admin);
+groupManager.AddGroupMember(groupId, member2PublicKey, MemberRole.Member);
 
-// Send a message to a recipient
-string messageId = mailboxManager.SendMessage(
-    recipientKey, 
-    "Secure message", 
-    MessageType.Chat
+// Distribute sender keys securely
+var distributionMessage = groupManager.CreateDistributionMessage(groupId);
+
+// Process distribution message across members
+foreach (var memberManager in memberManagers)
+{
+    memberManager.ProcessSenderKeyDistribution(distributionMessage);
+}
+
+// Encrypt a group message with sender authentication
+var encryptedMessage = groupManager.EncryptGroupMessage(
+    groupId, 
+    "Confidential team discussion"
 );
 
-// Get received messages
-var messages = mailboxManager.GetMessages();
+// Decrypt with role-based access validation
+string decryptedMessage = groupManager.DecryptGroupMessage(encryptedMessage);
 
-// Mark a message as read
-await mailboxManager.MarkMessageAsReadAsync(messageId);
+// Rotate group key (requires admin privileges)
+byte[] newSenderKey = groupManager.RotateGroupKey(groupId);
+```
 
-// Delete a message
-await mailboxManager.DeleteMessageAsync(messageId);
+## 📬 Advanced Mailbox Communication
 
-// Stop the mailbox when done
+```csharp
+// Create a mailbox manager with custom transport
+var mailboxManager = new MailboxManager(
+    userIdentityKeyPair, 
+    new HttpMailboxTransport("https://mailbox.example.com")
+);
+
+// Configure advanced mailbox settings
+mailboxManager.SetPollingInterval(TimeSpan.FromMinutes(1));
+mailboxManager.SetAutoSendReceipts(true);
+
+// Start background message processing
+mailboxManager.Start();
+
+// Event-driven message handling
+mailboxManager.MessageReceived += (sender, args) => 
+{
+    var message = args.Message;
+    Console.WriteLine($"New message received: {message.MessageId}");
+    
+    // Automatically mark as read and send read receipt
+    await mailboxManager.MarkMessageAsReadAsync(message.MessageId);
+};
+
+// Send a message with expiration
+string messageId = mailboxManager.SendMessage(
+    recipientPublicKey, 
+    "Time-sensitive information", 
+    MessageType.Chat,
+    timeToLive: 24 * 60 * 60 * 1000 // 24 hours
+);
+
+// Stop mailbox operations when done
 mailboxManager.Stop();
 ```
 
-### WebSocket Secure Communication
+## 🔒 Secure Key Management
 
 ```csharp
-// Create a secure WebSocket client
-var client = new SecureWebSocketClient("wss://example.com/ws");
+// Advanced key generation with enhanced security
+var keyPair = KeyGenerator.GenerateEd25519KeyPair();
 
-// Set up a session (from previous key exchange)
-client.SetSession(doubleRatchetSession);
+// Derive X25519 keys for different purposes
+byte[] x25519PublicKey = KeyConversion.DeriveX25519PublicKeyFromEd25519(keyPair.privateKey);
 
-// Connect to the server
-await client.ConnectAsync();
+// Secure key storage with password and salt rotation
+KeyStorage.StoreKeyToFile(
+    sensitiveKey, 
+    "secure_key.dat", 
+    password: "strongPassword", 
+    saltRotationDays: 30
+);
 
-// Send an encrypted message
-await client.SendEncryptedMessageAsync("Secret message");
-
-// Receive and decrypt a message
-string receivedMessage = await client.ReceiveEncryptedMessageAsync();
-
-// Close the connection when done
-await client.CloseAsync();
+// Load key with automatic salt rotation
+byte[] loadedKey = KeyStorage.LoadKeyFromFile(
+    "secure_key.dat", 
+    password: "strongPassword", 
+    forceRotation: false
+);
 ```
 
-## 📋 Architecture
+## 🛡️ WebSocket Secure Communication
 
-The library is structured into several key components:
+```csharp
+var webSocketClient = new SecureWebSocketClient("wss://secure.example.com/ws");
 
-- **Core** - Constants, utilities, and secure memory handling
-- **Encryption** - AES implementation, Double Ratchet, and nonce generation
-- **KeyManagement** - Key generation, storage, validation, and conversion
-- **KeyExchange** - X3DH protocol implementation and session management
-- **Models** - Data structures for messages, sessions, and key bundles
-- **Communication** - WebSocket clients, message signing, and mailbox system
-- **GroupMessaging** - Group chat management and message distribution
-- **MultiDevice** - Device linking and synchronization
+try 
+{
+    // Establish secure session
+    await webSocketClient.ConnectAsync();
+    webSocketClient.SetSession(secureDoubleRatchetSession);
 
-## 🛡️ Security Design Principles
+    // Send encrypted messages with retry logic
+    await webSocketClient.SendEncryptedMessageAsync("Secure communication");
 
-- **Defense in Depth** - Multiple layers of security controls
-- **Least Privilege** - Minimal access to sensitive cryptographic material
-- **Secure Defaults** - Conservative default settings for maximum security
-- **Immutable Data Structures** - Thread-safe operation with no side effects
-- **Fail Secure** - Errors result in messages being rejected, not compromised
+    // Receive messages with comprehensive error handling
+    string receivedMessage = await webSocketClient.ReceiveEncryptedMessageAsync(
+        cancellationToken: CancellationTokenSource.CreateLinkedTokenSource(
+            new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token
+        ).Token
+    );
+}
+catch (WebSocketException ex)
+{
+    // Robust error handling
+    Console.WriteLine($"Secure WebSocket communication failed: {ex.Message}");
+}
+finally
+{
+    await webSocketClient.CloseAsync();
+}
+```
 
-## 🧪 Testing and Validation
+## 🔍 Key Enhancements
 
-The library includes comprehensive tests:
+- Enhanced role-based access control
+- Comprehensive device synchronization
+- Advanced key rotation mechanisms
+- Improved error handling and logging
+- Stronger replay and replay attack protections
 
-- Unit tests for individual components
-- Integration tests for end-to-end workflows
-- Security tests for cryptographic properties
-- Performance tests for efficiency
-- Edge case handling
+## 🛡️ Security Guarantees
 
-## 📚 Documentation
+- **Forward Secrecy** - Automatic key rotation
+- **Post-Compromise Security** - Resilient against potential key compromises
+- **Granular Access Control** - Role-based permissions
+- **Secure Memory Handling** - Protection of sensitive cryptographic material
 
-For more detailed documentation, please refer to the XML documentation comments in the code.
+## 📦 Installation
+
+```bash
+dotnet add package E2EELibrary
+```
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - See LICENSE file for details.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions welcome! Please submit pull requests or open issues.
 
 ## 📞 Support
 
-For security issues, please contact Russell Benzing [me@russellbenzing.com]
+For security concerns: Russell Benzing [me@russellbenzing.com]
 
 ## 🔗 References
 
