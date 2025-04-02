@@ -213,12 +213,6 @@ finally
 - **Granular Access Control** - Role-based permissions
 - **Secure Memory Handling** - Protection of sensitive cryptographic material
 
-## 📦 Installation
-
-```bash
-dotnet add package E2EELibrary
-```
-
 ## 📄 License
 
 MIT License - See LICENSE file for details.
