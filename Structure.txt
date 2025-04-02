@@ -60,11 +60,41 @@ LibEmiddle/
 │   │   ├── MultiDevice/
 │   │   │   ├── DeviceLinking.cs
 │   │   │   └── DeviceManager.cs
-│   │   └── LibEmiddleClient.cs
+│   │   ├── .editorconfig
+│   │   ├── Directory.Build.props
+│   │   ├── Directory.Build.targets
+│   │   ├── LibEmiddleClient.cs
+│   │   ├── LICENSE
+│   │   ├── NOTICE
+│   │   └── README.md
 ├── tests/
 │   └── LibEmiddle.Tests/
-│       ├── [Test files would go here]
-│       └── 
+│       ├── Mocks/
+│       │   └──  MailboxMockFactory.cs
+│       ├── DeviceLinkingTests.cs
+│       ├── DeviceRevocationTests.cs
+│       ├── DoubleRatchetTests.cs
+│       ├── E2EETestFixture.cs
+│       ├── EncryptionTests.cs
+│       ├── ErrorRecoveryTests.cs
+│       ├── GroupMessagingTests.cs
+│       ├── IntegrationTests.cs
+│       ├── KeyAuthTests.cs
+│       ├── KeyExchangeTests.cs
+│       ├── KeyManagementTests.cs
+│       ├── KeyStorageTests.cs
+│       ├── LargeGroupMessageTests.cs
+│       ├── MailboxManagerTests.cs
+│       ├── MessageDeserializationTests.cs
+│       ├── MultiDeviceTests.cs
+│       ├── PerformanceTests.cs
+│       ├── SecureMemoryTests.cs
+│       ├── SecureWebSocketTests.cs
+│       ├── SecurityTests.cs
+│       ├── SessionPersistenceTests.cs
+│       ├── SignatureTests.cs
+│       ├── TestsHelpers.cs
+│       └── X3DHExceptionTests.cs
 └── runtimes/
     ├── win-x64/
     │   └── native/
