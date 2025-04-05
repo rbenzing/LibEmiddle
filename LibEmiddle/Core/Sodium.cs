@@ -1,5 +1,8 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System;
+using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace E2EELibrary.Core
 {
@@ -240,8 +243,6 @@ namespace E2EELibrary.Core
 
         #endregion
 
-        // Additional libsodium functions used throughout your project
-
         #region X25519 Key Exchange Functions
 
         /// <summary>
@@ -283,6 +284,12 @@ namespace E2EELibrary.Core
         /// </summary>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_sign_ed25519_keypair(byte[] publicKey, byte[] secretKey);
+
+        /// <summary>
+        /// Generates an Ed25519 key pair deterministically from a 32-byte seed.
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_sign_ed25519_seed_keypair(byte[] publicKey, byte[] secretKey, byte[] seed);
 
         /// <summary>
         /// Converts an Ed25519 public key to an X25519 public key.
@@ -382,6 +389,29 @@ namespace E2EELibrary.Core
                 throw new InvalidOperationException("X25519 public key generation failed.");
 
             return publicKey;
+        }
+
+        #endregion
+
+        #region New Public Key Conversion
+
+        /// <summary>
+        /// Converts an Ed25519 public key to an X25519 (Curve25519) public key.
+        /// </summary>
+        /// <param name="ed25519PublicKey">The Ed25519 public key (32 bytes).</param>
+        /// <returns>The converted X25519 public key (32 bytes).</returns>
+        public static byte[] ConvertEd25519PublicKeyToCurve25519(byte[] ed25519PublicKey)
+        {
+            if (ed25519PublicKey == null)
+                throw new ArgumentNullException(nameof(ed25519PublicKey));
+            if (ed25519PublicKey.Length != 32)
+                throw new ArgumentException("Ed25519 public key must be 32 bytes.", nameof(ed25519PublicKey));
+
+            byte[] curve25519PublicKey = new byte[32];
+            int result = crypto_sign_ed25519_pk_to_curve25519(curve25519PublicKey, ed25519PublicKey);
+            if (result != 0)
+                throw new InvalidOperationException("Conversion from Ed25519 to Curve25519 public key failed.");
+            return curve25519PublicKey;
         }
 
         #endregion

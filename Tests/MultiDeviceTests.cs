@@ -80,10 +80,10 @@ namespace E2EELibraryTests
                 newDeviceKeyPair,
                 mainDeviceKeyPair.publicKey);
 
-            // Assert - in current implementation, this will return null
-            // because the ProcessDeviceLinkMessage method can't find the main device key
-            // This is expected behavior with the current design
-            Assert.IsNull(result, "Current implementation should return null without mainDevicePublicKey information");
+            // Assert: With our updated implementation, a valid message returns the main device's Ed25519 public key.
+            Assert.IsNotNull(result, "Valid device link message should be processed successfully.");
+            Assert.IsTrue(TestsHelpers.AreByteArraysEqual(result, mainDeviceKeyPair.publicKey),
+                "The returned main device public key should match the original.");
         }
 
         [TestMethod]

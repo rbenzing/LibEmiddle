@@ -20,47 +20,50 @@ namespace E2EELibrary.KeyManagement
         }
 
         /// <summary>
-        /// Generates an Ed25519 key pair for digital signatures
+        /// Generates a standard Ed25519 key pair using libsodium.
         /// </summary>
-        /// <returns>Tuple containing (publicKey, privateKey) where privateKey is 64 bytes</returns>
         public static (byte[] publicKey, byte[] privateKey) GenerateEd25519KeyPair()
         {
-            // Generate a full Ed25519 key pair.
-            var edKeyPair = KeyAuth.GenerateKeyPair();
-            return (edKeyPair.PublicKey, edKeyPair.PrivateKey);
+            byte[] publicKey = new byte[32];
+            byte[] privateKey = new byte[64];
+            int result = Sodium.crypto_sign_ed25519_keypair(publicKey, privateKey);
+            if (result != 0)
+            {
+                throw new InvalidOperationException("Ed25519 key pair generation failed.");
+            }
+            return (publicKey, privateKey);
         }
 
         /// <summary>
-        /// Generates an X25519 key pair for secure key exchange in 32 bytes
+        /// Deterministically generates an Ed25519 key pair from a 32-byte seed.
+        /// This method is useful for edge-case testing with minimal or maximal entropy.
         /// </summary>
-        /// <returns>Tuple containing (publicKey, privateKey)</returns>
+        public static (byte[] publicKey, byte[] privateKey) GenerateEd25519KeyPairFromSeed(byte[] seed)
+        {
+            if (seed == null || seed.Length != 32)
+                throw new ArgumentException("Seed must be 32 bytes.", nameof(seed));
+            byte[] publicKey = new byte[32];
+            byte[] privateKey = new byte[64];
+            // Call libsodium’s seeded keypair generation.
+            int result = Sodium.crypto_sign_ed25519_seed_keypair(publicKey, privateKey, seed);
+            if (result != 0)
+                throw new InvalidOperationException("Ed25519 seeded key pair generation failed.");
+            return (publicKey, privateKey);
+        }
+
+        /// <summary>
+        /// Generates an X25519 key pair.
+        /// </summary>
         public static (byte[] publicKey, byte[] privateKey) GenerateX25519KeyPair()
         {
-            // Generate a full Ed25519 key pair first.
-            var edKeyPair = KeyAuth.GenerateKeyPair();
-
-            // Derive a proper 32-byte X25519 private key from the Ed25519 private key.
-            byte[] x25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(edKeyPair.PrivateKey);
-
-            try
-            {
-                // Compute the corresponding X25519 public key.
-                byte[] x25519Public = Sodium.ScalarMultBase(x25519Private);
-
-                // Validate the generated public key
-                if (!KeyValidation.ValidateX25519PublicKey(x25519Public))
-                {
-                    throw new CryptographicException("Generated X25519 public key failed validation");
-                }
-
-                return (x25519Public, x25519Private);
-            }
-            catch (Exception ex)
-            {
-                // Clear sensitive data on exception
-                SecureMemory.SecureClear(x25519Private);
-                throw new CryptographicException("Failed to generate X25519 key pair", ex);
-            }
+            byte[] privateKey = new byte[32];
+            RandomNumberGenerator.Fill(privateKey);
+            // Clamp the private key as per RFC 7748.
+            privateKey[0] &= 248;
+            privateKey[31] &= 127;
+            privateKey[31] |= 64;
+            byte[] publicKey = Sodium.ScalarMultBase(privateKey);
+            return (publicKey, privateKey);
         }
     }
 }
