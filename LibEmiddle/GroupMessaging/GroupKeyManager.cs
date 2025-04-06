@@ -1,6 +1,5 @@
 ﻿using System.Security.Cryptography;
 using E2EELibrary.Core;
-using E2EELibrary.KeyManagement;
 
 namespace E2EELibrary.GroupMessaging
 {
@@ -24,7 +23,7 @@ namespace E2EELibrary.GroupMessaging
         /// <returns>New random key suitable for group encryption</returns>
         public byte[] GenerateGroupKey()
         {
-            byte[] key = new byte[GROUP_KEY_SIZE];
+            byte[] key = Sodium.GenerateRandomBytes(GROUP_KEY_SIZE);
             RandomNumberGenerator.Fill(key);
             return key;
         }

@@ -48,8 +48,8 @@ namespace E2EELibrary.Core
         {
             Sodium.Initialize();
 
-            byte[] publicKey = new byte[ED25519_PUBLICKEYBYTES];
-            byte[] privateKey = new byte[ED25519_SECRETKEYBYTES];
+            byte[] publicKey = Sodium.GenerateRandomBytes(ED25519_PUBLICKEYBYTES);
+            byte[] privateKey = Sodium.GenerateRandomBytes(ED25519_SECRETKEYBYTES);
 
             unsafe
             {
@@ -83,7 +83,7 @@ namespace E2EELibrary.Core
 
             Sodium.Initialize();
 
-            byte[] signature = new byte[ED25519_BYTES];
+            byte[] signature = Sodium.GenerateRandomBytes(ED25519_BYTES);
             ulong signatureLength = 0;
 
             unsafe

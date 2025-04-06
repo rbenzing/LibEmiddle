@@ -14,7 +14,7 @@ namespace E2EELibrary.KeyManagement
         /// <returns>Random sender key</returns>
         public static byte[] GenerateSenderKey()
         {
-            byte[] senderKey = new byte[Constants.AES_KEY_SIZE];
+            byte[] senderKey = Sodium.GenerateRandomBytes(Constants.AES_KEY_SIZE);
             RandomNumberGenerator.Fill(senderKey);
             return senderKey;
         }
@@ -24,8 +24,8 @@ namespace E2EELibrary.KeyManagement
         /// </summary>
         public static (byte[] publicKey, byte[] privateKey) GenerateEd25519KeyPair()
         {
-            byte[] publicKey = new byte[32];
-            byte[] privateKey = new byte[64];
+            byte[] publicKey = Sodium.GenerateRandomBytes(32);
+            byte[] privateKey = Sodium.GenerateRandomBytes(64);
             int result = Sodium.crypto_sign_ed25519_keypair(publicKey, privateKey);
             if (result != 0)
             {
@@ -42,8 +42,8 @@ namespace E2EELibrary.KeyManagement
         {
             if (seed == null || seed.Length != 32)
                 throw new ArgumentException("Seed must be 32 bytes.", nameof(seed));
-            byte[] publicKey = new byte[32];
-            byte[] privateKey = new byte[64];
+            byte[] publicKey = Sodium.GenerateRandomBytes(32);
+            byte[] privateKey = Sodium.GenerateRandomBytes(64);
             // Call libsodium’s seeded keypair generation.
             int result = Sodium.crypto_sign_ed25519_seed_keypair(publicKey, privateKey, seed);
             if (result != 0)
@@ -52,17 +52,19 @@ namespace E2EELibrary.KeyManagement
         }
 
         /// <summary>
-        /// Generates an X25519 key pair.
+        /// Generates an X25519 key pair using libsodium's crypto_box_keypair
         /// </summary>
         public static (byte[] publicKey, byte[] privateKey) GenerateX25519KeyPair()
         {
-            byte[] privateKey = new byte[32];
-            RandomNumberGenerator.Fill(privateKey);
-            // Clamp the private key as per RFC 7748.
-            privateKey[0] &= 248;
-            privateKey[31] &= 127;
-            privateKey[31] |= 64;
-            byte[] publicKey = Sodium.ScalarMultBase(privateKey);
+            Sodium.Initialize();
+
+            byte[] publicKey = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
+            byte[] privateKey = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
+
+            int result = Sodium.crypto_box_keypair(publicKey, privateKey);
+            if (result != 0)
+                throw new InvalidOperationException("X25519 key pair generation failed.");
+
             return (publicKey, privateKey);
         }
     }

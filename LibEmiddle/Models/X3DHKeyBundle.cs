@@ -40,7 +40,7 @@ namespace E2EELibrary.Models
         {
             // Return a copy to prevent modification of the original
             if (_identityKeyPrivate == null) return null;
-            byte[] copy = new byte[_identityKeyPrivate.Length];
+            byte[] copy = Sodium.GenerateRandomBytes(_identityKeyPrivate.Length);
             _identityKeyPrivate.AsSpan().CopyTo(copy.AsSpan());
             return copy;
         }
@@ -62,7 +62,7 @@ namespace E2EELibrary.Models
                 return;
             }
 
-            _identityKeyPrivate = new byte[value.Length];
+            _identityKeyPrivate = Sodium.GenerateRandomBytes(value.Length);
             value.AsSpan().CopyTo(_identityKeyPrivate.AsSpan());
         }
 
@@ -73,7 +73,7 @@ namespace E2EELibrary.Models
         public byte[]? GetSignedPreKeyPrivate()
         {
             if (_signedPreKeyPrivate == null) return null;
-            byte[] copy = new byte[_signedPreKeyPrivate.Length];
+            byte[] copy = Sodium.GenerateRandomBytes(_signedPreKeyPrivate.Length);
             _signedPreKeyPrivate.AsSpan().CopyTo(copy.AsSpan());
             return copy;
         }
@@ -95,7 +95,7 @@ namespace E2EELibrary.Models
                 return;
             }
 
-            _signedPreKeyPrivate = new byte[value.Length];
+            _signedPreKeyPrivate = Sodium.GenerateRandomBytes(value.Length);
             value.AsSpan().CopyTo(_signedPreKeyPrivate.AsSpan());
         }
 

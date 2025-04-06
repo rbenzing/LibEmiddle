@@ -20,22 +20,13 @@ namespace E2EELibrary.Core
             if (data == null || data.Length == 0)
                 return;
 
-            // Use CryptographicOperations.ZeroMemory where available
-            try
+            // Use libsodium's native sodium_memzero
+            unsafe
             {
-                CryptographicOperations.ZeroMemory(data.AsSpan());
-            }
-            catch (PlatformNotSupportedException)
-            {
-                // Fallback for platforms that don't support CryptographicOperations
-                var span = data.AsSpan();
-                for (int i = 0; i < span.Length; i++)
+                fixed (byte* ptr = data)
                 {
-                    span[i] = 0;
+                    Sodium.sodium_memzero((IntPtr)ptr, (UIntPtr)data.Length);
                 }
-
-                // Add a memory barrier to prevent reordering
-                Thread.MemoryBarrier();
             }
 
             // Additional protection against optimizations
@@ -43,13 +34,11 @@ namespace E2EELibrary.Core
         }
 
         /// <summary>
-        /// Compares two byte arrays for equality in constant time to prevent timing attacks.
-        /// The time taken is proportional to the length of the arrays being compared,
-        /// not to how many bytes match.
+        /// Compares two byte arrays in constant time to prevent timing attacks.
         /// </summary>
         /// <param name="a">First byte array</param>
         /// <param name="b">Second byte array</param>
-        /// <returns>True if arrays are equal</returns>
+        /// <returns>True if arrays are equal, false otherwise</returns>
         public static bool SecureCompare(byte[] a, byte[] b)
         {
             // Handle null cases
@@ -58,28 +47,22 @@ namespace E2EELibrary.Core
             if (a == null || b == null)
                 return false;
 
-            int lengthA = a.Length;
-            int lengthB = b.Length;
+            // If lengths differ, return false but still do a comparison with the shared length
+            // to ensure constant-time operation regardless of where arrays differ
+            int minLength = Math.Min(a.Length, b.Length);
+            int result;
 
-            // Calculate the maximum length
-            int maxLength = Math.Max(lengthA, lengthB);
-
-            // Start with a non-zero value if lengths differ
-            uint result = (uint)(lengthA ^ lengthB);
-
-            // Iterate through all positions up to the maximum length
-            for (int i = 0; i < maxLength; i++)
+            unsafe
             {
-                // For indices beyond the actual array length, use 0
-                byte valueA = i < lengthA ? a[i] : (byte)0;
-                byte valueB = i < lengthB ? b[i] : (byte)0;
-
-                // XOR the bytes and OR into result
-                result |= (uint)(valueA ^ valueB);
+                fixed (byte* aPtr = a, bPtr = b)
+                {
+                    // Compare only up to the minimum length to avoid buffer overruns
+                    result = Sodium.sodium_memcmp((IntPtr)aPtr, (IntPtr)bPtr, (UIntPtr)minLength);
+                }
             }
 
-            // Return true only if all comparisons were equal
-            return result == 0;
+            // Return true only if the comparison succeeds AND lengths are identical
+            return result == 0 && a.Length == b.Length;
         }
 
         /// <summary>
@@ -87,24 +70,40 @@ namespace E2EELibrary.Core
         /// </summary>
         /// <param name="source">The source array to copy</param>
         /// <returns>A new array containing a copy of the source data</returns>
-        public static byte[]? SecureCopy(byte[] source)
+        public static byte[] SecureCopy(byte[] source)
         {
             ArgumentNullException.ThrowIfNull(source, nameof(source));
 
-            byte[] copy = new byte[source.Length];
+            byte[] copy = Sodium.GenerateRandomBytes(source.Length);
             source.AsSpan().CopyTo(copy.AsSpan());
             return copy;
         }
 
         /// <summary>
-        /// Creates a secure buffer for sensitive cryptographic operations.
+        /// Creates a secure buffer using libsodium's protected memory allocation.
         /// </summary>
         /// <param name="size">Size of the buffer in bytes</param>
-        /// <param name="usePool">Whether to use buffer pooling for better performance</param>
         /// <returns>A new secure buffer</returns>
-        public static byte[] CreateSecureBuffer(int size, bool usePool = true)
+        public static unsafe byte[] CreateSecureBuffer(int size)
         {
-            return CreateBuffer(size, usePool, isSecure: true);
+            if (size <= 0)
+                throw new ArgumentException("Buffer size must be positive", nameof(size));
+
+            // Allocate memory using sodium_malloc
+            IntPtr ptr = Sodium.sodium_malloc((UIntPtr)size);
+            if (ptr == IntPtr.Zero)
+                throw new OutOfMemoryException("Failed to allocate secure memory");
+
+            // Create a byte array from this memory
+            byte[] buffer = Sodium.GenerateRandomBytes(size);
+
+            // Copy the allocated memory to the managed array
+            Marshal.Copy(ptr, buffer, 0, size);
+
+            // Free the sodium_malloc memory - this is separate from the managed buffer
+            Sodium.sodium_free(ptr);
+
+            return buffer;
         }
 
         /// <summary>
@@ -145,7 +144,7 @@ namespace E2EELibrary.Core
             // For very large buffers, avoid the pool to prevent impact on other operations
             if (!usePool || size > 1024 * 16)
             {
-                return new byte[size];
+                return Sodium.GenerateRandomBytes(size);
             }
 
             // For smaller buffers, rent from the pool
@@ -211,6 +210,7 @@ namespace E2EELibrary.Core
         {
             private T[] _array;
             private bool _disposed = false;
+            private bool _isLocked = false;
 
             /// <summary>
             /// Secure array by length
@@ -219,6 +219,7 @@ namespace E2EELibrary.Core
             public SecureArray(int length)
             {
                 _array = new T[length];
+                LockArray();
             }
 
             /// <summary>
@@ -229,6 +230,22 @@ namespace E2EELibrary.Core
             {
                 _array = new T[existingArray.Length];
                 existingArray.CopyTo(_array, 0);
+                LockArray();
+            }
+
+            private void LockArray()
+            {
+                if (typeof(T) == typeof(byte) && !_isLocked)
+                {
+                    unsafe
+                    {
+                        fixed (byte* ptr = (byte[])(object)_array)
+                        {
+                            Sodium.sodium_mlock((IntPtr)ptr, (UIntPtr)(_array.Length * Marshal.SizeOf<T>()));
+                            _isLocked = true;
+                        }
+                    }
+                }
             }
 
             /// <summary>
@@ -245,7 +262,20 @@ namespace E2EELibrary.Core
                 {
                     if (typeof(T) == typeof(byte))
                     {
-                        SecureClear((byte[])(object)_array);
+                        if (_isLocked)
+                        {
+                            unsafe
+                            {
+                                fixed (byte* ptr = (byte[])(object)_array)
+                                {
+                                    Sodium.sodium_munlock((IntPtr)ptr, (UIntPtr)(_array.Length * Marshal.SizeOf<T>()));
+                                }
+                            }
+                        }
+                        else
+                        {
+                            SecureClear((byte[])(object)_array);
+                        }
                     }
                     else
                     {
@@ -255,6 +285,5 @@ namespace E2EELibrary.Core
                 }
             }
         }
-
     }
 }

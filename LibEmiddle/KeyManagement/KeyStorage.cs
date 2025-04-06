@@ -31,7 +31,7 @@ namespace E2EELibrary.KeyManagement
             if (!string.IsNullOrEmpty(password))
             {
                 // Generate salt with high entropy
-                byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE];
+                byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
                 RandomNumberGenerator.Fill(salt);
 
                 // Store creation timestamp for salt rotation
@@ -135,7 +135,7 @@ namespace E2EELibrary.KeyManagement
                     if (metadataLength > 0 && metadataLength < 1024 && metadataLength <= storedData.Length - 4)
                     {
                         // This is a new format file with metadata
-                        byte[] metadataBytes = new byte[metadataLength];
+                        byte[] metadataBytes = Sodium.GenerateRandomBytes(metadataLength);
                         storedData.AsSpan(4, metadataLength).CopyTo(metadataBytes);
 
                         string metadataJson = Encoding.UTF8.GetString(metadataBytes);
@@ -155,9 +155,9 @@ namespace E2EELibrary.KeyManagement
 
                             // Extract salt, nonce, and encrypted key
                             int offset = 4 + metadataLength;
-                            byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE]; // Using constant for consistency
-                            byte[] nonce = new byte[Constants.NONCE_SIZE];
-                            byte[] encryptedKey = new byte[storedData.Length - offset - salt.Length - nonce.Length];
+                            byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE); // Using constant for consistency
+                            byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
+                            byte[] encryptedKey = Sodium.GenerateRandomBytes(storedData.Length - offset - salt.Length - nonce.Length);
 
                             // Copy salt data - using spans for efficient memory handling
                             storedData.AsSpan(offset, salt.Length).CopyTo(salt.AsSpan());
@@ -191,9 +191,9 @@ namespace E2EELibrary.KeyManagement
                 }
 
                 // Fall back to old format (for backward compatibility)
-                byte[] oldSalt = new byte[16];
-                byte[] oldNonce = new byte[Constants.NONCE_SIZE];
-                byte[] oldEncryptedKey = new byte[storedData.Length - oldSalt.Length - oldNonce.Length];
+                byte[] oldSalt = Sodium.GenerateRandomBytes(16);
+                byte[] oldNonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
+                byte[] oldEncryptedKey = Sodium.GenerateRandomBytes(storedData.Length - oldSalt.Length - oldNonce.Length);
 
                 // Use spans for efficient memory copying
                 storedData.AsSpan(0, oldSalt.Length).CopyTo(oldSalt.AsSpan());

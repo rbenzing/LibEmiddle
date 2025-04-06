@@ -213,7 +213,44 @@ namespace E2EELibrary.Core
 
         #endregion
 
-        #region Common libsodium operations
+        #region Memory operations
+
+        /// <summary>
+        /// Returns a pointer from which exactly size contiguous bytes of memory can be
+        /// accessed. Like normal malloc, NULL may be returned and errno set if it is 
+        /// not possible to allocate enough memory.
+        /// </summary>
+        /// <param name="size"></param>
+        /// <returns></returns>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr sodium_malloc(UIntPtr size);
+
+        /// <summary>
+        /// Free the allocated region
+        /// </summary>
+        /// <param name="ptr"></param>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void sodium_free(IntPtr ptr);
+
+        /// <summary>
+        /// Locks at least len bytes of memory starting at addr. This can help avoid swapping 
+        /// sensitive data to disk.
+        /// </summary>
+        /// <param name="addr"></param>
+        /// <param name="len"></param>
+        /// <returns></returns>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int sodium_mlock(IntPtr addr, UIntPtr len);
+
+        /// <summary>
+        /// Called after locked memory is not being used anymore. It will zero len bytes starting at 
+        /// addr before flagging the pages as swappable again. 
+        /// </summary>
+        /// <param name="addr"></param>
+        /// <param name="len"></param>
+        /// <returns></returns>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int sodium_munlock(IntPtr addr, UIntPtr len);
 
         /// <summary>
         /// Securely zeros out a memory region.
@@ -239,7 +276,7 @@ namespace E2EELibrary.Core
         /// <param name="buffer">The buffer to fill with random bytes.</param>
         /// <param name="size">The number of bytes to fill.</param>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern void randombytes_buf(IntPtr buffer, UIntPtr size);
+        private static extern void randombytes_buf(IntPtr buffer, UIntPtr size);
 
         #endregion
 
@@ -256,6 +293,16 @@ namespace E2EELibrary.Core
         /// </summary>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_scalarmult_curve25519_base(byte[] q, byte[] n);
+
+        #endregion
+
+        #region X25519 Key Generation
+
+        /// <summary>
+        /// Randomly generates a secret key and the corresponding public key.
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_box_keypair(byte[] publicKey, byte[] secretKey);
 
         #endregion
 
@@ -327,7 +374,7 @@ namespace E2EELibrary.Core
         #region Utility Functions
 
         /// <summary>
-        /// Fills a buffer with random bytes.
+        /// Fills a buffer with random bytes using libsodium's cryptographically secure random number generator.
         /// </summary>
         /// <param name="buffer">The buffer to fill with random data.</param>
         public static void RandomBytes(byte[] buffer)
@@ -347,6 +394,28 @@ namespace E2EELibrary.Core
         }
 
         /// <summary>
+        /// Fills a buffer with random bytes.
+        /// </summary>
+        public static byte[] GenerateRandomBytes(int size)
+        {
+            if (size <= 0)
+                throw new ArgumentException("Size must be positive", nameof(size));
+
+            Initialize();
+
+            byte[] buffer = new byte[size];
+            unsafe
+            {
+                fixed (byte* ptr = buffer)
+                {
+                    randombytes_buf((IntPtr)ptr, (UIntPtr)size);
+                }
+            }
+
+            return buffer;
+        }
+
+        /// <summary>
         /// Computes a shared secret using X25519.
         /// </summary>
         /// <param name="secretKey">The secret key.</param>
@@ -361,7 +430,7 @@ namespace E2EELibrary.Core
 
             Initialize();
 
-            byte[] sharedSecret = new byte[32];
+            byte[] sharedSecret = Sodium.GenerateRandomBytes(32);
             int result = crypto_scalarmult_curve25519(sharedSecret, secretKey, publicKey);
 
             if (result != 0)
@@ -382,7 +451,7 @@ namespace E2EELibrary.Core
 
             Initialize();
 
-            byte[] publicKey = new byte[32];
+            byte[] publicKey = Sodium.GenerateRandomBytes(32);
             int result = crypto_scalarmult_curve25519_base(publicKey, secretKey);
 
             if (result != 0)
@@ -407,7 +476,7 @@ namespace E2EELibrary.Core
             if (ed25519PublicKey.Length != 32)
                 throw new ArgumentException("Ed25519 public key must be 32 bytes.", nameof(ed25519PublicKey));
 
-            byte[] curve25519PublicKey = new byte[32];
+            byte[] curve25519PublicKey = Sodium.GenerateRandomBytes(32);
             int result = crypto_sign_ed25519_pk_to_curve25519(curve25519PublicKey, ed25519PublicKey);
             if (result != 0)
                 throw new InvalidOperationException("Conversion from Ed25519 to Curve25519 public key failed.");

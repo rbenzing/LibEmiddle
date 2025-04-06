@@ -130,7 +130,7 @@ namespace E2EELibraryTests
         public void CreateSecureBuffer_WithPooling_ShouldWorkCorrectly()
         {
             // Test with pooling enabled
-            byte[] pooledBuffer = SecureMemory.CreateSecureBuffer(1024, true);
+            byte[] pooledBuffer = SecureMemory.CreateSecureBuffer(1024);
             Assert.IsNotNull(pooledBuffer, "Pooled buffer should not be null");
             Assert.AreEqual(1024, pooledBuffer.Length, "Pooled buffer should have the requested size");
 
@@ -144,7 +144,7 @@ namespace E2EELibraryTests
             SecureMemory.ReturnBuffer(pooledBuffer, true);
 
             // Test with pooling disabled
-            byte[] nonPooledBuffer = SecureMemory.CreateSecureBuffer(1024, false);
+            byte[] nonPooledBuffer = SecureMemory.CreateSecureBuffer(1024);
             Assert.IsNotNull(nonPooledBuffer, "Non-pooled buffer should not be null");
             Assert.AreEqual(1024, nonPooledBuffer.Length, "Non-pooled buffer should have the requested size");
         }

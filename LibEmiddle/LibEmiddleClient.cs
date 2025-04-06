@@ -357,7 +357,7 @@ namespace E2EELibrary
 
             // Combine device key and timestamp for signing
             byte[] timestampBytes = BitConverter.GetBytes(timestamp);
-            byte[] dataToSign = new byte[revokedDeviceKey.Length + timestampBytes.Length];
+            byte[] dataToSign = Core.Sodium.GenerateRandomBytes(revokedDeviceKey.Length + timestampBytes.Length);
 
             revokedDeviceKey.AsSpan().CopyTo(dataToSign.AsSpan(0, revokedDeviceKey.Length));
             timestampBytes.AsSpan().CopyTo(dataToSign.AsSpan(revokedDeviceKey.Length));

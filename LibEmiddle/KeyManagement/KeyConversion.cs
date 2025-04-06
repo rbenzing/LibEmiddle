@@ -67,7 +67,7 @@ namespace E2EELibrary.KeyManagement
             // If already 32 bytes, assume it is already a seed or an X25519 key.
             if (ed25519PrivateKey.Length == Constants.X25519_KEY_SIZE)
             {
-                byte[] copy = new byte[Constants.X25519_KEY_SIZE];
+                byte[] copy = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
                 ed25519PrivateKey.AsSpan(0, Constants.X25519_KEY_SIZE).CopyTo(copy.AsSpan());
                 return copy;
             }
@@ -75,7 +75,7 @@ namespace E2EELibrary.KeyManagement
             // If it's a 64-byte Ed25519 private key, extract the seed (first 32 bytes).
             if (ed25519PrivateKey.Length == Constants.ED25519_PRIVATE_KEY_SIZE)
             {
-                byte[] seed = new byte[Constants.X25519_KEY_SIZE];
+                byte[] seed = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
                 ed25519PrivateKey.AsSpan(0, Constants.X25519_KEY_SIZE).CopyTo(seed);
 
                 // Derive the X25519 private key from the seed following RFC 7748.
@@ -86,7 +86,7 @@ namespace E2EELibrary.KeyManagement
                 hash[31] &= 127; // Clear the highest bit.
                 hash[31] |= 64;  // Set the second highest bit.
 
-                byte[] x25519Private = new byte[Constants.X25519_KEY_SIZE];
+                byte[] x25519Private = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
                 hash.AsSpan(0, Constants.X25519_KEY_SIZE).CopyTo(x25519Private);
                 return x25519Private;
             }

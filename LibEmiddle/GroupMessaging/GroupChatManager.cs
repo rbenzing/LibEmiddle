@@ -151,7 +151,7 @@ namespace E2EELibrary.GroupMessaging
                 }
 
                 // Make a deep copy of the sender key to avoid concurrent modification
-                byte[] senderKeyCopy = new byte[groupSession.SenderKey.Length];
+                byte[] senderKeyCopy = Sodium.GenerateRandomBytes(groupSession.SenderKey.Length);
                 groupSession.SenderKey.AsSpan().CopyTo(senderKeyCopy);
 
                 // Encrypt message with the copy

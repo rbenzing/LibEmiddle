@@ -2,6 +2,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using E2EELibrary.Communication;
+using E2EELibrary.Core;
 using E2EELibrary.Encryption;
 using E2EELibrary.Models;
 
@@ -94,7 +95,7 @@ namespace E2EELibrary.GroupMessaging
             try
             {
                 // Create a deep copy of the sender key
-                byte[] senderKeyCopy = new byte[distribution.SenderKey.Length];
+                byte[] senderKeyCopy = Sodium.GenerateRandomBytes(distribution.SenderKey.Length);
                 distribution.SenderKey.AsSpan().CopyTo(senderKeyCopy);
 
                 _senderKeys[storageKey] = senderKeyCopy;
@@ -129,7 +130,7 @@ namespace E2EELibrary.GroupMessaging
                 if (_senderKeys.TryGetValue(storageKey, out byte[]? senderKey))
                 {
                     // Return a copy to prevent external modification
-                    byte[] result = new byte[senderKey.Length];
+                    byte[] result = Sodium.GenerateRandomBytes(senderKey.Length);
                     senderKey.AsSpan().CopyTo(result);
                     return result;
                 }
@@ -287,7 +288,7 @@ namespace E2EELibrary.GroupMessaging
 
             // For compatibility with existing tests, generate a symmetric key directly
             // In a production system, this would use proper ECDH as in the other implementation
-            byte[] encryptionKey = new byte[32];
+            byte[] encryptionKey = Sodium.GenerateRandomBytes(32);
             using (var rng = RandomNumberGenerator.Create())
             {
                 rng.GetBytes(encryptionKey);

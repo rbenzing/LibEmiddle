@@ -46,7 +46,7 @@ namespace E2EELibrary.MultiDevice
             );
 
             // Generate a random sync key with high entropy
-            _syncKey = new byte[Constants.AES_KEY_SIZE];
+            _syncKey = Sodium.GenerateRandomBytes(Constants.AES_KEY_SIZE);
             using (var rng = RandomNumberGenerator.Create())
             {
                 rng.GetBytes(_syncKey);
@@ -86,7 +86,7 @@ namespace E2EELibrary.MultiDevice
                 Sodium.ScalarMultBase(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
 
             // Create a deep copy of the key to prevent any external modification
-            byte[] keyCopy = new byte[finalKey.Length];
+            byte[] keyCopy = Sodium.GenerateRandomBytes(finalKey.Length);
             finalKey.AsSpan(0, finalKey.Length).CopyTo(keyCopy.AsSpan(0, finalKey.Length));
 
             // Add to dictionary using Base64 representation of the key as dictionary key to prevent duplicates
@@ -443,10 +443,10 @@ namespace E2EELibrary.MultiDevice
 
             // Combine device key and timestamp for signing
             byte[] timestampBytes = BitConverter.GetBytes(timestamp);
-            byte[] dataToSign = new byte[deviceKeyToRevoke.Length + timestampBytes.Length];
+            byte[] dataToSign = Sodium.GenerateRandomBytes(deviceKeyToRevoke.Length + timestampBytes.Length);
 
-            Buffer.BlockCopy(deviceKeyToRevoke, 0, dataToSign, 0, deviceKeyToRevoke.Length);
-            Buffer.BlockCopy(timestampBytes, 0, dataToSign, deviceKeyToRevoke.Length, timestampBytes.Length);
+            deviceKeyToRevoke.AsSpan().CopyTo(dataToSign.AsSpan(0, deviceKeyToRevoke.Length));
+            timestampBytes.AsSpan().CopyTo(dataToSign.AsSpan(deviceKeyToRevoke.Length, timestampBytes.Length));
 
             // Sign the combined data using _deviceKeyPair (not _identityKeyPair)
             byte[] signature = MessageSigning.SignMessage(dataToSign, _deviceKeyPair.privateKey);
@@ -563,7 +563,7 @@ namespace E2EELibrary.MultiDevice
             if (!string.IsNullOrEmpty(password))
             {
                 // Generate a salt
-                byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE];
+                byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
                 using (var rng = RandomNumberGenerator.Create())
                 {
                     rng.GetBytes(salt);
@@ -578,7 +578,7 @@ namespace E2EELibrary.MultiDevice
                 SecureMemory.SecureClear(key);
 
                 // Combine salt, nonce, and ciphertext
-                byte[] result = new byte[salt.Length + nonce.Length + ciphertext.Length];
+                byte[] result = Sodium.GenerateRandomBytes(salt.Length + nonce.Length + ciphertext.Length);
                 Buffer.BlockCopy(salt, 0, result, 0, salt.Length);
                 Buffer.BlockCopy(nonce, 0, result, salt.Length, nonce.Length);
                 Buffer.BlockCopy(ciphertext, 0, result, salt.Length + nonce.Length, ciphertext.Length);
@@ -611,14 +611,14 @@ namespace E2EELibrary.MultiDevice
                 if (data.Length < Constants.DEFAULT_SALT_SIZE + Constants.NONCE_SIZE + 16)
                     throw new ArgumentException("Data is too short to be valid encrypted export", nameof(data));
 
-                byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE];
-                byte[] nonce = new byte[Constants.NONCE_SIZE];
+                byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
+                byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
                 Buffer.BlockCopy(data, 0, salt, 0, salt.Length);
                 Buffer.BlockCopy(data, salt.Length, nonce, 0, nonce.Length);
 
                 // Extract ciphertext
                 int ciphertextLength = data.Length - salt.Length - nonce.Length;
-                byte[] ciphertext = new byte[ciphertextLength];
+                byte[] ciphertext = Sodium.GenerateRandomBytes(ciphertextLength);
                 Buffer.BlockCopy(data, salt.Length + nonce.Length, ciphertext, 0, ciphertextLength);
 
                 // Derive key

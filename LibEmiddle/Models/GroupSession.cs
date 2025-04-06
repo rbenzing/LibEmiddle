@@ -1,4 +1,6 @@
-﻿namespace E2EELibrary.Models
+﻿using E2EELibrary.Core;
+
+namespace E2EELibrary.Models
 {
     /// <summary>
     /// Represents the state of a group messaging session
@@ -51,14 +53,14 @@
             // Deep copy of SenderKey
             if (this.SenderKey != null)
             {
-                clone.SenderKey = new byte[this.SenderKey.Length];
+                clone.SenderKey = Sodium.GenerateRandomBytes(this.SenderKey.Length);
                 this.SenderKey.AsSpan().CopyTo(clone.SenderKey.AsSpan());
             }
 
             // Deep copy of CreatorIdentityKey
             if (this.CreatorIdentityKey != null)
             {
-                clone.CreatorIdentityKey = new byte[this.CreatorIdentityKey.Length];
+                clone.CreatorIdentityKey = Sodium.GenerateRandomBytes(this.CreatorIdentityKey.Length);
                 this.CreatorIdentityKey.AsSpan().CopyTo(clone.CreatorIdentityKey.AsSpan());
             }
 

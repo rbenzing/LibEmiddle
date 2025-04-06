@@ -47,7 +47,7 @@ namespace E2EELibrary.KeyExchange
                 byte[] encryptedData = AES.AESEncrypt(serializedData, encryptionKey, nonce);
 
                 // Combine nonce and encrypted data using AsSpan
-                byte[] result = new byte[nonce.Length + encryptedData.Length];
+                byte[] result = Sodium.GenerateRandomBytes(nonce.Length + encryptedData.Length);
                 nonce.AsSpan().CopyTo(result.AsSpan(0, nonce.Length));
                 encryptedData.AsSpan().CopyTo(result.AsSpan(nonce.Length));
 
@@ -79,8 +79,8 @@ namespace E2EELibrary.KeyExchange
                 try
                 {
                     // Extract nonce and encrypted data
-                    byte[] nonce = new byte[Constants.NONCE_SIZE];
-                    byte[] encryptedData = new byte[serializedData.Length - Constants.NONCE_SIZE];
+                    byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
+                    byte[] encryptedData = Sodium.GenerateRandomBytes(serializedData.Length - Constants.NONCE_SIZE);
 
                     serializedData.AsSpan(0, Constants.NONCE_SIZE).CopyTo(nonce.AsSpan());
                     serializedData.AsSpan(Constants.NONCE_SIZE).CopyTo(encryptedData.AsSpan());

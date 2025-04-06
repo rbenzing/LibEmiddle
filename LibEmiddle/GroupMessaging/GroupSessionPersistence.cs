@@ -127,7 +127,7 @@ namespace E2EELibrary.GroupMessaging
             if (!string.IsNullOrEmpty(password))
             {
                 // Generate salt and nonce
-                byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE];
+                byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
                 RandomNumberGenerator.Fill(salt);
 
                 byte[] nonce = NonceGenerator.GenerateNonce();
@@ -176,15 +176,15 @@ namespace E2EELibrary.GroupMessaging
             if (!string.IsNullOrEmpty(password))
             {
                 // Extract salt and nonce
-                byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE];
-                byte[] nonce = new byte[Constants.NONCE_SIZE];
+                byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
+                byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
 
                 Buffer.BlockCopy(fileData, 0, salt, 0, salt.Length);
                 Buffer.BlockCopy(fileData, salt.Length, nonce, 0, nonce.Length);
 
                 // Extract encrypted data
                 int encryptedDataOffset = salt.Length + nonce.Length;
-                byte[] encryptedData = new byte[fileData.Length - encryptedDataOffset];
+                byte[] encryptedData = Sodium.GenerateRandomBytes(fileData.Length - encryptedDataOffset);
                 Buffer.BlockCopy(fileData, encryptedDataOffset, encryptedData, 0, encryptedData.Length);
 
                 // Derive key from password
@@ -317,7 +317,7 @@ namespace E2EELibrary.GroupMessaging
                 byte[] encryptedData = AES.AESEncrypt(data, encryptionKey, nonce);
 
                 // Combine nonce and encrypted data
-                byte[] result = new byte[nonce.Length + encryptedData.Length];
+                byte[] result = Sodium.GenerateRandomBytes(nonce.Length + encryptedData.Length);
                 Buffer.BlockCopy(nonce, 0, result, 0, nonce.Length);
                 Buffer.BlockCopy(encryptedData, 0, result, nonce.Length, encryptedData.Length);
 
@@ -341,8 +341,8 @@ namespace E2EELibrary.GroupMessaging
             if (decryptionKey != null && decryptionKey.Length == Constants.AES_KEY_SIZE)
             {
                 // Extract nonce and encrypted data
-                byte[] nonce = new byte[Constants.NONCE_SIZE];
-                byte[] encryptedData = new byte[serializedData.Length - Constants.NONCE_SIZE];
+                byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
+                byte[] encryptedData = Sodium.GenerateRandomBytes(serializedData.Length - Constants.NONCE_SIZE);
 
                 Buffer.BlockCopy(serializedData, 0, nonce, 0, nonce.Length);
                 Buffer.BlockCopy(serializedData, nonce.Length, encryptedData, 0, encryptedData.Length);
@@ -453,7 +453,7 @@ namespace E2EELibrary.GroupMessaging
             // If key is already the right size, return a copy
             if (identityKey.Length == Constants.X25519_KEY_SIZE)
             {
-                byte[] copy = new byte[identityKey.Length];
+                byte[] copy = Sodium.GenerateRandomBytes(identityKey.Length);
                 identityKey.AsSpan().CopyTo(copy);
                 return copy;
             }
@@ -469,7 +469,7 @@ namespace E2EELibrary.GroupMessaging
         private byte[] _sessionKeyToIdentityKey(byte[] sessionKey)
         {
             // Just return a copy since we can't recover the original identity key
-            byte[] copy = new byte[sessionKey.Length];
+            byte[] copy = Sodium.GenerateRandomBytes(sessionKey.Length);
             sessionKey.AsSpan().CopyTo(copy);
             return copy;
         }

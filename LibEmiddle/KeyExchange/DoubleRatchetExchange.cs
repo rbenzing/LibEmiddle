@@ -40,8 +40,8 @@ namespace E2EELibrary.KeyExchange
             ArgumentNullException.ThrowIfNull(hmac, nameof(hmac));
 
             byte[]? t = [];
-            byte[] okm = new byte[outputLength];
-            byte[] counter = new byte[1];
+            byte[] okm = Sodium.GenerateRandomBytes(outputLength);
+            byte[] counter = Sodium.GenerateRandomBytes(1);
             int offset = 0;
 
             for (counter[0] = 1; offset < outputLength; counter[0]++)

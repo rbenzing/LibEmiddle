@@ -165,7 +165,7 @@ namespace E2EELibrary.Communication
             }
 
             // Use a reasonably sized buffer
-            byte[] buffer = new byte[8192];
+            byte[] buffer = Sodium.GenerateRandomBytes(8192);
 
             try
             {

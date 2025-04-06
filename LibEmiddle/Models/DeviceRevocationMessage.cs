@@ -84,7 +84,7 @@ namespace E2EELibrary.Models
 
             // Combine device key and timestamp for verification
             byte[] timestampBytes = BitConverter.GetBytes(RevocationTimestamp);
-            byte[] dataToVerify = new byte[RevokedDeviceKey.Length + timestampBytes.Length];
+            byte[] dataToVerify = Sodium.GenerateRandomBytes(RevokedDeviceKey.Length + timestampBytes.Length);
 
             Buffer.BlockCopy(RevokedDeviceKey, 0, dataToVerify, 0, RevokedDeviceKey.Length);
             Buffer.BlockCopy(timestampBytes, 0, dataToVerify, RevokedDeviceKey.Length, timestampBytes.Length);

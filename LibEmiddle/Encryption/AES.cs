@@ -40,13 +40,13 @@ namespace E2EELibrary.Encryption
             try
             {
                 // Create an auth tag array (small, so direct allocation is fine)
-                byte[] tag = new byte[Constants.AUTH_TAG_SIZE];
+                byte[] tag = Sodium.GenerateRandomBytes(Constants.AUTH_TAG_SIZE);
 
                 // Encrypt directly into these buffers
                 aes.Encrypt(nonce, plaintext, pooledCiphertext, tag);
 
                 // Combine ciphertext and tag for easier handling
-                byte[] result = new byte[plaintext.Length + Constants.AUTH_TAG_SIZE];
+                byte[] result = Sodium.GenerateRandomBytes(plaintext.Length + Constants.AUTH_TAG_SIZE);
                 pooledCiphertext.AsSpan(0, pooledCiphertext.Length).CopyTo(result.AsSpan(0, plaintext.Length));
                 tag.AsSpan(0, Constants.AUTH_TAG_SIZE).CopyTo(result.AsSpan(plaintext.Length, Constants.AUTH_TAG_SIZE));
 
@@ -96,8 +96,8 @@ namespace E2EELibrary.Encryption
             try
             {
                 // Extract ciphertext and tag directly into new arrays
-                byte[] ciphertext = new byte[ciphertextLength];
-                byte[] tag = new byte[Constants.AUTH_TAG_SIZE];
+                byte[] ciphertext = Sodium.GenerateRandomBytes(ciphertextLength);
+                byte[] tag = Sodium.GenerateRandomBytes(Constants.AUTH_TAG_SIZE);
                 Buffer.BlockCopy(ciphertextWithTag, 0, ciphertext, 0, ciphertextLength);
                 Buffer.BlockCopy(ciphertextWithTag, ciphertextLength, tag, 0, Constants.AUTH_TAG_SIZE);
 
@@ -110,7 +110,7 @@ namespace E2EELibrary.Encryption
                     // the result to a properly sized array
                     if (pooledPlaintext.Length > ciphertextLength)
                     {
-                        byte[] result = new byte[ciphertextLength];
+                        byte[] result = Sodium.GenerateRandomBytes(ciphertextLength);
                         pooledPlaintext.AsSpan(0, pooledPlaintext.Length).CopyTo(result.AsSpan(0, ciphertextLength));
 
                         return result;

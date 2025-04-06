@@ -38,7 +38,7 @@ namespace E2EELibrary.KeyExchange
             else
             {
                 // Create a copy to avoid modifying the original
-                senderX25519PrivateKey = new byte[Constants.X25519_KEY_SIZE];
+                senderX25519PrivateKey = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
                 senderPrivateKey.AsSpan(0, Constants.X25519_KEY_SIZE).CopyTo(senderX25519PrivateKey.AsSpan(0, Constants.X25519_KEY_SIZE));
             }
 
@@ -154,7 +154,7 @@ namespace E2EELibrary.KeyExchange
                         int index = 0;
                         if (validOneTimePreKeys.Count > 1)
                         {
-                            byte[] randomBytes = new byte[4];
+                            byte[] randomBytes = Sodium.GenerateRandomBytes(4);
                             using (var rng = RandomNumberGenerator.Create())
                             {
                                 rng.GetBytes(randomBytes);
@@ -185,7 +185,7 @@ namespace E2EELibrary.KeyExchange
                 else
                 {
                     // Create a copy to avoid modifying the original
-                    senderX25519Private = new byte[Constants.X25519_KEY_SIZE];
+                    senderX25519Private = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
                     senderIdentityKeyPair.privateKey.AsSpan(0, Constants.X25519_KEY_SIZE).CopyTo(senderX25519Private.AsSpan(0, Constants.X25519_KEY_SIZE));
                 }
 

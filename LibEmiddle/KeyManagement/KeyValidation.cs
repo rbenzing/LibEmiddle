@@ -7,18 +7,6 @@ namespace E2EELibrary.KeyManagement
     /// </summary>
     public static class KeyValidation
     {
-        // Known problematic patterns for X25519 keys
-        private static readonly byte[][] _knownWeakPatterns = new byte[][]
-        {
-            new byte[Constants.X25519_KEY_SIZE], // All zeros
-            Enumerable.Repeat((byte)255, Constants.X25519_KEY_SIZE).ToArray(), // All ones
-            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, // Small order point
-            new byte[] { 224, 235, 122, 124, 59, 65, 184, 174, 22, 86, 227, 250, 241, 159, 196, 106, 218, 9, 141, 235, 156, 50, 177, 253, 134, 98, 5, 22, 95, 73, 184, 0 } // Twist point 
-        };
-
-        // Low entropy threshold (minimum number of unique bytes in the key)
-        private const int _minimumEntropyThreshold = 8;
-
         /// <summary>
         /// Validates an X25519 public key to ensure it's not an invalid or dangerous value
         /// </summary>
