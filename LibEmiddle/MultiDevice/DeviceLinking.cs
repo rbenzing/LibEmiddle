@@ -52,7 +52,6 @@ namespace E2EELibrary.MultiDevice
             }
         }
 
-
         /// <summary>
         /// Derives a shared key for a new device when the caller provides an X25519 public key.
         /// No conversion is performed.

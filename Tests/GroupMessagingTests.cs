@@ -4,6 +4,7 @@ using System.Reflection;
 using E2EELibrary;
 using E2EELibrary.Core;
 using E2EELibrary.GroupMessaging;
+using System.Threading;
 
 namespace E2EELibraryTests
 {
@@ -16,7 +17,7 @@ namespace E2EELibraryTests
             // Arrange
             var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(keyPair);
-            string groupId = "test-key-rotation";
+            string groupId = $"test-key-{Guid.NewGuid()}";
             byte[] originalKey = groupManager.CreateGroup(groupId);
 
             // Act
@@ -44,7 +45,7 @@ namespace E2EELibraryTests
             var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(adminKeyPair);
-            string groupId = "test-authorization";
+            string groupId = $"test-authorization-{Guid.NewGuid()}";
             groupManager.CreateGroup(groupId);
 
             // Act
@@ -69,7 +70,7 @@ namespace E2EELibraryTests
             var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(adminKeyPair);
-            string groupId = "test-revocation";
+            string groupId = $"test-revocation-{Guid.NewGuid()}";
             groupManager.CreateGroup(groupId);
             groupManager.AddGroupMember(groupId, memberKeyPair.publicKey);
 
@@ -107,7 +108,7 @@ namespace E2EELibraryTests
             // Arrange
             var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var groupManager = new GroupChatManager(keyPair);
-            string groupId = "test-replay-protection";
+            string groupId = $"test-replay-protection-{Guid.NewGuid()}";
             byte[] senderKey = groupManager.CreateGroup(groupId);
 
             // Create and encrypt a message
@@ -156,7 +157,7 @@ namespace E2EELibraryTests
             var adminManager = new GroupChatManager(adminKeyPair);
             var memberManager = new GroupChatManager(memberKeyPair);
 
-            string groupId = "test-forward-secrecy";
+            string groupId = $"test-forward-secrecy-{Guid.NewGuid()}";
 
             // 1. Admin creates the group and member joins
             adminManager.CreateGroup(groupId);
@@ -210,7 +211,8 @@ namespace E2EELibraryTests
             var memberManager = new GroupChatManager(memberKeyPair);
             var untrustedManager = new GroupChatManager(untrustedKeyPair);
 
-            string groupId = "test-untrusted-rejection";
+            string groupId = $"test-untrusted-rejection-{Guid.NewGuid()}";
+
             adminManager.CreateGroup(groupId);
             memberManager.CreateGroup(groupId);
             untrustedManager.CreateGroup(groupId);
@@ -252,7 +254,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             string message = "This is a group message";
-            string groupId = "test-group-123";
+            string groupId = $"test-group-{Guid.NewGuid()}";
             byte[] senderKey = LibEmiddleClient.GenerateSenderKey();
 
             // Create identity key pair for signing
@@ -273,7 +275,7 @@ namespace E2EELibraryTests
         public void CreateDistributionMessage_ShouldReturnValidMessage()
         {
             // Arrange
-            string groupId = "test-group-123";
+            string groupId = $"test-group-{Guid.NewGuid()}";
             var senderKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Create an instance of GroupChatManager
@@ -313,7 +315,7 @@ namespace E2EELibraryTests
         public void EncryptDecryptSenderKeyDistribution_ShouldReturnOriginalMessage()
         {
             // Arrange
-            string groupId = "test-group-456";
+            string groupId = $"test-group-{Guid.NewGuid()}";
             var senderKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var recipientKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
@@ -349,7 +351,7 @@ namespace E2EELibraryTests
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
 
-            string groupId = "test-group-789";
+            string groupId = $"test-group-{Guid.NewGuid()}";
             string message = "Hello group members!";
 
             // Act
@@ -403,7 +405,7 @@ namespace E2EELibraryTests
             var charlieManager = new GroupChatManager(charlieKeyPair);
 
             // Setup the group - Alice is the admin/creator
-            string groupId = "multiple-senders-test-group";
+            string groupId = $"test-multiple-senders-{Guid.NewGuid()}";
             aliceManager.CreateGroup(groupId);
             bobManager.CreateGroup(groupId);
             charlieManager.CreateGroup(groupId);
@@ -467,6 +469,9 @@ namespace E2EELibraryTests
         [TestMethod]
         public void GroupMemberAddition_ShouldAllowNewMemberToReceiveMessages()
         {
+            // Create a unique group ID to prevent test interference
+            string groupId = $"member-addition-test-group-{Guid.NewGuid()}";
+
             // Create test participants
             var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
             var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
@@ -477,7 +482,6 @@ namespace E2EELibraryTests
             var daveManager = new GroupChatManager(daveKeyPair);
 
             // 1. Each member creates their own group
-            string groupId = "member-addition-test-group";
             aliceManager.CreateGroup(groupId);
             bobManager.CreateGroup(groupId);
 
@@ -502,7 +506,11 @@ namespace E2EELibraryTests
 
             Assert.AreEqual(initialMessage, bobDecryptsInitial, "Bob should be able to decrypt the initial message");
 
-            // 5. Add Dave to the group
+            // 5. Add Dave to the group - ensure timestamp separation
+            // Use a small delay to ensure clear timestamp separation
+            Thread.Sleep(100);
+
+            // Now Dave joins the group
             daveManager.CreateGroup(groupId);
 
             // Bidirectional authorization for Dave with both Alice and Bob
@@ -528,7 +536,9 @@ namespace E2EELibraryTests
             Assert.IsTrue(daveProcessAlice, "Dave should successfully process Alice's distribution");
             Assert.IsTrue(daveProcessBob, "Dave should successfully process Bob's distribution");
 
-            // 7. Send new messages after Dave joins
+            // 7. Send new messages after Dave joins - ensure timestamp separation again
+            Thread.Sleep(100);
+
             string aliceMessage = "Message from Alice after Dave joined";
             string bobMessage = "Message from Bob after Dave joined";
             string daveMessage = "Dave's first message to the group";
@@ -576,7 +586,7 @@ namespace E2EELibraryTests
             var charlieManager = new GroupChatManager(charlieKeyPair);
 
             // Step 3: Each participant creates the group
-            string groupId = "friends-group-123";
+            string groupId = $"test-friends-{Guid.NewGuid()}";
             aliceManager.CreateGroup(groupId);
             bobManager.CreateGroup(groupId);
             charlieManager.CreateGroup(groupId);
@@ -650,7 +660,7 @@ namespace E2EELibraryTests
             var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             var groupManager = new GroupChatManager(adminKeyPair);
-            string groupId = "test-delete-group";
+            string groupId = $"test-delete-{Guid.NewGuid()}";
 
             // Create group and add a member
             groupManager.CreateGroup(groupId);
