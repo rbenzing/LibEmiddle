@@ -1,5 +1,4 @@
-﻿using System.Security.Cryptography;
-using System.Buffers;
+﻿using System.Runtime.InteropServices;
 using System.Text;
 using E2EELibrary.Core;
 using E2EELibrary.Models;
@@ -7,76 +6,104 @@ using E2EELibrary.Models;
 namespace E2EELibrary.Encryption
 {
     /// <summary>
-    /// Provides AES-GCM encryption and decryption functionality
+    /// Provides AES-GCM encryption and decryption functionality using libsodium
+    /// with state precomputation for improved performance.
     /// </summary>
     public class AES
     {
+        // Size of the AES-GCM state for precomputation
+        private const int StateSize = 512; // Must be aligned to 16 bytes
+
         /// <summary>
-        /// Encrypts data using AES-GCM
+        /// Encrypts data using AES-GCM with libsodium
         /// </summary>
         /// <param name="plaintext">Data to encrypt</param>
         /// <param name="key">Encryption key</param>
         /// <param name="nonce">Nonce for AES-GCM</param>
+        /// <param name="additionalData">Optional authenticated additional data</param>
         /// <returns>Encrypted data with authentication tag</returns>
-        public static byte[] AESEncrypt(byte[] plaintext, byte[] key, byte[] nonce)
+        public static byte[] AESEncrypt(byte[] plaintext, byte[] key, byte[] nonce, byte[]? additionalData = null)
         {
-            if (plaintext == null)
-                throw new ArgumentNullException(nameof(plaintext));
-            if (key == null)
-                throw new ArgumentNullException(nameof(key));
-            if (nonce == null)
-                throw new ArgumentNullException(nameof(nonce));
+            ArgumentNullException.ThrowIfNull(plaintext);
+            ArgumentNullException.ThrowIfNull(key);
+            ArgumentNullException.ThrowIfNull(nonce);
 
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
             if (nonce.Length != Constants.NONCE_SIZE)
                 throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long", nameof(nonce));
 
-            using var aes = new AesGcm(key, Constants.AUTH_TAG_SIZE);
+            // Initialize libsodium
+            Sodium.Initialize();
 
-            // Use our helper to get a buffer for ciphertext from the pool
-            byte[] pooledCiphertext = SecureMemory.CreateSecureBuffer(plaintext.Length);
+            // Check if AES-GCM is available on this platform
+            if (Sodium.crypto_aead_aes256gcm_is_available() != 1)
+            {
+                throw new PlatformNotSupportedException("AES-GCM is not available on this platform");
+            }
 
             try
             {
-                // Create an auth tag array (small, so direct allocation is fine)
-                byte[] tag = Sodium.GenerateRandomBytes(Constants.AUTH_TAG_SIZE);
+                // Allocate unmanaged memory for the state (must be 16-byte aligned)
+                IntPtr state = Marshal.AllocHGlobal(StateSize);
 
-                // Encrypt directly into these buffers
-                aes.Encrypt(nonce, plaintext, pooledCiphertext, tag);
-
-                // Combine ciphertext and tag for easier handling
-                byte[] result = Sodium.GenerateRandomBytes(plaintext.Length + Constants.AUTH_TAG_SIZE);
-                pooledCiphertext.AsSpan(0, pooledCiphertext.Length).CopyTo(result.AsSpan(0, plaintext.Length));
-                tag.AsSpan(0, Constants.AUTH_TAG_SIZE).CopyTo(result.AsSpan(plaintext.Length, Constants.AUTH_TAG_SIZE));
-
-                return result;
-            }
-            finally
-            {
-                // Return the rented buffer to the pool if it was pooled
-                if (pooledCiphertext.Length > plaintext.Length)
+                try
                 {
-                    ArrayPool<byte>.Shared.Return(pooledCiphertext);
+                    // Precompute the key expansion
+                    int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key);
+                    if (result != 0)
+                    {
+                        throw new InvalidOperationException("Failed to initialize AES-GCM state");
+                    }
+
+                    // Prepare additional data if provided
+                    byte[] ad = additionalData ?? Array.Empty<byte>();
+
+                    // Allocate output buffer for ciphertext
+                    // Ciphertext will be the same size as plaintext + authentication tag
+                    byte[] ciphertext = Sodium.GenerateRandomBytes(plaintext.Length + Constants.AUTH_TAG_SIZE);
+
+                    // Encrypt using libsodium
+                    result = Sodium.crypto_aead_aes256gcm_encrypt_afternm(
+                        ciphertext, out ulong cipherLength,
+                        plaintext, (ulong)plaintext.Length,
+                        ad, (ulong)ad.Length,
+                        null, // nsec is always null for AES-GCM
+                        nonce,
+                        state);
+
+                    if (result != 0)
+                    {
+                        throw new InvalidOperationException("Encryption failed");
+                    }
+
+                    return ciphertext;
                 }
+                finally
+                {
+                    // Free unmanaged memory
+                    Marshal.FreeHGlobal(state);
+                }
+            }
+            catch (DllNotFoundException)
+            {
+                throw new PlatformNotSupportedException("The libsodium library is not available");
             }
         }
 
         /// <summary>
-        /// Decrypts data using AES-GCM
+        /// Decrypts data using AES-GCM with libsodium
         /// </summary>
         /// <param name="ciphertextWithTag">Combined ciphertext and authentication tag</param>
         /// <param name="key">Decryption key</param>
         /// <param name="nonce">Nonce used for encryption</param>
+        /// <param name="additionalData">Optional authenticated additional data</param>
         /// <returns>Decrypted data</returns>
-        public static byte[] AESDecrypt(byte[] ciphertextWithTag, byte[] key, byte[] nonce)
+        public static byte[] AESDecrypt(byte[] ciphertextWithTag, byte[] key, byte[] nonce, byte[]? additionalData = null)
         {
-            if (ciphertextWithTag == null)
-                throw new ArgumentNullException(nameof(ciphertextWithTag));
-            if (key == null)
-                throw new ArgumentNullException(nameof(key));
-            if (nonce == null)
-                throw new ArgumentNullException(nameof(nonce));
+            ArgumentNullException.ThrowIfNull(ciphertextWithTag);
+            ArgumentNullException.ThrowIfNull(key);
+            ArgumentNullException.ThrowIfNull(nonce);
 
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
@@ -85,57 +112,69 @@ namespace E2EELibrary.Encryption
             if (ciphertextWithTag.Length < Constants.AUTH_TAG_SIZE)
                 throw new ArgumentException("Ciphertext too short to contain tag", nameof(ciphertextWithTag));
 
-            using var aes = new AesGcm(key, Constants.AUTH_TAG_SIZE);
+            // Initialize libsodium
+            Sodium.Initialize();
 
-            // Extract ciphertext and tag
-            int ciphertextLength = ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE;
-
-            // Use our helper to get a buffer for plaintext from the pool
-            byte[] pooledPlaintext = SecureMemory.CreateSecureBuffer(ciphertextLength);
+            // Check if AES-GCM is available on this platform
+            if (Sodium.crypto_aead_aes256gcm_is_available() != 1)
+            {
+                throw new PlatformNotSupportedException("AES-GCM is not available on this platform");
+            }
 
             try
             {
-                // Extract ciphertext and tag directly into new arrays
-                byte[] ciphertext = Sodium.GenerateRandomBytes(ciphertextLength);
-                byte[] tag = Sodium.GenerateRandomBytes(Constants.AUTH_TAG_SIZE);
-                Buffer.BlockCopy(ciphertextWithTag, 0, ciphertext, 0, ciphertextLength);
-                Buffer.BlockCopy(ciphertextWithTag, ciphertextLength, tag, 0, Constants.AUTH_TAG_SIZE);
+                // Allocate unmanaged memory for the state (must be 16-byte aligned)
+                IntPtr state = Marshal.AllocHGlobal(StateSize);
 
                 try
                 {
-                    // Use the AesGcm Decrypt method with standard arrays
-                    aes.Decrypt(nonce, ciphertext, tag, pooledPlaintext);
-
-                    // If we got a pooled buffer that's larger than needed, we need to copy
-                    // the result to a properly sized array
-                    if (pooledPlaintext.Length > ciphertextLength)
+                    // Precompute the key expansion
+                    int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key);
+                    if (result != 0)
                     {
-                        byte[] result = Sodium.GenerateRandomBytes(ciphertextLength);
-                        pooledPlaintext.AsSpan(0, pooledPlaintext.Length).CopyTo(result.AsSpan(0, ciphertextLength));
+                        throw new InvalidOperationException("Failed to initialize AES-GCM state");
+                    }
 
-                        return result;
-                    }
-                    else
+                    // Prepare additional data if provided
+                    byte[] ad = additionalData ?? Array.Empty<byte>();
+
+                    // Allocate output buffer for plaintext
+                    // Plaintext will be at most the size of ciphertext - authentication tag
+                    byte[] plaintext = Sodium.GenerateRandomBytes(ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE);
+
+                    // Decrypt using libsodium
+                    result = Sodium.crypto_aead_aes256gcm_decrypt_afternm(
+                        plaintext, out ulong plaintextLength,
+                        null, // nsec is always null for AES-GCM
+                        ciphertextWithTag, (ulong)ciphertextWithTag.Length,
+                        ad, (ulong)ad.Length,
+                        nonce,
+                        state);
+
+                    if (result != 0)
                     {
-                        // If we got an exact-sized buffer, we can return it directly
-                        return pooledPlaintext;
+                        throw new System.Security.Cryptography.CryptographicException("Authentication failed. The data may have been tampered with or the wrong key was used.");
                     }
+
+                    // Create a properly sized result array if needed
+                    if (plaintextLength < (ulong)plaintext.Length)
+                    {
+                        byte[] resizedPlaintext = Sodium.GenerateRandomBytes(Convert.ToInt32(plaintextLength));
+                        plaintext.AsSpan(0, (int)plaintextLength).CopyTo(resizedPlaintext);
+                        return resizedPlaintext;
+                    }
+
+                    return plaintext;
                 }
-                catch (CryptographicException ex)
+                finally
                 {
-                    throw new CryptographicException("Authentication failed. The data may have been tampered with or the wrong key was used.", ex);
+                    // Free unmanaged memory
+                    Marshal.FreeHGlobal(state);
                 }
             }
-            finally
+            catch (DllNotFoundException)
             {
-                // Clear sensitive data before returning the buffer
-                if (pooledPlaintext.Length > ciphertextLength)
-                {
-                    SecureMemory.SecureClear(pooledPlaintext);
-
-                    // Return the pooled buffer if it was pooled
-                    ArrayPool<byte>.Shared.Return(pooledPlaintext);
-                }
+                throw new PlatformNotSupportedException("The libsodium library is not available");
             }
         }
 
@@ -145,15 +184,10 @@ namespace E2EELibrary.Encryption
         /// <param name="message">Message to encrypt</param>
         /// <param name="key">AES-256 encryption key (32 bytes)</param>
         /// <returns>EncryptedMessage object containing ciphertext and nonce</returns>
-        /// <exception cref="ArgumentException">Thrown when message is null or empty</exception>
-        /// <exception cref="ArgumentNullException">Thrown when key is null</exception>
-        /// <exception cref="ArgumentException">Thrown when key length is not 32 bytes</exception>
         public static EncryptedMessage Encrypt(string message, byte[] key)
         {
-            if (string.IsNullOrEmpty(message))
-                throw new ArgumentException("Message cannot be null or empty", nameof(message));
-            if (key == null)
-                throw new ArgumentNullException(nameof(key));
+            ArgumentException.ThrowIfNullOrEmpty(message, nameof(message));
+            ArgumentNullException.ThrowIfNull(key, nameof(key));
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
 
@@ -164,7 +198,9 @@ namespace E2EELibrary.Encryption
             return new EncryptedMessage
             {
                 Ciphertext = ciphertext,
-                Nonce = nonce
+                Nonce = nonce,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                MessageId = Guid.NewGuid()
             };
         }
 
@@ -176,14 +212,10 @@ namespace E2EELibrary.Encryption
         /// <returns>Decrypted message string</returns>
         public static string Decrypt(EncryptedMessage encryptedMessage, byte[] key)
         {
-            if (encryptedMessage == null)
-                throw new ArgumentNullException(nameof(encryptedMessage));
-            if (encryptedMessage.Ciphertext == null)
-                throw new ArgumentException("Ciphertext cannot be null", nameof(encryptedMessage));
-            if (encryptedMessage.Nonce == null)
-                throw new ArgumentException("Nonce cannot be null", nameof(encryptedMessage));
-            if (key == null)
-                throw new ArgumentNullException(nameof(key));
+            ArgumentNullException.ThrowIfNull(encryptedMessage, nameof(encryptedMessage));
+            ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, "Ciphertext cannot be null");
+            ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce, "Nonce cannot be null");
+            ArgumentNullException.ThrowIfNull(key, nameof(key));
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
 
@@ -194,7 +226,7 @@ namespace E2EELibrary.Encryption
                 // Validate the plaintext before converting to string
                 if (plaintext == null || plaintext.Length == 0)
                 {
-                    throw new CryptographicException("Decryption produced empty plaintext");
+                    throw new System.Security.Cryptography.CryptographicException("Decryption produced empty plaintext");
                 }
 
                 // Check if the plaintext contains valid UTF-8 before conversion
@@ -205,9 +237,318 @@ namespace E2EELibrary.Encryption
 
                 return Encoding.UTF8.GetString(plaintext);
             }
-            catch (CryptographicException ex)
+            catch (System.Security.Cryptography.CryptographicException ex)
             {
-                throw new CryptographicException("Message decryption failed. The key may be incorrect.", ex);
+                throw new System.Security.Cryptography.CryptographicException("Message decryption failed. The key may be incorrect.", ex);
+            }
+        }
+
+        /// <summary>
+        /// Separate encryption method for detached mode (separate ciphertext and tag)
+        /// </summary>
+        /// <param name="plaintext">Data to encrypt</param>
+        /// <param name="key">Encryption key</param>
+        /// <param name="nonce">Nonce for AES-GCM</param>
+        /// <param name="tag">Output parameter for the authentication tag</param>
+        /// <param name="additionalData">Optional authenticated additional data</param>
+        /// <returns>Encrypted data without authentication tag</returns>
+        public static byte[] AESEncryptDetached(byte[] plaintext, byte[] key, byte[] nonce, out byte[] tag, byte[]? additionalData = null)
+        {
+            ArgumentNullException.ThrowIfNull(plaintext);
+            ArgumentNullException.ThrowIfNull(key);
+            ArgumentNullException.ThrowIfNull(nonce);
+
+            if (key.Length != Constants.AES_KEY_SIZE)
+                throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
+            if (nonce.Length != Constants.NONCE_SIZE)
+                throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long", nameof(nonce));
+
+            // Initialize libsodium
+            Sodium.Initialize();
+
+            // Check if AES-GCM is available on this platform
+            if (Sodium.crypto_aead_aes256gcm_is_available() != 1)
+            {
+                throw new PlatformNotSupportedException("AES-GCM is not available on this platform");
+            }
+
+            try
+            {
+                // Allocate unmanaged memory for the state (must be 16-byte aligned)
+                IntPtr state = Marshal.AllocHGlobal(StateSize);
+
+                try
+                {
+                    // Precompute the key expansion
+                    int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key);
+                    if (result != 0)
+                    {
+                        throw new InvalidOperationException("Failed to initialize AES-GCM state");
+                    }
+
+                    // Prepare additional data if provided
+                    byte[] ad = additionalData ?? Array.Empty<byte>();
+
+                    // Allocate output buffer for ciphertext (same size as plaintext)
+                    byte[] ciphertext = new byte[plaintext.Length];
+
+                    // Allocate tag buffer
+                    tag = new byte[Constants.AUTH_TAG_SIZE];
+
+                    // Encrypt using libsodium in detached mode
+                    result = Sodium.crypto_aead_aes256gcm_encrypt_detached_afternm(
+                        ciphertext,
+                        tag, out ulong tagLength,
+                        plaintext, (ulong)plaintext.Length,
+                        ad, (ulong)ad.Length,
+                        null, // nsec is always null for AES-GCM
+                        nonce,
+                        state);
+
+                    if (result != 0)
+                    {
+                        throw new InvalidOperationException("Encryption failed");
+                    }
+
+                    return ciphertext;
+                }
+                finally
+                {
+                    // Free unmanaged memory
+                    Marshal.FreeHGlobal(state);
+                }
+            }
+            catch (DllNotFoundException)
+            {
+                throw new PlatformNotSupportedException("The libsodium library is not available");
+            }
+        }
+
+        /// <summary>
+        /// Separate decryption method for detached mode (separate ciphertext and tag)
+        /// </summary>
+        /// <param name="ciphertext">Encrypted data without authentication tag</param>
+        /// <param name="tag">Authentication tag</param>
+        /// <param name="key">Decryption key</param>
+        /// <param name="nonce">Nonce used for encryption</param>
+        /// <param name="additionalData">Optional authenticated additional data</param>
+        /// <returns>Decrypted data</returns>
+        public static byte[] AESDecryptDetached(byte[] ciphertext, byte[] tag, byte[] key, byte[] nonce, byte[]? additionalData = null)
+        {
+            ArgumentNullException.ThrowIfNull(ciphertext);
+            ArgumentNullException.ThrowIfNull(tag);
+            ArgumentNullException.ThrowIfNull(key);
+            ArgumentNullException.ThrowIfNull(nonce);
+
+            if (key.Length != Constants.AES_KEY_SIZE)
+                throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
+            if (nonce.Length != Constants.NONCE_SIZE)
+                throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long", nameof(nonce));
+            if (tag.Length != Constants.AUTH_TAG_SIZE)
+                throw new ArgumentException($"Tag must be {Constants.AUTH_TAG_SIZE} bytes long", nameof(tag));
+
+            // Initialize libsodium
+            Sodium.Initialize();
+
+            // Check if AES-GCM is available on this platform
+            if (Sodium.crypto_aead_aes256gcm_is_available() != 1)
+            {
+                throw new PlatformNotSupportedException("AES-GCM is not available on this platform");
+            }
+
+            try
+            {
+                // Allocate unmanaged memory for the state (must be 16-byte aligned)
+                IntPtr state = Marshal.AllocHGlobal(StateSize);
+
+                try
+                {
+                    // Precompute the key expansion
+                    int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key);
+                    if (result != 0)
+                    {
+                        throw new InvalidOperationException("Failed to initialize AES-GCM state");
+                    }
+
+                    // Prepare additional data if provided
+                    byte[] ad = additionalData ?? Array.Empty<byte>();
+
+                    // Allocate output buffer for plaintext (same size as ciphertext)
+                    byte[] plaintext = new byte[ciphertext.Length];
+
+                    // Decrypt using libsodium in detached mode
+                    result = Sodium.crypto_aead_aes256gcm_decrypt_detached_afternm(
+                        plaintext,
+                        null, // nsec is always null for AES-GCM
+                        ciphertext, (ulong)ciphertext.Length,
+                        tag,
+                        ad, (ulong)ad.Length,
+                        nonce,
+                        state);
+
+                    if (result != 0)
+                    {
+                        throw new System.Security.Cryptography.CryptographicException("Authentication failed. The data may have been tampered with or the wrong key was used.");
+                    }
+
+                    return plaintext;
+                }
+                finally
+                {
+                    // Free unmanaged memory
+                    Marshal.FreeHGlobal(state);
+                }
+            }
+            catch (DllNotFoundException)
+            {
+                throw new PlatformNotSupportedException("The libsodium library is not available");
+            }
+        }
+
+        /// <summary>
+        /// AES-GCM Context for reusing the same expanded key
+        /// </summary>
+        public sealed class AesGcmContext : IDisposable
+        {
+            private IntPtr _state;
+            private bool _disposed;
+
+            /// <summary>
+            /// Creates a new AES-GCM context with the specified key
+            /// </summary>
+            /// <param name="key">The encryption/decryption key</param>
+            public AesGcmContext(byte[] key)
+            {
+                ArgumentNullException.ThrowIfNull(key);
+                if (key.Length != Constants.AES_KEY_SIZE)
+                    throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
+
+                // Initialize libsodium
+                Sodium.Initialize();
+
+                // Check if AES-GCM is available on this platform
+                if (Sodium.crypto_aead_aes256gcm_is_available() != 1)
+                {
+                    throw new PlatformNotSupportedException("AES-GCM is not available on this platform");
+                }
+
+                // Allocate unmanaged memory for the state (must be 16-byte aligned)
+                _state = Marshal.AllocHGlobal(StateSize);
+
+                // Precompute the key expansion
+                int result = Sodium.crypto_aead_aes256gcm_beforenm(_state, key);
+                if (result != 0)
+                {
+                    Marshal.FreeHGlobal(_state);
+                    throw new InvalidOperationException("Failed to initialize AES-GCM state");
+                }
+            }
+
+            /// <summary>
+            /// Encrypts data using the precomputed key
+            /// </summary>
+            /// <param name="plaintext">Data to encrypt</param>
+            /// <param name="nonce">Nonce for AES-GCM</param>
+            /// <param name="additionalData">Optional authenticated additional data</param>
+            /// <returns>Encrypted data with authentication tag</returns>
+            public byte[] Encrypt(byte[] plaintext, byte[] nonce, byte[]? additionalData = null)
+            {
+                ThrowIfDisposed();
+                ArgumentNullException.ThrowIfNull(plaintext);
+                ArgumentNullException.ThrowIfNull(nonce);
+                if (nonce.Length != Constants.NONCE_SIZE)
+                    throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long", nameof(nonce));
+
+                // Prepare additional data if provided
+                byte[] ad = additionalData ?? Array.Empty<byte>();
+
+                // Allocate output buffer for ciphertext
+                byte[] ciphertext = new byte[plaintext.Length + Constants.AUTH_TAG_SIZE];
+
+                // Encrypt using libsodium
+                int result = Sodium.crypto_aead_aes256gcm_encrypt_afternm(
+                    ciphertext, out ulong cipherLength,
+                    plaintext, (ulong)plaintext.Length,
+                    ad, (ulong)ad.Length,
+                    null, // nsec is always null for AES-GCM
+                    nonce,
+                    _state);
+
+                if (result != 0)
+                {
+                    throw new InvalidOperationException("Encryption failed");
+                }
+
+                return ciphertext;
+            }
+
+            /// <summary>
+            /// Decrypts data using the precomputed key
+            /// </summary>
+            /// <param name="ciphertextWithTag">Combined ciphertext and authentication tag</param>
+            /// <param name="nonce">Nonce used for encryption</param>
+            /// <param name="additionalData">Optional authenticated additional data</param>
+            /// <returns>Decrypted data</returns>
+            public byte[] Decrypt(byte[] ciphertextWithTag, byte[] nonce, byte[]? additionalData = null)
+            {
+                ThrowIfDisposed();
+                ArgumentNullException.ThrowIfNull(ciphertextWithTag);
+                ArgumentNullException.ThrowIfNull(nonce);
+                if (nonce.Length != Constants.NONCE_SIZE)
+                    throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long", nameof(nonce));
+                if (ciphertextWithTag.Length < Constants.AUTH_TAG_SIZE)
+                    throw new ArgumentException("Ciphertext too short to contain tag", nameof(ciphertextWithTag));
+
+                // Prepare additional data if provided
+                byte[] ad = additionalData ?? Array.Empty<byte>();
+
+                // Allocate output buffer for plaintext
+                byte[] plaintext = new byte[ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE];
+
+                // Decrypt using libsodium
+                int result = Sodium.crypto_aead_aes256gcm_decrypt_afternm(
+                    plaintext, out ulong plaintextLength,
+                    null, // nsec is always null for AES-GCM
+                    ciphertextWithTag, (ulong)ciphertextWithTag.Length,
+                    ad, (ulong)ad.Length,
+                    nonce,
+                    _state);
+
+                if (result != 0)
+                {
+                    throw new System.Security.Cryptography.CryptographicException("Authentication failed. The data may have been tampered with or the wrong key was used.");
+                }
+
+                // Create a properly sized result array if needed
+                if (plaintextLength < (ulong)plaintext.Length)
+                {
+                    byte[] resizedPlaintext = new byte[plaintextLength];
+                    plaintext.AsSpan(0, (int)plaintextLength).CopyTo(resizedPlaintext);
+                    return resizedPlaintext;
+                }
+
+                return plaintext;
+            }
+
+            /// <summary>
+            /// Disposes the context and frees unmanaged resources
+            /// </summary>
+            public void Dispose()
+            {
+                if (!_disposed)
+                {
+                    // Free unmanaged memory
+                    Marshal.FreeHGlobal(_state);
+                    _disposed = true;
+                }
+            }
+
+            private void ThrowIfDisposed()
+            {
+                if (_disposed)
+                {
+                    throw new ObjectDisposedException(nameof(AesGcmContext));
+                }
             }
         }
     }

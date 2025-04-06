@@ -1,8 +1,5 @@
-﻿using System;
-using System.IO;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Threading;
 
 namespace E2EELibrary.Core
 {
@@ -210,6 +207,127 @@ namespace E2EELibrary.Core
 
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern unsafe int sodium_set_misuse_handler(delegate* unmanaged[Cdecl]<void> handler);
+
+        #endregion
+
+        #region AES encryption
+
+        /// <summary>
+        /// Returns a 0 or 1 when AES-GCM is available on the processor.
+        /// </summary>
+        /// <returns></returns>
+        [DllImport(Sodium.LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_aead_aes256gcm_is_available();
+
+        /// <summary>
+        /// Initializes a context ctx by expanding the key k and always returns 0.
+        /// </summary>
+        /// <param name="state"></param>
+        /// <param name="key"></param>
+        /// <returns></returns>
+        [DllImport(Sodium.LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_aead_aes256gcm_beforenm(IntPtr state, byte[] key);
+
+        /// <summary>
+        /// The crypto_aead_aes256gcm_encrypt_afternm() and crypto_aead_aes256gcm_decrypt_afternm() 
+        /// functions are identical to crypto_aead_aes256gcm_encrypt() and 
+        /// crypto_aead_aes256gcm_decrypt(), but accept a previously initialized 
+        /// context ctx instead of a key.
+        /// </summary>
+        /// <param name="cipher"></param>
+        /// <param name="cipherLength"></param>
+        /// <param name="message"></param>
+        /// <param name="messageLength"></param>
+        /// <param name="additionalData"></param>
+        /// <param name="additionalDataLength"></param>
+        /// <param name="nsec"></param>
+        /// <param name="nonce"></param>
+        /// <param name="state"></param>
+        /// <returns></returns>
+        [DllImport(Sodium.LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_aead_aes256gcm_encrypt_afternm(
+            byte[] cipher, out ulong cipherLength,
+            byte[] message, ulong messageLength,
+            byte[] additionalData, ulong additionalDataLength,
+            byte[]? nsec, // Always null for AES-GCM
+            byte[] nonce,
+            IntPtr state);
+
+        /// <summary>
+        /// The crypto_aead_aes256gcm_encrypt_afternm() and crypto_aead_aes256gcm_decrypt_afternm() 
+        /// functions are identical to crypto_aead_aes256gcm_encrypt() and 
+        /// crypto_aead_aes256gcm_decrypt(), but accept a previously initialized 
+        /// context ctx instead of a key.
+        /// </summary>
+        /// <param name="message"></param>
+        /// <param name="messageLength"></param>
+        /// <param name="nsec"></param>
+        /// <param name="cipher"></param>
+        /// <param name="cipherLength"></param>
+        /// <param name="additionalData"></param>
+        /// <param name="additionalDataLength"></param>
+        /// <param name="nonce"></param>
+        /// <param name="state"></param>
+        /// <returns></returns>
+        [DllImport(Sodium.LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_aead_aes256gcm_decrypt_afternm(
+            byte[] message, out ulong messageLength,
+            byte[]? nsec, // Always null for AES-GCM
+            byte[] cipher, ulong cipherLength,
+            byte[] additionalData, ulong additionalDataLength,
+            byte[] nonce,
+            IntPtr state);
+
+        /// <summary>
+        /// function is identical to crypto_aead_aes256gcm_encrypt_detached() and 
+        /// crypto_aead_aes256gcm_decrypt_detached(), but accept a previously 
+        /// initialized context ctx instead of a key.
+        /// </summary>
+        /// <param name="cipher"></param>
+        /// <param name="tag"></param>
+        /// <param name="tagLength"></param>
+        /// <param name="message"></param>
+        /// <param name="messageLength"></param>
+        /// <param name="additionalData"></param>
+        /// <param name="additionalDataLength"></param>
+        /// <param name="nsec"></param>
+        /// <param name="nonce"></param>
+        /// <param name="state"></param>
+        /// <returns></returns>
+        [DllImport(Sodium.LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_aead_aes256gcm_encrypt_detached_afternm(
+            byte[] cipher,
+            byte[] tag, out ulong tagLength,
+            byte[] message, ulong messageLength,
+            byte[] additionalData, ulong additionalDataLength,
+            byte[]? nsec, // Always null for AES-GCM
+            byte[] nonce,
+            IntPtr state);
+
+        /// <summary>
+        /// function is identical to crypto_aead_aes256gcm_encrypt_detached() and 
+        /// crypto_aead_aes256gcm_decrypt_detached(), but accept a previously 
+        /// initialized context ctx instead of a key.
+        /// </summary>
+        /// <param name="message"></param>
+        /// <param name="nsec"></param>
+        /// <param name="cipher"></param>
+        /// <param name="cipherLength"></param>
+        /// <param name="tag"></param>
+        /// <param name="additionalData"></param>
+        /// <param name="additionalDataLength"></param>
+        /// <param name="nonce"></param>
+        /// <param name="state"></param>
+        /// <returns></returns>
+        [DllImport(Sodium.LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_aead_aes256gcm_decrypt_detached_afternm(
+            byte[] message,
+            byte[]? nsec, // Always null for AES-GCM
+            byte[] cipher, ulong cipherLength,
+            byte[] tag,
+            byte[] additionalData, ulong additionalDataLength,
+            byte[] nonce,
+            IntPtr state);
 
         #endregion
 
