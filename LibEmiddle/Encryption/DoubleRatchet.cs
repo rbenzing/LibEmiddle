@@ -1,4 +1,5 @@
-﻿using System.Security;
+﻿using System.Diagnostics;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using E2EELibrary.Core;
@@ -198,19 +199,19 @@ namespace E2EELibrary.Encryption
             {
                 // Log specific cryptographic failures with details but return generic result
                 // In a production environment, this should use a proper logging framework
-                Console.WriteLine($"Cryptographic failure during message decryption: {ex.Message}");
+                Trace.TraceWarning($"Cryptographic failure during message decryption: {ex.Message}");
                 return (null, null);
             }
             catch (SecurityException ex)
             {
                 // Log security violations separately
-                Console.WriteLine($"Security violation during message processing: {ex.Message}");
+                Trace.TraceWarning($"Security violation during message processing: {ex.Message}");
                 return (null, null);
             }
             catch (Exception ex)
             {
                 // Generic exception handler as last resort
-                Console.WriteLine($"Unexpected error in Double Ratchet decryption: {ex.Message}");
+                Trace.TraceWarning($"Unexpected error in Double Ratchet decryption: {ex.Message}");
                 return (null, null);
             }
         }

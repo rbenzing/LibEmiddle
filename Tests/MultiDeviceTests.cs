@@ -13,6 +13,7 @@ using E2EELibrary.Models;
 using System.Linq;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace E2EELibraryTests
 {
@@ -192,30 +193,30 @@ namespace E2EELibraryTests
         [TestMethod]
         public void MultiDeviceManager_ProcessSyncMessage_ShouldReturnSyncData()
         {
-            Console.WriteLine("Starting test setup");
+            Trace.TraceWarning("Starting test setup");
 
             // 1. Generate X25519 keypairs directly to avoid conversion issues
             var mainDeviceKeyPair = KeyGenerator.GenerateX25519KeyPair();
             var secondDeviceKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            Console.WriteLine($"Generated X25519 key pairs - Main device pub key length: {mainDeviceKeyPair.publicKey.Length}, Second device pub key length: {secondDeviceKeyPair.publicKey.Length}");
+            Trace.TraceWarning($"Generated X25519 key pairs - Main device pub key length: {mainDeviceKeyPair.publicKey.Length}, Second device pub key length: {secondDeviceKeyPair.publicKey.Length}");
 
             string mainDeviceKeyBase64 = Convert.ToBase64String(mainDeviceKeyPair.publicKey);
             string secondDeviceKeyBase64 = Convert.ToBase64String(secondDeviceKeyPair.publicKey);
-            Console.WriteLine($"Main device key (Base64): {mainDeviceKeyBase64}");
-            Console.WriteLine($"Second device key (Base64): {secondDeviceKeyBase64}");
+            Trace.TraceWarning($"Main device key (Base64): {mainDeviceKeyBase64}");
+            Trace.TraceWarning($"Second device key (Base64): {secondDeviceKeyBase64}");
 
             // 2. Create our test sync data
             byte[] originalSyncData = Encoding.UTF8.GetBytes("Test sync data for multi-device processing");
-            Console.WriteLine($"Created test sync data, length: {originalSyncData.Length}");
+            Trace.TraceWarning($"Created test sync data, length: {originalSyncData.Length}");
 
             // 3. Let's manually create and process the sync message using direct methods instead of DeviceManager
-            Console.WriteLine("Creating sync message manually for better debugging...");
+            Trace.TraceWarning("Creating sync message manually for better debugging...");
 
             try
             {
                 // Implement manual signing, encryption, and decryption for the sync message
                 byte[] signature = MessageSigning.SignMessage(originalSyncData, mainDeviceKeyPair.privateKey);
-                Console.WriteLine($"Created signature, length: {signature.Length}");
+                Trace.TraceWarning($"Created signature, length: {signature.Length}");
 
                 // Create the sync message JSON manually
                 var syncMessage = new
@@ -229,20 +230,20 @@ namespace E2EELibraryTests
 
                 // Serialize to JSON string
                 string jsonMessage = System.Text.Json.JsonSerializer.Serialize(syncMessage);
-                Console.WriteLine($"Serialized JSON message, length: {jsonMessage.Length}");
-                Console.WriteLine($"JSON content: {jsonMessage}");
+                Trace.TraceWarning($"Serialized JSON message, length: {jsonMessage.Length}");
+                Trace.TraceWarning($"JSON content: {jsonMessage}");
 
                 // Now we'll manually perform X3DH key exchange
                 byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(
                     secondDeviceKeyPair.publicKey,
                     mainDeviceKeyPair.privateKey);
-                Console.WriteLine($"Performed X3DH key exchange, shared secret length: {sharedSecret.Length}");
+                Trace.TraceWarning($"Performed X3DH key exchange, shared secret length: {sharedSecret.Length}");
 
                 // Encrypt the message with AES using the shared secret
                 byte[] nonce = NonceGenerator.GenerateNonce();
                 byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
                 byte[] ciphertext = AES.AESEncrypt(messageBytes, sharedSecret, nonce);
-                Console.WriteLine($"Encrypted message, ciphertext length: {ciphertext.Length}");
+                Trace.TraceWarning($"Encrypted message, ciphertext length: {ciphertext.Length}");
 
                 // Create the encrypted message
                 var encryptedMessage = new EncryptedMessage
@@ -255,7 +256,7 @@ namespace E2EELibraryTests
                 };
 
                 // Verify we can decrypt it manually
-                Console.WriteLine("Verifying manual decryption works...");
+                Trace.TraceWarning("Verifying manual decryption works...");
 
                 // First, let's try manual decryption - this should work if everything is set up correctly
                 byte[] sharedSecret2 = X3DHExchange.X3DHKeyExchange(
@@ -264,7 +265,7 @@ namespace E2EELibraryTests
 
                 byte[] decryptedBytes = AES.AESDecrypt(encryptedMessage.Ciphertext, sharedSecret2, encryptedMessage.Nonce);
                 string decryptedJson = Encoding.UTF8.GetString(decryptedBytes);
-                Console.WriteLine($"Decrypted JSON successfully: {decryptedJson}");
+                Trace.TraceWarning($"Decrypted JSON successfully: {decryptedJson}");
 
                 // Parse the decrypted JSON
                 var parsedMessage = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(decryptedJson);
@@ -280,14 +281,14 @@ namespace E2EELibraryTests
 
                 // Verify the signature
                 bool signatureValid = MessageSigning.VerifySignature(extractedData, extractedSignature, extractedSenderKey);
-                Console.WriteLine($"Signature verification result: {signatureValid}");
+                Trace.TraceWarning($"Signature verification result: {signatureValid}");
 
                 // Verify the extracted data matches the original
                 bool dataMatches = originalSyncData.SequenceEqual(extractedData);
-                Console.WriteLine($"Extracted data matches original: {dataMatches}");
+                Trace.TraceWarning($"Extracted data matches original: {dataMatches}");
 
                 // Now let's try with the device manager
-                Console.WriteLine("\nNow testing with DeviceManager...");
+                Trace.TraceWarning("\nNow testing with DeviceManager...");
 
                 // Create device managers
                 var mainDeviceManager = new DeviceManager((mainDeviceKeyPair.publicKey, mainDeviceKeyPair.privateKey));
@@ -297,18 +298,18 @@ namespace E2EELibraryTests
                 mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.publicKey);
                 secondDeviceManager.AddLinkedDevice(mainDeviceKeyPair.publicKey);
 
-                Console.WriteLine($"Second device linked device count: {secondDeviceManager.GetLinkedDeviceCount()}");
+                Trace.TraceWarning($"Second device linked device count: {secondDeviceManager.GetLinkedDeviceCount()}");
 
                 // Now try to process with the second device manager
                 byte[] receivedData = secondDeviceManager.ProcessSyncMessage(encryptedMessage, mainDeviceKeyPair.publicKey);
 
                 if (receivedData != null)
                 {
-                    Console.WriteLine($"Successfully processed with DeviceManager, received data length: {receivedData.Length}");
+                    Trace.TraceWarning($"Successfully processed with DeviceManager, received data length: {receivedData.Length}");
                 }
                 else
                 {
-                    Console.WriteLine("DeviceManager.ProcessSyncMessage returned null");
+                    Trace.TraceWarning("DeviceManager.ProcessSyncMessage returned null");
 
                     // Let's add a temporary method to the DeviceManager class for debugging:
                     /*
@@ -319,11 +320,11 @@ namespace E2EELibraryTests
                             byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(senderPublicKey, recipientPrivateKey);
                             byte[] decrypted = AES.AESDecrypt(message.Ciphertext, sharedSecret, message.Nonce);
                             string json = Encoding.UTF8.GetString(decrypted);
-                            Console.WriteLine($"Test decryption succeeded, JSON: {json}");
+                            Trace.TraceWarning($"Test decryption succeeded, JSON: {json}");
                             return true;
                         }
                         catch (Exception ex) {
-                            Console.WriteLine($"Test decryption failed: {ex.Message}");
+                            Trace.TraceWarning($"Test decryption failed: {ex.Message}");
                             return false;
                         }
                     }
@@ -334,7 +335,7 @@ namespace E2EELibraryTests
                     //    encryptedMessage, 
                     //    mainDeviceKeyPair.publicKey, 
                     //    secondDeviceKeyPair.privateKey);
-                    //Console.WriteLine($"Debug decryption test result: {decryptionWorked}");
+                    //Trace.TraceWarning($"Debug decryption test result: {decryptionWorked}");
                 }
 
                 // Continue with the standard assertions
@@ -347,8 +348,8 @@ namespace E2EELibraryTests
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Exception during test: {ex.Message}");
-                Console.WriteLine(ex.StackTrace);
+                Trace.TraceWarning($"Exception during test: {ex.Message}");
+                Trace.TraceWarning(ex.StackTrace);
                 throw;
             }
         }

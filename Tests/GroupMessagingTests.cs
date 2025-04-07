@@ -5,6 +5,7 @@ using E2EELibrary;
 using E2EELibrary.Core;
 using E2EELibrary.GroupMessaging;
 using System.Threading;
+using System.Diagnostics;
 
 namespace E2EELibraryTests
 {
@@ -116,11 +117,11 @@ namespace E2EELibraryTests
             var encryptedMessage = groupManager.EncryptGroupMessage(groupId, originalMessage);
 
             // Log details to help diagnose the issue
-            Console.WriteLine($"Group ID: {groupId}");
-            Console.WriteLine($"Message ID: {encryptedMessage.MessageId}");
-            Console.WriteLine($"Sender Identity Key Length: {encryptedMessage.SenderIdentityKey?.Length ?? 0}");
-            Console.WriteLine($"Ciphertext Length: {encryptedMessage.Ciphertext?.Length ?? 0}");
-            Console.WriteLine($"Nonce Length: {encryptedMessage.Nonce?.Length ?? 0}");
+            Trace.TraceWarning($"Group ID: {groupId}");
+            Trace.TraceWarning($"Message ID: {encryptedMessage.MessageId}");
+            Trace.TraceWarning($"Sender Identity Key Length: {encryptedMessage.SenderIdentityKey?.Length ?? 0}");
+            Trace.TraceWarning($"Ciphertext Length: {encryptedMessage.Ciphertext?.Length ?? 0}");
+            Trace.TraceWarning($"Nonce Length: {encryptedMessage.Nonce?.Length ?? 0}");
 
             // Act & Assert - First decryption with detailed logging
             string firstDecryption = groupManager.DecryptGroupMessage(encryptedMessage);
@@ -128,16 +129,16 @@ namespace E2EELibraryTests
             // If firstDecryption is null, log additional details to help diagnose
             if (firstDecryption == null)
             {
-                Console.WriteLine("First decryption FAILED - returned null");
+                Trace.TraceWarning("First decryption FAILED - returned null");
 
                 // Try direct decryption via the underlying components to isolate the issue
                 var messageCrypto = new GroupMessageCrypto();
                 var directDecrypt = messageCrypto.DecryptMessage(encryptedMessage, senderKey);
-                Console.WriteLine($"Direct decryption via GroupMessageCrypto: {(directDecrypt != null ? "SUCCESS" : "FAILED")}");
+                Trace.TraceWarning($"Direct decryption via GroupMessageCrypto: {(directDecrypt != null ? "SUCCESS" : "FAILED")}");
             }
             else
             {
-                Console.WriteLine("First decryption SUCCESS");
+                Trace.TraceWarning("First decryption SUCCESS");
             }
 
             Assert.IsNotNull(firstDecryption, "First decryption should succeed");

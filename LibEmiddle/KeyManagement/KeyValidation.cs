@@ -1,4 +1,5 @@
 ﻿using E2EELibrary.Core;
+using System.Diagnostics;
 
 namespace E2EELibrary.KeyManagement
 {
@@ -17,13 +18,13 @@ namespace E2EELibrary.KeyManagement
         {
             if (publicKey == null)
             {
-                Console.WriteLine("Validation failed: Public key is null");
+                Trace.TraceWarning("Validation failed: Public key is null");
                 return false;
             }
 
             if (publicKey.Length != Constants.X25519_KEY_SIZE)
             {
-                Console.WriteLine($"Validation failed: Incorrect key length. Expected {Constants.X25519_KEY_SIZE}, got {publicKey.Length}");
+                Trace.TraceWarning($"Validation failed: Incorrect key length. Expected {Constants.X25519_KEY_SIZE}, got {publicKey.Length}");
                 return false;
             }
 
@@ -40,7 +41,7 @@ namespace E2EELibrary.KeyManagement
 
             if (allZeros)
             {
-                Console.WriteLine("Validation failed: Public key is all zeros");
+                Trace.TraceWarning("Validation failed: Public key is all zeros");
                 return false;
             }
 

@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using E2EELibrary.Communication.Abstract;
 using E2EELibrary.Models;
@@ -51,7 +52,7 @@ namespace E2EELibrary.Communication
             catch (Exception ex)
             {
                 // Log the error - in production this would use a proper logging framework
-                Console.WriteLine($"Error sending message: {ex.Message}");
+                Trace.TraceWarning($"Error sending message: {ex.Message}");
                 return false;
             }
         }
@@ -91,7 +92,7 @@ namespace E2EELibrary.Communication
             catch (Exception ex)
             {
                 // Log the error - in production this would use a proper logging framework
-                Console.WriteLine($"Error fetching messages: {ex.Message}");
+                Trace.TraceWarning($"Error fetching messages: {ex.Message}");
                 return new List<MailboxMessage>();
             }
         }
@@ -111,7 +112,7 @@ namespace E2EELibrary.Communication
             catch (Exception ex)
             {
                 // Log the error - in production this would use a proper logging framework
-                Console.WriteLine($"Error deleting message: {ex.Message}");
+                Trace.TraceWarning($"Error deleting message: {ex.Message}");
                 return false;
             }
         }
@@ -132,7 +133,7 @@ namespace E2EELibrary.Communication
             catch (Exception ex)
             {
                 // Log the error - in production this would use a proper logging framework
-                Console.WriteLine($"Error marking message as read: {ex.Message}");
+                Trace.TraceWarning($"Error marking message as read: {ex.Message}");
                 return false;
             }
         }

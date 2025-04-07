@@ -5,6 +5,7 @@ using E2EELibrary.Core;
 using E2EELibrary.Encryption;
 using E2EELibrary.Models;
 using E2EELibrary.KeyExchange;
+using System.Diagnostics;
 
 namespace E2EELibrary.GroupMessaging
 {
@@ -235,7 +236,7 @@ namespace E2EELibrary.GroupMessaging
                 catch (Exception ex)
                 {
                     // Log the error but continue processing other sessions
-                    Console.WriteLine($"Error loading session for group {dto.GroupId}: {ex.Message}");
+                    Trace.TraceWarning($"Error loading session for group {dto.GroupId}: {ex.Message}");
                 }
             }
 

@@ -8,6 +8,7 @@ using E2EELibrary.Encryption;
 using E2EELibrary.Models;
 using E2EELibrary.KeyExchange;
 using E2EELibrary.KeyManagement;
+using System.Diagnostics;
 
 namespace E2EELibrary.MultiDevice
 {
@@ -171,7 +172,7 @@ namespace E2EELibrary.MultiDevice
                                 // If already 32 bytes, validate it's a proper X25519 key
                                 if (!KeyValidation.ValidateX25519PublicKey(deviceKey))
                                 {
-                                    // Use a secure logging mechanism instead of Console.WriteLine
+                                    // Use a secure logging mechanism instead of Trace.TraceWarning
                                     // LogManager.LogWarning("Skipping invalid X25519 public key");
                                     continue;
                                 }
@@ -186,7 +187,7 @@ namespace E2EELibrary.MultiDevice
                             }
                             else
                             {
-                                // Use a secure logging mechanism instead of Console.WriteLine
+                                // Use a secure logging mechanism instead of Trace.TraceWarning
                                 // LogManager.LogWarning($"Skipping device key with invalid length: {deviceKey.Length}");
                                 continue;
                             }
@@ -242,9 +243,9 @@ namespace E2EELibrary.MultiDevice
                         catch (Exception ex)
                         {
                             // Log the error but continue processing other devices
-                            // Use a secure logging mechanism instead of Console.WriteLine
+                            // Use a secure logging mechanism instead of Trace.TraceWarning
                             // LogManager.LogError($"Error creating sync message: {ex.Message}");
-                            Console.WriteLine($"Error creating sync message: {ex.Message}");
+                            Trace.TraceWarning($"Error creating sync message: {ex.Message}");
                         }
                     }
                 }

@@ -7,6 +7,7 @@ using E2EELibrary;
 using E2EELibrary.Encryption;
 using E2EELibrary.Models;
 using E2EELibrary.Core;
+using System.Diagnostics;
 
 namespace E2EELibraryTests
 {
@@ -290,8 +291,8 @@ namespace E2EELibraryTests
             CollectionAssert.AreEqual(largeData, decrypted, "Decrypted data should match original");
 
             // Performance depends on the machine, but we can have a reasonable expectation
-            Console.WriteLine($"Encryption time for 10MB: {encryptTime}ms");
-            Console.WriteLine($"Decryption time for 10MB: {decryptTime}ms");
+            Trace.TraceWarning($"Encryption time for 10MB: {encryptTime}ms");
+            Trace.TraceWarning($"Decryption time for 10MB: {decryptTime}ms");
 
             // The actual times will vary by environment, so use loose constraints
             Assert.IsTrue(encryptTime < 5000, "Encryption should complete within 5 seconds");

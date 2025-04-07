@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace E2EELibrary.Core
@@ -83,7 +84,7 @@ namespace E2EELibrary.Core
 
                 // Log the actual version for diagnostic purposes
                 string? actualVersion = Marshal.PtrToStringAnsi(sodium_version_string());
-                Console.WriteLine($"Loaded libsodium version: {actualVersion} (major={major}, minor={minor})");
+                Trace.TraceWarning($"Loaded libsodium version: {actualVersion} (major={major}, minor={minor})");
 
                 if (sodium_set_misuse_handler(&InternalError) != 0)
                 {
@@ -166,7 +167,7 @@ namespace E2EELibrary.Core
                     IntPtr handle = System.Runtime.InteropServices.NativeLibrary.Load(s_libraryPath);
 
                     // If we get here, the library loaded successfully
-                    Console.WriteLine($"Successfully loaded libsodium from: {s_libraryPath}");
+                    Trace.TraceWarning($"Successfully loaded libsodium from: {s_libraryPath}");
                     return true;
                 }
                 else

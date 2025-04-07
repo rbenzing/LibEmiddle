@@ -3,6 +3,7 @@ using System.IO;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using E2EELibrary;
 using E2EELibrary.Core;
+using System.Diagnostics;
 
 namespace E2EELibraryTests
 {
@@ -18,7 +19,7 @@ namespace E2EELibraryTests
         [AssemblyInitialize]
         public static void AssemblyInit(TestContext context)
         {
-            Console.WriteLine("E2EE Test Suite Initialization Started");
+            Trace.TraceWarning("E2EE Test Suite Initialization Started");
 
             try
             {
@@ -29,7 +30,7 @@ namespace E2EELibraryTests
                 var keyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
                 if (keyPair.publicKey != null && keyPair.privateKey != null)
                 {
-                    Console.WriteLine($"Sodium library initialized successfully. Generated key sizes: Public={keyPair.publicKey.Length}, Private={keyPair.privateKey.Length}");
+                    Trace.TraceWarning($"Sodium library initialized successfully. Generated key sizes: Public={keyPair.publicKey.Length}, Private={keyPair.privateKey.Length}");
                 }
                 else
                 {
@@ -38,48 +39,48 @@ namespace E2EELibraryTests
             }
             catch (PlatformNotSupportedException ex)
             {
-                Console.WriteLine($"Sodium library not available on this platform: {ex.Message}");
-                Console.WriteLine("You may need to install libsodium for your platform.");
+                Trace.TraceWarning($"Sodium library not available on this platform: {ex.Message}");
+                Trace.TraceWarning("You may need to install libsodium for your platform.");
 
                 string runtimeDir = Path.GetDirectoryName(typeof(LibEmiddleClient).Assembly.Location) ?? "";
-                Console.WriteLine($"Runtime directory: {runtimeDir}");
-                Console.WriteLine("Available files:");
+                Trace.TraceWarning($"Runtime directory: {runtimeDir}");
+                Trace.TraceWarning("Available files:");
                 foreach (var file in Directory.GetFiles(runtimeDir, "*.dll"))
                 {
-                    Console.WriteLine($"  {Path.GetFileName(file)}");
+                    Trace.TraceWarning($"  {Path.GetFileName(file)}");
                 }
 
                 throw;
             }
             catch (DllNotFoundException ex)
             {
-                Console.WriteLine($"Sodium library not found: {ex.Message}");
-                Console.WriteLine("Make sure libsodium.dll is available in your application directory or PATH.");
+                Trace.TraceWarning($"Sodium library not found: {ex.Message}");
+                Trace.TraceWarning("Make sure libsodium.dll is available in your application directory or PATH.");
 
                 string runtimeDir = Path.GetDirectoryName(typeof(LibEmiddleClient).Assembly.Location) ?? "";
                 string path = Environment.GetEnvironmentVariable("PATH") ?? "";
 
-                Console.WriteLine($"Runtime directory: {runtimeDir}");
-                Console.WriteLine($"PATH: {path}");
+                Trace.TraceWarning($"Runtime directory: {runtimeDir}");
+                Trace.TraceWarning($"PATH: {path}");
 
                 throw;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to initialize Sodium library: {ex.Message}");
-                Console.WriteLine($"Exception type: {ex.GetType().FullName}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                Trace.TraceWarning($"Failed to initialize Sodium library: {ex.Message}");
+                Trace.TraceWarning($"Exception type: {ex.GetType().FullName}");
+                Trace.TraceWarning($"Stack trace: {ex.StackTrace}");
 
                 if (ex.InnerException != null)
                 {
-                    Console.WriteLine($"Inner exception: {ex.InnerException.Message}");
-                    Console.WriteLine($"Inner exception type: {ex.InnerException.GetType().FullName}");
+                    Trace.TraceWarning($"Inner exception: {ex.InnerException.Message}");
+                    Trace.TraceWarning($"Inner exception type: {ex.InnerException.GetType().FullName}");
                 }
 
                 throw;
             }
 
-            Console.WriteLine("E2EE Test Suite Initialization Completed");
+            Trace.TraceWarning("E2EE Test Suite Initialization Completed");
         }
 
         /// <summary>
@@ -89,7 +90,7 @@ namespace E2EELibraryTests
         public static void AssemblyCleanup()
         {
             // Perform any global cleanup
-            Console.WriteLine("E2EE Test Suite Cleanup Completed");
+            Trace.TraceWarning("E2EE Test Suite Cleanup Completed");
         }
     }
 }

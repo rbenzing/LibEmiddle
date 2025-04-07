@@ -2,8 +2,8 @@
 using E2EELibrary.Core;
 using E2EELibrary.Encryption;
 using E2EELibrary.Models;
-using E2EELibrary.Communication;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace E2EELibrary.GroupMessaging
 {
@@ -110,7 +110,7 @@ namespace E2EELibrary.GroupMessaging
                     // If message was sent before we joined the group, reject it
                     if (encryptedMessage.Timestamp < joinTimestamp)
                     {
-                        Console.WriteLine($"Rejecting message sent before joining group: message timestamp {encryptedMessage.Timestamp}, joined at {joinTimestamp}");
+                        Trace.TraceWarning($"Rejecting message sent before joining group: message timestamp {encryptedMessage.Timestamp}, joined at {joinTimestamp}");
                         return null;
                     }
                 }

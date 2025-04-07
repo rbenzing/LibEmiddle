@@ -17,6 +17,7 @@ using E2EELibrary.GroupMessaging;
 using E2EELibrary.MultiDevice;
 using E2EELibrary.Communication.Abstract;
 using System.Linq;
+using System.Diagnostics;
 
 namespace E2EELibraryTests
 {
@@ -169,15 +170,15 @@ namespace E2EELibraryTests
                 .Setup(t => t.FetchMessagesAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
                 .Returns((byte[] recipientKey, CancellationToken token) => {
                     int count = Interlocked.Increment(ref attemptCount);
-                    Console.WriteLine($"Fetch attempt #{count}");
+                    Trace.TraceWarning($"Fetch attempt #{count}");
 
                     if (count < 3)
                     {
-                        Console.WriteLine($"Attempt {count}: Throwing network error");
+                        Trace.TraceWarning($"Attempt {count}: Throwing network error");
                         throw new System.Net.Http.HttpRequestException($"Network error on attempt {count}");
                     }
 
-                    Console.WriteLine("Attempt 3: Succeeding");
+                    Trace.TraceWarning("Attempt 3: Succeeding");
                     thirdAttemptSucceeded.Set();
                     return Task.FromResult(messages);
                 });
@@ -203,7 +204,7 @@ namespace E2EELibraryTests
             catch (System.Reflection.TargetInvocationException ex)
             {
                 // Expected exception
-                Console.WriteLine($"Expected first exception: {ex.InnerException?.Message}");
+                Trace.TraceWarning($"Expected first exception: {ex.InnerException?.Message}");
             }
 
             try
@@ -214,7 +215,7 @@ namespace E2EELibraryTests
             catch (System.Reflection.TargetInvocationException ex)
             {
                 // Expected exception
-                Console.WriteLine($"Expected second exception: {ex.InnerException?.Message}");
+                Trace.TraceWarning($"Expected second exception: {ex.InnerException?.Message}");
             }
 
             try
@@ -227,12 +228,12 @@ namespace E2EELibraryTests
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Unexpected exception on third attempt: {ex.Message}");
+                Trace.TraceWarning($"Unexpected exception on third attempt: {ex.Message}");
                 Assert.Fail("Third attempt should not throw an exception");
             }
 
             // Assert
-            Console.WriteLine($"Total attempts made: {attemptCount}");
+            Trace.TraceWarning($"Total attempts made: {attemptCount}");
             Assert.AreEqual(3, attemptCount, "Should have made exactly 3 attempts");
             Assert.IsTrue(thirdAttemptSucceeded.WaitOne(0), "Third attempt should have succeeded");
 
@@ -443,15 +444,15 @@ namespace E2EELibraryTests
         [TestMethod]
         public void MultiDeviceSynchronization_ShouldRecoverFromMessageLoss()
         {
-            Console.WriteLine("==== Starting MultiDeviceSynchronization_ShouldRecoverFromMessageLoss ====");
+            Trace.TraceWarning("==== Starting MultiDeviceSynchronization_ShouldRecoverFromMessageLoss ====");
 
             // Arrange
             var mainDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
             var secondDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
-            Console.WriteLine($"Main device key pair - Public: {Convert.ToBase64String(mainDeviceKeyPair.publicKey)}, " +
+            Trace.TraceWarning($"Main device key pair - Public: {Convert.ToBase64String(mainDeviceKeyPair.publicKey)}, " +
                              $"Private: {Convert.ToBase64String(mainDeviceKeyPair.privateKey).Substring(0, 10)}...");
-            Console.WriteLine($"Second device key pair - Public: {Convert.ToBase64String(secondDeviceKeyPair.publicKey)}, " +
+            Trace.TraceWarning($"Second device key pair - Public: {Convert.ToBase64String(secondDeviceKeyPair.publicKey)}, " +
                              $"Private: {Convert.ToBase64String(secondDeviceKeyPair.privateKey).Substring(0, 10)}...");
 
             // Convert to X25519 keys
@@ -461,19 +462,19 @@ namespace E2EELibraryTests
             byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
 
-            Console.WriteLine($"Main device X25519 public key: {Convert.ToBase64String(mainDeviceX25519Public)}");
-            Console.WriteLine($"Second device X25519 public key: {Convert.ToBase64String(secondDeviceX25519Public)}");
+            Trace.TraceWarning($"Main device X25519 public key: {Convert.ToBase64String(mainDeviceX25519Public)}");
+            Trace.TraceWarning($"Second device X25519 public key: {Convert.ToBase64String(secondDeviceX25519Public)}");
 
             // Let's manually test the key exchange works both ways
             byte[] sharedSecret1 = X3DHExchange.X3DHKeyExchange(secondDeviceX25519Public, mainDeviceX25519Private);
             byte[] sharedSecret2 = X3DHExchange.X3DHKeyExchange(mainDeviceX25519Public, secondDeviceX25519Private);
 
-            Console.WriteLine($"Manual key exchange - Shared secret 1 length: {sharedSecret1.Length}, " +
+            Trace.TraceWarning($"Manual key exchange - Shared secret 1 length: {sharedSecret1.Length}, " +
                              $"Shared secret 2 length: {sharedSecret2.Length}");
 
             // Verify they match (they should)
             bool secretsMatch = sharedSecret1.SequenceEqual(sharedSecret2);
-            Console.WriteLine($"Shared secrets match: {secretsMatch}");
+            Trace.TraceWarning($"Shared secrets match: {secretsMatch}");
             Assert.IsTrue(secretsMatch, "X3DH key exchange should produce matching shared secrets");
 
             // Create device managers
@@ -483,26 +484,26 @@ namespace E2EELibraryTests
             // Link devices
             mainDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
             secondDeviceManager.AddLinkedDevice(mainDeviceX25519Public);
-            Console.WriteLine("Linked both devices successfully");
+            Trace.TraceWarning("Linked both devices successfully");
 
             // Create sync data
             byte[] syncData = Encoding.UTF8.GetBytes("Important sync data");
-            Console.WriteLine($"Created sync data of length {syncData.Length}");
+            Trace.TraceWarning($"Created sync data of length {syncData.Length}");
 
             // Create sync messages
             var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
-            Console.WriteLine($"Created {syncMessages.Count} sync messages");
+            Trace.TraceWarning($"Created {syncMessages.Count} sync messages");
 
             // Get the sync message for the second device
             string secondDeviceId = Convert.ToBase64String(secondDeviceX25519Public);
-            Console.WriteLine($"Second device ID: {secondDeviceId}");
+            Trace.TraceWarning($"Second device ID: {secondDeviceId}");
             Assert.IsTrue(syncMessages.ContainsKey(secondDeviceId), "Should have sync message for second device");
 
             var syncMessageForSecondDevice = syncMessages[secondDeviceId];
-            Console.WriteLine($"Got sync message with ciphertext length: {syncMessageForSecondDevice.Ciphertext?.Length}");
+            Trace.TraceWarning($"Got sync message with ciphertext length: {syncMessageForSecondDevice.Ciphertext?.Length}");
 
             // Now, let's manually decrypt the message to verify we can get the original sync data
-            Console.WriteLine("Manually decrypting the sync message to verify it contains the expected data...");
+            Trace.TraceWarning("Manually decrypting the sync message to verify it contains the expected data...");
             try
             {
                 byte[] manualPlaintext = AES.AESDecrypt(
@@ -511,7 +512,7 @@ namespace E2EELibraryTests
                     syncMessageForSecondDevice.Nonce);
 
                 string jsonContent = Encoding.UTF8.GetString(manualPlaintext);
-                Console.WriteLine($"Decrypted JSON: {jsonContent}");
+                Trace.TraceWarning($"Decrypted JSON: {jsonContent}");
 
                 // Parse the JSON to extract the data field
                 var jsonDoc = System.Text.Json.JsonDocument.Parse(jsonContent);
@@ -521,17 +522,17 @@ namespace E2EELibraryTests
                 {
                     byte[] extractedData = Convert.FromBase64String(dataBase64);
                     string extractedText = Encoding.UTF8.GetString(extractedData);
-                    Console.WriteLine($"Extracted data: {extractedText}");
+                    Trace.TraceWarning($"Extracted data: {extractedText}");
 
                     // Verify this matches the original sync data
                     bool dataMatches = syncData.SequenceEqual(extractedData);
-                    Console.WriteLine($"Extracted data matches original: {dataMatches}");
+                    Trace.TraceWarning($"Extracted data matches original: {dataMatches}");
                     Assert.IsTrue(dataMatches, "The extracted data should match the original sync data");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Manual decryption failed: {ex.Message}");
+                Trace.TraceWarning($"Manual decryption failed: {ex.Message}");
                 Assert.Fail($"Manual decryption should succeed: {ex.Message}");
             }
 
@@ -558,15 +559,15 @@ namespace E2EELibraryTests
             // Tamper with the middle part
             int middleIndex = tamperedMessage.Ciphertext.Length / 2;
             tamperedMessage.Ciphertext[middleIndex] ^= 0xFF;
-            Console.WriteLine($"Created tampered message by modifying byte at index {middleIndex}");
+            Trace.TraceWarning($"Created tampered message by modifying byte at index {middleIndex}");
 
             // Try to process the tampered message - should fail
-            Console.WriteLine("Attempting to process tampered message...");
+            Trace.TraceWarning("Attempting to process tampered message...");
             byte[] result1 = secondDeviceManager.ProcessSyncMessage(tamperedMessage, mainDeviceX25519Public);
-            Console.WriteLine($"Tampered message processing result: {(result1 == null ? "null" : "success")}");
+            Trace.TraceWarning($"Tampered message processing result: {(result1 == null ? "null" : "success")}");
 
             // Main device notices failure (no acknowledgment) and resends the correct message
-            Console.WriteLine("Attempting to process valid message...");
+            Trace.TraceWarning("Attempting to process valid message...");
 
             // Apply the TEMPORARY FIX: We'll directly extract the data instead of relying on ProcessSyncMessage
             // This is not something you'd do in production code, but it helps us proceed with testing
@@ -579,7 +580,7 @@ namespace E2EELibraryTests
             // Option 2: If that fails, extract it manually (TEMPORARY TEST FIX)
             if (result2 == null)
             {
-                Console.WriteLine("ProcessSyncMessage failed, applying manual extraction...");
+                Trace.TraceWarning("ProcessSyncMessage failed, applying manual extraction...");
                 try
                 {
                     byte[] extractedPlaintext = AES.AESDecrypt(
@@ -593,16 +594,16 @@ namespace E2EELibraryTests
                     if (dataBase64 != null)
                     {
                         result2 = Convert.FromBase64String(dataBase64);
-                        Console.WriteLine($"Manual extraction succeeded, data length: {result2.Length}");
+                        Trace.TraceWarning($"Manual extraction succeeded, data length: {result2.Length}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Manual extraction failed too: {ex.Message}");
+                    Trace.TraceWarning($"Manual extraction failed too: {ex.Message}");
                 }
             }
 
-            Console.WriteLine($"Valid message processing result: {(result2 == null ? "null" : "success")}");
+            Trace.TraceWarning($"Valid message processing result: {(result2 == null ? "null" : "success")}");
 
             // Assert
             Assert.IsNull(result1, "Processing tampered sync message should fail");
@@ -614,12 +615,12 @@ namespace E2EELibraryTests
             if (result2 != null)
             {
                 // Verify the received data matches the original
-                Console.WriteLine($"Comparing received data '{Encoding.UTF8.GetString(result2)}' with original '{Encoding.UTF8.GetString(syncData)}'");
+                Trace.TraceWarning($"Comparing received data '{Encoding.UTF8.GetString(result2)}' with original '{Encoding.UTF8.GetString(syncData)}'");
                 Assert.IsTrue(SecureMemory.SecureCompare(syncData, result2),
                     "Received sync data should match original after recovery");
             }
 
-            Console.WriteLine("==== Test completed ====");
+            Trace.TraceWarning("==== Test completed ====");
         }
 
         [TestMethod]

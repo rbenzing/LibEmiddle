@@ -1,7 +1,7 @@
 ﻿using E2EELibrary.Core;
-using E2EELibrary.Encryption;
 using E2EELibrary.Models;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace E2EELibrary.GroupMessaging
 {
@@ -116,7 +116,7 @@ namespace E2EELibrary.GroupMessaging
                 !_memberManager.IsMember(distribution.GroupId, distribution.SenderIdentityKey))
             {
                 // Sender is not a member of the group - reject the distribution
-                Console.WriteLine("Rejecting distribution from non-member of the group");
+                Trace.TraceWarning("Rejecting distribution from non-member of the group");
                 return false;
             }
 
@@ -214,7 +214,7 @@ namespace E2EELibrary.GroupMessaging
                 // Here we're just verifying the member is added correctly
                 if (!_memberManager.IsMember(groupId, memberPublicKey))
                 {
-                    Console.WriteLine("Warning: Member was added but IsMember verification failed");
+                    Trace.TraceWarning("Warning: Member was added but IsMember verification failed");
                 }
             }
 
@@ -257,12 +257,12 @@ namespace E2EELibrary.GroupMessaging
                 catch (UnauthorizedAccessException)
                 {
                     // Log the error but don't fail - the member was still removed
-                    Console.WriteLine("Warning: Group key rotation failed due to permission issues");
+                    Trace.TraceWarning("Warning: Group key rotation failed due to permission issues");
                 }
                 catch (Exception ex)
                 {
                     // Log but don't fail the member removal operation
-                    Console.WriteLine($"Warning: Failed to rotate group key after member removal: {ex.Message}");
+                    Trace.TraceWarning($"Warning: Failed to rotate group key after member removal: {ex.Message}");
                 }
             }
 

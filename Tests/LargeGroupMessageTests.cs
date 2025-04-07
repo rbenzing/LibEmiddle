@@ -6,6 +6,7 @@ using E2EELibrary.GroupMessaging;
 using E2EELibrary.Models;
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Diagnostics;
 
 namespace E2EELibraryTests
 {
@@ -62,7 +63,7 @@ namespace E2EELibraryTests
             // Each member processes all other members' distribution messages
             for (int receiverIdx = 0; receiverIdx < memberCount; receiverIdx++)
             {
-                Console.WriteLine($"Processing distributions for receiver {receiverIdx}");
+                Trace.TraceWarning($"Processing distributions for receiver {receiverIdx}");
                 for (int senderIdx = 0; senderIdx < memberCount; senderIdx++)
                 {
                     if (receiverIdx != senderIdx)
@@ -74,7 +75,7 @@ namespace E2EELibraryTests
                         if (!result)
                         {
                             string senderKey = Convert.ToBase64String(memberKeyPairs[senderIdx].publicKey);
-                            Console.WriteLine($"Failed to process distribution from sender {senderIdx} with key {senderKey}");
+                            Trace.TraceWarning($"Failed to process distribution from sender {senderIdx} with key {senderKey}");
 
                             // Check authorization status using reflection
                             var memberManagerField = typeof(GroupChatManager).GetField("_memberManager",
@@ -86,9 +87,9 @@ namespace E2EELibraryTests
                             string receiverKey = Convert.ToBase64String(memberKeyPairs[receiverIdx].publicKey);
                             string senderBase64Key = Convert.ToBase64String(memberKeyPairs[senderIdx].publicKey);
 
-                            Console.WriteLine($"Receiver {receiverIdx} key: {receiverKey}");
-                            Console.WriteLine($"Sender {senderIdx} key: {senderBase64Key}");
-                            Console.WriteLine($"Is sender authorized: {isMember}");
+                            Trace.TraceWarning($"Receiver {receiverIdx} key: {receiverKey}");
+                            Trace.TraceWarning($"Sender {senderIdx} key: {senderBase64Key}");
+                            Trace.TraceWarning($"Is sender authorized: {isMember}");
                         }
 
                         Assert.IsTrue(result, $"Member {receiverIdx} should process distribution from member {senderIdx}");
