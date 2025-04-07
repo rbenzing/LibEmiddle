@@ -110,6 +110,14 @@ namespace E2EELibrary.Models
             if (!ProtocolVersion.IsCompatible(ProtocolMajorVersion, ProtocolMinorVersion))
                 return false;
 
+            // Validate message ID format
+            if (MessageId == Guid.Empty)
+                return false;
+
+            // Check message number range
+            if (MessageNumber < 0)
+                return false;
+
             return true;
         }
 
@@ -243,7 +251,12 @@ namespace E2EELibrary.Models
                 orderedDict["sessionId"] = SessionId;
             }
 
-            return JsonSerialization.Serialize(orderedDict);
+            // Use invariant culture to ensure consistent number formatting globally
+            return JsonSerializer.Serialize(orderedDict, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = false
+            });
         }
 
         /// <summary>

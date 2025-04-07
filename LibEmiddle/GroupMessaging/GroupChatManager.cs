@@ -1,7 +1,7 @@
-﻿using E2EELibrary.Core;
-using E2EELibrary.Models;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
+using E2EELibrary.Core;
+using E2EELibrary.Models;
 
 namespace E2EELibrary.GroupMessaging
 {
@@ -16,6 +16,13 @@ namespace E2EELibrary.GroupMessaging
         private readonly SenderKeyDistribution _distributionManager;
         private readonly GroupSessionPersistence _sessionPersistence;
         private readonly GroupSecurityValidator _securityValidator;
+
+        // Add new field to track when keys were last rotated
+        private readonly ConcurrentDictionary<string, long> _lastKeyRotationTimestamps =
+            new ConcurrentDictionary<string, long>();
+
+        // Add configurable rotation period (default 7 days)
+        private TimeSpan _keyRotationPeriod = TimeSpan.FromDays(7);
 
         /// <summary>
         /// Identity key pair for this client
@@ -39,6 +46,18 @@ namespace E2EELibrary.GroupMessaging
             _distributionManager = new SenderKeyDistribution(identityKeyPair);
             _sessionPersistence = new GroupSessionPersistence();
             _securityValidator = new GroupSecurityValidator();
+        }
+
+        /// <summary>
+        /// Method to configure key rotation period
+        /// </summary>
+        /// <param name="period">The time period between key rotations</param>
+        public void SetKeyRotationPeriod(TimeSpan period)
+        {
+            if (period < TimeSpan.FromHours(1))
+                throw new ArgumentException("Key rotation period must be at least 1 hour", nameof(period));
+
+            _keyRotationPeriod = period;
         }
 
         /// <summary>
@@ -73,6 +92,9 @@ namespace E2EELibrary.GroupMessaging
             // Process our own distribution message to ensure we can decrypt our own messages
             var distribution = CreateDistributionMessage(groupId);
             ProcessSenderKeyDistribution(distribution);
+
+            // Set initial key rotation timestamp
+            _lastKeyRotationTimestamps[groupId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             return senderKey;
         }
@@ -140,6 +162,9 @@ namespace E2EELibrary.GroupMessaging
         {
             _securityValidator.ValidateGroupId(groupId);
 
+            // First check if key rotation is needed
+            CheckAndRotateKeyIfNeeded(groupId);
+
             // Use a lock specific to this group ID to synchronize access
             lock (GetGroupLock(groupId))
             {
@@ -152,10 +177,40 @@ namespace E2EELibrary.GroupMessaging
 
                 // Make a deep copy of the sender key to avoid concurrent modification
                 byte[] senderKeyCopy = Sodium.GenerateRandomBytes(groupSession.SenderKey.Length);
-                groupSession.SenderKey.AsSpan().CopyTo(senderKeyCopy);
+                groupSession.SenderKey.AsSpan().CopyTo(senderKeyCopy.AsSpan());
 
                 // Encrypt message with the copy
                 return _messageCrypto.EncryptMessage(groupId, message, senderKeyCopy, _identityKeyPair);
+            }
+        }
+
+        /// <summary>
+        /// Add method to check and rotate key if needed
+        /// </summary>
+        /// <param name="groupId">The group ID to check</param>
+        private void CheckAndRotateKeyIfNeeded(string groupId)
+        {
+            // Get current time
+            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // Get last rotation time, or 0 if not previously set
+            long lastRotationTime = _lastKeyRotationTimestamps.GetOrAdd(groupId, 0);
+
+            // Calculate elapsed time
+            TimeSpan elapsed = TimeSpan.FromMilliseconds(currentTime - lastRotationTime);
+
+            // Check if rotation is needed
+            if (elapsed >= _keyRotationPeriod && _memberManager.HasKeyRotationPermission(groupId, _identityKeyPair.publicKey))
+            {
+                try
+                {
+                    RotateGroupKey(groupId);
+                }
+                catch (Exception ex)
+                {
+                    // Log the error but continue (don't block messaging if rotation fails)
+                    Trace.TraceWarning($"Failed to rotate group key for {groupId}: {ex.Message}");
+                }
             }
         }
 
@@ -302,6 +357,9 @@ namespace E2EELibrary.GroupMessaging
             // Clear any existing distribution records for this group in the distribution manager
             // This ensures that old sender keys cannot be used
             _distributionManager.DeleteGroupDistributions(groupId);
+
+            // Update the rotation timestamp
+            _lastKeyRotationTimestamps[groupId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             return newKey;
         }

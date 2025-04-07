@@ -119,6 +119,41 @@ namespace E2EELibrary.Communication
         }
 
         /// <summary>
+        /// Enhanced message validation before processing
+        /// </summary>
+        /// <param name="message">Message to validate</param>
+        /// <returns>True if message is valid</returns>
+        private bool ValidateIncomingMessage(MailboxMessage message)
+        {
+            if (message == null)
+                return false;
+
+            if (message.EncryptedPayload == null ||
+                message.RecipientKey == null ||
+                message.SenderKey == null)
+                return false;
+
+            // Validate recipient is indeed us
+            if (!SecureMemory.SecureCompare(message.RecipientKey, _identityKeyPair.publicKey))
+                return false;
+
+            // Check the encrypted payload
+            if (!message.EncryptedPayload.Validate())
+                return false;
+
+            // Check for expired messages
+            if (message.IsExpired())
+                return false;
+
+            // Check for suspiciously old messages
+            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (currentTime - message.Timestamp > TimeSpan.FromDays(7).TotalMilliseconds)
+                return false;
+
+            return true;
+        }
+
+        /// <summary>
         /// Sends a message to a recipient using Double Ratchet encryption.
         /// </summary>
         /// <param name="recipientKey">The recipient's public key</param>
@@ -339,6 +374,21 @@ namespace E2EELibrary.Communication
         }
 
         /// <summary>
+        /// Returns true if the message isnt expired.
+        /// </summary>
+        /// <param name="message"></param>
+        /// <returns></returns>
+        protected virtual bool ShouldProcessMessage(MailboxMessage message)
+        {
+            // Skip expired messages
+            if (message.IsExpired())
+                return false;
+
+            // Check other validation criteria
+            return ValidateIncomingMessage(message);
+        }
+
+        /// <summary>
         /// Polls for new messages from the server.
         /// </summary>
         /// <param name="cancellationToken">The cancel token</param>
@@ -353,12 +403,8 @@ namespace E2EELibrary.Communication
 
                     foreach (var message in messages)
                     {
-                        // Skip expired messages
-                        if (message.IsExpired())
-                            continue;
-
-                        // Make sure message is for us
-                        if (!SecureMemory.SecureCompare(message.RecipientKey, _identityKeyPair.publicKey))
+                        // Use the protected method for filtering
+                        if (!ShouldProcessMessage(message))
                             continue;
 
                         // Add to our local store if it's new
@@ -406,16 +452,6 @@ namespace E2EELibrary.Communication
                     {
                         break; // Cancellation requested
                     }
-                }
-
-                // Wait for next poll - this should be skipped if we already delayed after an error
-                try
-                {
-                    await Task.Delay(_pollingInterval, cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    break; // Cancellation requested
                 }
             }
         }

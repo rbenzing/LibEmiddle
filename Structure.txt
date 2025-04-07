@@ -82,6 +82,7 @@ LibEmiddle/
 │       ├── KeyAuthTests.cs
 │       ├── KeyExchangeTests.cs
 │       ├── KeyManagementTests.cs
+│       ├── KeyRotationTests.cs
 │       ├── KeyStorageTests.cs
 │       ├── LargeGroupMessageTests.cs
 │       ├── MailboxManagerTests.cs

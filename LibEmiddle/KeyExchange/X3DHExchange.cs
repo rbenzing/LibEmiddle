@@ -104,13 +104,84 @@ namespace E2EELibrary.KeyExchange
         }
 
         /// <summary>
+        /// Add proper key derivation following Signal spec
+        /// </summary>
+        /// <param name="secrets">Secret key materials to combine</param>
+        /// <returns>Derived shared secret</returns>
+        private static byte[] DeriveSharedSecret(params byte[][] secrets)
+        {
+            // Use HKDF for proper key derivation
+            byte[] combinedInput = new byte[secrets.Sum(s => s.Length)];
+            int offset = 0;
+
+            foreach (var secret in secrets)
+            {
+                secret.CopyTo(combinedInput, offset);
+                offset += secret.Length;
+            }
+
+            // Use a proper info string as per spec
+            byte[] info = Encoding.UTF8.GetBytes("X3DH_Signal_Protocol_v1");
+
+            // 32 bytes output (AES-256 key)
+            return Hkdf(combinedInput, null, info, 32);
+        }
+
+        /// <summary>
+        /// Implement proper HKDF as per RFC 5869
+        /// </summary>
+        /// <param name="inputKeyMaterial">Initial key material</param>
+        /// <param name="salt">Optional salt (can be null)</param>
+        /// <param name="info">Context and application specific information</param>
+        /// <param name="outputLength">Length of output in bytes</param>
+        /// <returns>Derived key material</returns>
+        private static byte[] Hkdf(byte[] inputKeyMaterial, byte[]? salt, byte[] info, int outputLength)
+        {
+            salt ??= new byte[32]; // Use empty salt if not provided
+
+            // HKDF-Extract
+            byte[] prk;
+            using (var hmac = new HMACSHA256(salt))
+            {
+                prk = hmac.ComputeHash(inputKeyMaterial);
+            }
+
+            // HKDF-Expand
+            byte[] okm = new byte[outputLength];
+            byte[] t = Array.Empty<byte>();
+            byte[] counter = new byte[1];
+            int offset = 0;
+
+            using var hmacExpand = new HMACSHA256(prk);
+
+            for (counter[0] = 1; offset < outputLength; counter[0]++)
+            {
+                hmacExpand.Initialize();
+
+                using var ms = new MemoryStream();
+                ms.Write(t);
+                ms.Write(info);
+                ms.Write(counter);
+
+                t = hmacExpand.ComputeHash(ms.ToArray());
+
+                int remaining = Math.Min(outputLength - offset, t.Length);
+                Buffer.BlockCopy(t, 0, okm, offset, remaining);
+                offset += remaining;
+            }
+
+            return okm;
+        }
+
+        /// <summary>
         /// Initiates a session with a recipient using their X3DH key bundle with enhanced security validation
         /// </summary>
         /// <param name="recipientBundle">Recipient's X3DH key bundle</param>
         /// <param name="senderIdentityKeyPair">Sender's identity key pair</param>
         /// <returns>Initial message keys and session data</returns>
-        public static X3DHSession InitiateX3DHSession(X3DHPublicBundle recipientBundle, 
-            (byte[] publicKey, byte[] privateKey) senderIdentityKeyPair) {
+        public static X3DHSession InitiateX3DHSession(X3DHPublicBundle recipientBundle,
+            (byte[] publicKey, byte[] privateKey) senderIdentityKeyPair)
+        {
             ArgumentNullException.ThrowIfNull(recipientBundle, nameof(recipientBundle));
 
             if (recipientBundle.IdentityKey == null || recipientBundle.SignedPreKey == null)
@@ -208,32 +279,13 @@ namespace E2EELibrary.KeyExchange
                         dh4 = X3DHKeyExchange(oneTimePreKey, ephemeralKeyPair.privateKey);
                     }
 
-                    // Combine keys to create master secret using HKDF-like construction
-                    byte[] masterSecret;
-                    using (var sha256 = SHA256.Create())
-                    {
-                        using (var ms = new MemoryStream())
-                        {
-                            byte[] info = Encoding.UTF8.GetBytes("X3DH");
-
-                            // Add all DH outputs to the key material
-                            ms.Write(dh1, 0, dh1.Length);
-                            ms.Write(dh2, 0, dh2.Length);
-                            ms.Write(dh3, 0, dh3.Length);
-
-                            if (dh4 != null)
-                            {
-                                ms.Write(dh4, 0, dh4.Length);
-                            }
-
-                            ms.Write(info, 0, info.Length);
-
-                            masterSecret = sha256.ComputeHash(ms.ToArray());
-                        }
-                    }
+                    // Derive the shared secret using proper HKDF
+                    byte[] sharedSecret = dh4 != null
+                        ? DeriveSharedSecret(dh1, dh2, dh3, dh4)
+                        : DeriveSharedSecret(dh1, dh2, dh3);
 
                     // Initialize Double Ratchet with this master secret
-                    var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(masterSecret);
+                    var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
                     // Create the session object
                     var session = new X3DHSession(
@@ -251,7 +303,7 @@ namespace E2EELibrary.KeyExchange
                     SecureMemory.SecureClear(dh2);
                     SecureMemory.SecureClear(dh3);
                     if (dh4 != null) SecureMemory.SecureClear(dh4);
-                    SecureMemory.SecureClear(masterSecret);
+                    SecureMemory.SecureClear(sharedSecret);
                     SecureMemory.SecureClear(ephemeralKeyPair.privateKey);
 
                     return session;

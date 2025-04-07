@@ -1,6 +1,8 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Security;
 using System.Security.Cryptography;
 using E2EELibrary.Core;
 using E2EELibrary.Communication;
@@ -8,7 +10,6 @@ using E2EELibrary.Encryption;
 using E2EELibrary.Models;
 using E2EELibrary.KeyExchange;
 using E2EELibrary.KeyManagement;
-using System.Diagnostics;
 
 namespace E2EELibrary.MultiDevice
 {
@@ -21,6 +22,10 @@ namespace E2EELibrary.MultiDevice
 
         // Changed from ConcurrentBag to ConcurrentDictionary to prevent duplicates
         private readonly ConcurrentDictionary<string, byte[]> _linkedDevices = new ConcurrentDictionary<string, byte[]>(StringComparer.Ordinal);
+
+        // Add a revoked devices tracking set with timestamps
+        private readonly ConcurrentDictionary<string, long> _revokedDevices =
+            new ConcurrentDictionary<string, long>();
 
         private readonly byte[] _syncKey;
         private readonly object _syncLock = new object();
@@ -73,6 +78,10 @@ namespace E2EELibrary.MultiDevice
                     $"Device public key must be {Constants.X25519_KEY_SIZE} or {Constants.ED25519_PUBLIC_KEY_SIZE} bytes",
                     nameof(devicePublicKey));
             }
+
+            // Check if device was previously revoked
+            if (IsDeviceRevoked(devicePublicKey))
+                throw new SecurityException("Cannot add a previously revoked device");
 
             // Validate X25519 public key if it's that length
             if (devicePublicKey.Length == Constants.X25519_KEY_SIZE &&
@@ -429,6 +438,22 @@ namespace E2EELibrary.MultiDevice
         }
 
         /// <summary>
+        /// Checks if a device has been revoked
+        /// </summary>
+        /// <param name="devicePublicKey">Public key of the device to check</param>
+        /// <returns>True if the device was revoked</returns>
+        public bool IsDeviceRevoked(byte[] devicePublicKey)
+        {
+            if (devicePublicKey == null)
+                return false;
+
+            // Convert key to Base64 for lookup
+            string deviceId = Convert.ToBase64String(devicePublicKey);
+
+            return _revokedDevices.ContainsKey(deviceId);
+        }
+
+        /// <summary>
         /// Creates a revocation message for a device.
         /// </summary>
         /// <param name="deviceKeyToRevoke">The public key of the device to revoke</param>
@@ -475,9 +500,9 @@ namespace E2EELibrary.MultiDevice
                 throw new ArgumentNullException(nameof(devicePublicKey));
 
             // Convert key to X25519 format if needed
-            byte[] finalKey = devicePublicKey.Length == Constants.X25519_KEY_SIZE ?
-                devicePublicKey :
-                KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey);
+            byte[] finalKey = devicePublicKey.Length != Constants.X25519_KEY_SIZE ?
+                KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey) :
+                devicePublicKey;
 
             // Use Base64 representation as dictionary key
             string deviceId = Convert.ToBase64String(finalKey);
@@ -495,6 +520,9 @@ namespace E2EELibrary.MultiDevice
             {
                 throw new KeyNotFoundException("Device not found in linked devices");
             }
+
+            // Track the revoked device with current timestamp
+            _revokedDevices[deviceId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             // Create revocation message
             return CreateRevocationMessage(finalKey);
@@ -532,6 +560,9 @@ namespace E2EELibrary.MultiDevice
                 SecureMemory.SecureClear(removedKey);
             }
 
+            // Add to revoked devices tracking
+            _revokedDevices[deviceId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
             return removed;
         }
 
@@ -546,14 +577,23 @@ namespace E2EELibrary.MultiDevice
 
             var deviceList = new List<string>();
 
+            // Include all currently linked devices
             foreach (var device in _linkedDevices)
             {
                 deviceList.Add(device.Key);
             }
 
+            // We need to export the revoked devices list as well
+            var revokedDeviceList = new Dictionary<string, long>();
+            foreach (var device in _revokedDevices)
+            {
+                revokedDeviceList.Add(device.Key, device.Value);
+            }
+
             string json = JsonSerializer.Serialize(new
             {
                 devices = deviceList,
+                revokedDevices = revokedDeviceList, // Add revoked devices to export
                 exportTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 protocolVersion = ProtocolVersion.FULL_VERSION
             });
@@ -603,108 +643,150 @@ namespace E2EELibrary.MultiDevice
             if (data == null || data.Length == 0)
                 throw new ArgumentException("Import data cannot be null or empty", nameof(data));
 
-            byte[] jsonData;
+            byte[]? jsonData = null;
+            byte[]? key = null;
 
-            // Decrypt if password provided
-            if (!string.IsNullOrEmpty(password))
+            try
             {
-                // Extract salt and nonce
-                if (data.Length < Constants.DEFAULT_SALT_SIZE + Constants.NONCE_SIZE + 16)
-                    throw new ArgumentException("Data is too short to be valid encrypted export", nameof(data));
-
-                byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
-                byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
-                Buffer.BlockCopy(data, 0, salt, 0, salt.Length);
-                Buffer.BlockCopy(data, salt.Length, nonce, 0, nonce.Length);
-
-                // Extract ciphertext
-                int ciphertextLength = data.Length - salt.Length - nonce.Length;
-                byte[] ciphertext = Sodium.GenerateRandomBytes(ciphertextLength);
-                Buffer.BlockCopy(data, salt.Length + nonce.Length, ciphertext, 0, ciphertextLength);
-
-                // Derive key
-                byte[] key = DeriveKeyFromPassword(password, salt);
-
-                // Decrypt
-                try
+                // Decrypt if password provided
+                if (!string.IsNullOrEmpty(password))
                 {
-                    jsonData = AES.AESDecrypt(ciphertext, key, nonce);
+                    // Extract salt and nonce
+                    if (data.Length < Constants.DEFAULT_SALT_SIZE + Constants.NONCE_SIZE + 16)
+                        throw new ArgumentException("Data is too short to be valid encrypted export", nameof(data));
+
+                    byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
+                    byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
+                    Buffer.BlockCopy(data, 0, salt, 0, salt.Length);
+                    Buffer.BlockCopy(data, salt.Length, nonce, 0, nonce.Length);
+
+                    // Extract ciphertext
+                    int ciphertextLength = data.Length - salt.Length - nonce.Length;
+                    byte[] ciphertext = Sodium.GenerateRandomBytes(ciphertextLength);
+                    Buffer.BlockCopy(data, salt.Length + nonce.Length, ciphertext, 0, ciphertextLength);
+
+                    // Derive key with proper secure handling
+                    key = DeriveKeyFromPassword(password, salt);
+
+                    try
+                    {
+                        jsonData = AES.AESDecrypt(ciphertext, key, nonce);
+                    }
+                    finally
+                    {
+                        // Always clear sensitive data
+                        if (key != null)
+                        {
+                            SecureMemory.SecureClear(key);
+                            key = null;
+                        }
+                    }
                 }
-                finally
+                else
+                {
+                    jsonData = data;
+                }
+
+                // Deserialize
+                string json = Encoding.UTF8.GetString(jsonData);
+                var importData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+
+                if (importData == null || !importData.ContainsKey("devices"))
+                    throw new FormatException("Invalid import data format");
+
+                // Check protocol version compatibility if present
+                if (importData.TryGetValue("protocolVersion", out var versionElement) &&
+                    versionElement.ValueKind == JsonValueKind.String)
+                {
+                    string? versionStr = versionElement.GetString();
+                    if (!string.IsNullOrEmpty(versionStr))
+                    {
+                        string[] parts = versionStr.Split('/');
+                        if (parts.Length == 2 && parts[1].StartsWith("v"))
+                        {
+                            string version = parts[1].Substring(1);
+                            string[] versionParts = version.Split('.');
+                            if (versionParts.Length == 2 &&
+                                int.TryParse(versionParts[0], out int majorVersion) &&
+                                int.TryParse(versionParts[1], out int minorVersion))
+                            {
+                                if (!ProtocolVersion.IsCompatible(majorVersion, minorVersion))
+                                {
+                                    throw new ProtocolVersionException($"Incompatible protocol version: {versionStr}");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Process revoked devices list first (if present)
+                if (importData.TryGetValue("revokedDevices", out var revokedDevicesElement) &&
+                    revokedDevicesElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var revokedDevice in revokedDevicesElement.EnumerateObject())
+                    {
+                        string deviceKey = revokedDevice.Name;
+                        long timestamp = revokedDevice.Value.GetInt64();
+
+                        // Add to revoked devices dictionary
+                        _revokedDevices[deviceKey] = timestamp;
+                    }
+                }
+
+                // Process device list
+                var devicesList = importData["devices"].EnumerateArray();
+                int importCount = 0;
+
+                foreach (var deviceElement in devicesList)
+                {
+                    if (deviceElement.ValueKind == JsonValueKind.String)
+                    {
+                        string? deviceKey = deviceElement.GetString();
+                        if (!string.IsNullOrEmpty(deviceKey))
+                        {
+                            try
+                            {
+                                byte[] deviceBytes = Convert.FromBase64String(deviceKey);
+
+                                // Check if device was previously revoked
+                                if (_revokedDevices.ContainsKey(deviceKey))
+                                {
+                                    continue; // Skip revoked devices
+                                }
+
+                                // We can now add this device to our linked devices
+                                // The AddLinkedDevice method will perform validation and conversion
+                                if (!_linkedDevices.ContainsKey(deviceKey))
+                                {
+                                    _linkedDevices[deviceKey] = deviceBytes;
+                                    importCount++;
+                                }
+                            }
+                            catch (FormatException)
+                            {
+                                // Skip invalid base64 strings
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                return importCount;
+            }
+            finally
+            {
+                // Ensure key is cleared
+                if (key != null)
                 {
                     SecureMemory.SecureClear(key);
                 }
-            }
-            else
-            {
-                jsonData = data;
-            }
 
-            // Deserialize
-            string json = Encoding.UTF8.GetString(jsonData);
-            var importData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-
-            if (importData == null || !importData.ContainsKey("devices"))
-                throw new FormatException("Invalid import data format");
-
-            // Check protocol version compatibility if present
-            if (importData.TryGetValue("protocolVersion", out var versionElement) &&
-                versionElement.ValueKind == JsonValueKind.String)
-            {
-                string? versionStr = versionElement.GetString();
-                if (!string.IsNullOrEmpty(versionStr))
+                // Clear decrypted data if it was sensitive
+                if (jsonData != null && password != null)
                 {
-                    string[] parts = versionStr.Split('/');
-                    if (parts.Length == 2 && parts[1].StartsWith("v"))
-                    {
-                        string version = parts[1].Substring(1);
-                        string[] versionParts = version.Split('.');
-                        if (versionParts.Length == 2 &&
-                            int.TryParse(versionParts[0], out int majorVersion) &&
-                            int.TryParse(versionParts[1], out int minorVersion))
-                        {
-                            if (!ProtocolVersion.IsCompatible(majorVersion, minorVersion))
-                            {
-                                throw new ProtocolVersionException($"Incompatible protocol version: {versionStr}");
-                            }
-                        }
-                    }
+                    SecureMemory.SecureClear(jsonData);
                 }
             }
-
-            // Process device list
-            var devicesList = importData["devices"].EnumerateArray();
-            int importCount = 0;
-
-            foreach (var deviceElement in devicesList)
-            {
-                if (deviceElement.ValueKind == JsonValueKind.String)
-                {
-                    string? deviceKey = deviceElement.GetString();
-                    if (!string.IsNullOrEmpty(deviceKey))
-                    {
-                        try
-                        {
-                            byte[] deviceBytes = Convert.FromBase64String(deviceKey);
-
-                            // We can now add this device to our linked devices
-                            // The AddLinkedDevice method will perform validation and conversion
-                            if (!_linkedDevices.ContainsKey(deviceKey))
-                            {
-                                _linkedDevices[deviceKey] = deviceBytes;
-                                importCount++;
-                            }
-                        }
-                        catch (FormatException)
-                        {
-                            // Skip invalid base64 strings
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            return importCount;
         }
 
         /// <summary>

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Security;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using E2EELibrary;
 using E2EELibrary.MultiDevice;
@@ -304,6 +305,84 @@ namespace E2EELibraryTests
 
             // Assert
             Assert.IsTrue(isValidManually, "Signature validation should pass with manually combined data");
+        }
+
+        [TestMethod]
+        public void RevokedDevice_ShouldNotBeAddedAgain()
+        {
+            // Arrange
+            var identityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var deviceManager = new DeviceManager(identityKeyPair);
+            var deviceKey = KeyGenerator.GenerateEd25519KeyPair().publicKey;
+
+            // Act
+            deviceManager.AddLinkedDevice(deviceKey);
+            Assert.IsTrue(deviceManager.IsDeviceLinked(deviceKey));
+
+            // Revoke the device
+            deviceManager.RevokeLinkedDevice(deviceKey);
+            Assert.IsFalse(deviceManager.IsDeviceLinked(deviceKey));
+
+            // Attempt to add it again
+            bool exceptionThrown = false;
+            try
+            {
+                deviceManager.AddLinkedDevice(deviceKey);
+            }
+            catch (SecurityException)
+            {
+                exceptionThrown = true;
+            }
+
+            // Assert
+            Assert.IsTrue(exceptionThrown, "Expected SecurityException was not thrown");
+            Assert.IsFalse(deviceManager.IsDeviceLinked(deviceKey));
+        }
+
+        [TestMethod]
+        public void RevokedDevices_ShouldBeTracked_EvenAfterRestart()
+        {
+            // Arrange
+            var identityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var deviceManager = new DeviceManager(identityKeyPair);
+            var device1 = KeyGenerator.GenerateEd25519KeyPair().publicKey;
+            var device2 = KeyGenerator.GenerateEd25519KeyPair().publicKey;
+
+            // Act - Add and revoke device1
+            deviceManager.AddLinkedDevice(device1);
+            deviceManager.AddLinkedDevice(device2);
+
+            deviceManager.RevokeLinkedDevice(device1);
+
+            // Export linked devices
+            string password = "test_password";
+            byte[] exportedData = deviceManager.ExportLinkedDevices(password);
+
+            // Create a new device manager (simulate restart)
+            var newDeviceManager = new DeviceManager(identityKeyPair);
+
+            // Import linked devices
+            newDeviceManager.ImportLinkedDevices(exportedData, password);
+
+            // Assert
+            Assert.IsFalse(newDeviceManager.IsDeviceLinked(device1),
+                "Revoked device should not be linked after import");
+            Assert.IsTrue(newDeviceManager.IsDeviceLinked(device2),
+                "Non-revoked device should still be linked after import");
+
+            // Try to add the revoked device again
+            bool exceptionThrown = false;
+            try
+            {
+                newDeviceManager.AddLinkedDevice(device1);
+            }
+            catch (SecurityException)
+            {
+                exceptionThrown = true;
+            }
+
+            Assert.IsTrue(exceptionThrown,
+                "Should throw SecurityException when adding previously revoked device");
         }
     }
 }
