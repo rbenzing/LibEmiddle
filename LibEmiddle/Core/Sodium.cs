@@ -86,7 +86,9 @@ namespace E2EELibrary.Core
                 string? actualVersion = Marshal.PtrToStringAnsi(sodium_version_string());
                 Trace.TraceWarning($"Loaded libsodium version: {actualVersion} (major={major}, minor={minor})");
 
-                if (sodium_set_misuse_handler(&InternalError) != 0)
+                // Set misuse handler using Marshal for pointer conversion
+                IntPtr handlerPtr = Marshal.GetFunctionPointerForDelegate(new InternalErrorCallback(InternalError));
+                if (sodium_set_misuse_handler(handlerPtr) != 0)
                 {
                     throw new InvalidOperationException("Failed to set Sodium misuse handler.");
                 }
@@ -164,7 +166,7 @@ namespace E2EELibrary.Core
                 if (File.Exists(s_libraryPath))
                 {
                     // Use .NET Core 3.0+ API
-                    IntPtr handle = System.Runtime.InteropServices.NativeLibrary.Load(s_libraryPath);
+                    IntPtr handle = NativeLibrary.Load(s_libraryPath);
 
                     // If we get here, the library loaded successfully
                     Trace.TraceWarning($"Successfully loaded libsodium from: {s_libraryPath}");
@@ -183,10 +185,13 @@ namespace E2EELibrary.Core
             return false;
         }
 
+        // Define delegate for internal error callback
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void InternalErrorCallback();
+
         /// <summary>
         /// Handler for internal libsodium errors.
         /// </summary>
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
         private static void InternalError()
         {
             throw new InvalidOperationException("Sodium internal error: The library detected a misuse of a function.");
@@ -207,7 +212,7 @@ namespace E2EELibrary.Core
         private static extern int sodium_library_version_minor();
 
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern unsafe int sodium_set_misuse_handler(delegate* unmanaged[Cdecl]<void> handler);
+        private static extern int sodium_set_misuse_handler(IntPtr handler);
 
         #endregion
 
@@ -235,16 +240,6 @@ namespace E2EELibrary.Core
         /// crypto_aead_aes256gcm_decrypt(), but accept a previously initialized 
         /// context ctx instead of a key.
         /// </summary>
-        /// <param name="cipher"></param>
-        /// <param name="cipherLength"></param>
-        /// <param name="message"></param>
-        /// <param name="messageLength"></param>
-        /// <param name="additionalData"></param>
-        /// <param name="additionalDataLength"></param>
-        /// <param name="nsec"></param>
-        /// <param name="nonce"></param>
-        /// <param name="state"></param>
-        /// <returns></returns>
         [DllImport(Sodium.LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_aead_aes256gcm_encrypt_afternm(
             byte[] cipher, out ulong cipherLength,
@@ -260,16 +255,6 @@ namespace E2EELibrary.Core
         /// crypto_aead_aes256gcm_decrypt(), but accept a previously initialized 
         /// context ctx instead of a key.
         /// </summary>
-        /// <param name="message"></param>
-        /// <param name="messageLength"></param>
-        /// <param name="nsec"></param>
-        /// <param name="cipher"></param>
-        /// <param name="cipherLength"></param>
-        /// <param name="additionalData"></param>
-        /// <param name="additionalDataLength"></param>
-        /// <param name="nonce"></param>
-        /// <param name="state"></param>
-        /// <returns></returns>
         [DllImport(Sodium.LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_aead_aes256gcm_decrypt_afternm(
             byte[] message, out ulong messageLength,
@@ -280,21 +265,10 @@ namespace E2EELibrary.Core
             IntPtr state);
 
         /// <summary>
-        /// function is identical to crypto_aead_aes256gcm_encrypt_detached() and 
+        /// Function is identical to crypto_aead_aes256gcm_encrypt_detached() and 
         /// crypto_aead_aes256gcm_decrypt_detached(), but accept a previously 
         /// initialized context ctx instead of a key.
         /// </summary>
-        /// <param name="cipher"></param>
-        /// <param name="tag"></param>
-        /// <param name="tagLength"></param>
-        /// <param name="message"></param>
-        /// <param name="messageLength"></param>
-        /// <param name="additionalData"></param>
-        /// <param name="additionalDataLength"></param>
-        /// <param name="nsec"></param>
-        /// <param name="nonce"></param>
-        /// <param name="state"></param>
-        /// <returns></returns>
         [DllImport(Sodium.LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_aead_aes256gcm_encrypt_detached_afternm(
             byte[] cipher,
@@ -306,20 +280,10 @@ namespace E2EELibrary.Core
             IntPtr state);
 
         /// <summary>
-        /// function is identical to crypto_aead_aes256gcm_encrypt_detached() and 
+        /// Function is identical to crypto_aead_aes256gcm_encrypt_detached() and 
         /// crypto_aead_aes256gcm_decrypt_detached(), but accept a previously 
         /// initialized context ctx instead of a key.
         /// </summary>
-        /// <param name="message"></param>
-        /// <param name="nsec"></param>
-        /// <param name="cipher"></param>
-        /// <param name="cipherLength"></param>
-        /// <param name="tag"></param>
-        /// <param name="additionalData"></param>
-        /// <param name="additionalDataLength"></param>
-        /// <param name="nonce"></param>
-        /// <param name="state"></param>
-        /// <returns></returns>
         [DllImport(Sodium.LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_aead_aes256gcm_decrypt_detached_afternm(
             byte[] message,
@@ -339,15 +303,12 @@ namespace E2EELibrary.Core
         /// accessed. Like normal malloc, NULL may be returned and errno set if it is 
         /// not possible to allocate enough memory.
         /// </summary>
-        /// <param name="size"></param>
-        /// <returns></returns>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr sodium_malloc(UIntPtr size);
 
         /// <summary>
         /// Free the allocated region
         /// </summary>
-        /// <param name="ptr"></param>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void sodium_free(IntPtr ptr);
 
@@ -355,9 +316,6 @@ namespace E2EELibrary.Core
         /// Locks at least len bytes of memory starting at addr. This can help avoid swapping 
         /// sensitive data to disk.
         /// </summary>
-        /// <param name="addr"></param>
-        /// <param name="len"></param>
-        /// <returns></returns>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int sodium_mlock(IntPtr addr, UIntPtr len);
 
@@ -365,35 +323,24 @@ namespace E2EELibrary.Core
         /// Called after locked memory is not being used anymore. It will zero len bytes starting at 
         /// addr before flagging the pages as swappable again. 
         /// </summary>
-        /// <param name="addr"></param>
-        /// <param name="len"></param>
-        /// <returns></returns>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int sodium_munlock(IntPtr addr, UIntPtr len);
 
         /// <summary>
         /// Securely zeros out a memory region.
         /// </summary>
-        /// <param name="buffer">The memory region to zero.</param>
-        /// <param name="length"></param>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void sodium_memzero(IntPtr buffer, UIntPtr length);
 
         /// <summary>
         /// Securely compares two memory regions in constant time.
         /// </summary>
-        /// <param name="b1">First memory region.</param>
-        /// <param name="b2">Second memory region.</param>
-        /// <param name="length">Length to compare.</param>
-        /// <returns>0 if the regions are equal, non-zero otherwise.</returns>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int sodium_memcmp(IntPtr b1, IntPtr b2, UIntPtr length);
 
         /// <summary>
         /// Generates random bytes suitable for cryptographic use.
         /// </summary>
-        /// <param name="buffer">The buffer to fill with random bytes.</param>
-        /// <param name="size">The number of bytes to fill.</param>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         private static extern void randombytes_buf(IntPtr buffer, UIntPtr size);
 
@@ -473,17 +420,43 @@ namespace E2EELibrary.Core
 
         #region Public Key Authentication
 
+        /// <summary>
+        /// Randomly generates a secret key and a corresponding public key.
+        /// </summary>
+        /// <param name="publicKey"></param>
+        /// <param name="secretKey"></param>
+        /// <returns></returns>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern int crypto_sign_keypair(byte[] publicKey, byte[] secretKey);
+        public static extern int crypto_sign_keypair(byte[] publicKey, byte[] secretKey);
 
+        /// <summary>
+        /// Signs the message m, whose length is mlen bytes, using the secret key sk 
+        /// and puts the signature into sig, which can be up to crypto_sign_BYTES bytes
+        /// long.
+        /// </summary>
+        /// <param name="signature"></param>
+        /// <param name="signatureLength"></param>
+        /// <param name="message"></param>
+        /// <param name="messageLength"></param>
+        /// <param name="secretKey"></param>
+        /// <returns></returns>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern int crypto_sign_detached(
+        public static extern int crypto_sign_detached(
             byte[] signature, out ulong signatureLength,
             byte[] message, ulong messageLength,
             byte[] secretKey);
 
+        /// <summary>
+        /// Verifies that sig is a valid signature for the message m, whose length is mlen 
+        /// bytes, using the signer’s public key pk.
+        /// </summary>
+        /// <param name="signature"></param>
+        /// <param name="message"></param>
+        /// <param name="messageLength"></param>
+        /// <param name="publicKey"></param>
+        /// <returns></returns>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-        private static extern int crypto_sign_verify_detached(
+        public static extern int crypto_sign_verify_detached(
             byte[] signature,
             byte[] message, ulong messageLength,
             byte[] publicKey);
@@ -503,17 +476,20 @@ namespace E2EELibrary.Core
 
             Initialize();
 
-            unsafe
+            // Use Marshal for safe pointer handling
+            GCHandle bufferHandle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+            try
             {
-                fixed (byte* ptr = buffer)
-                {
-                    randombytes_buf((IntPtr)ptr, (UIntPtr)buffer.Length);
-                }
+                randombytes_buf(bufferHandle.AddrOfPinnedObject(), (UIntPtr)buffer.Length);
+            }
+            finally
+            {
+                bufferHandle.Free();
             }
         }
 
         /// <summary>
-        /// Fills a buffer with random bytes.
+        /// Generates a buffer with random bytes.
         /// </summary>
         public static byte[] GenerateRandomBytes(int size)
         {
@@ -523,12 +499,16 @@ namespace E2EELibrary.Core
             Initialize();
 
             byte[] buffer = new byte[size];
-            unsafe
+
+            // Use Marshal for safe pointer handling
+            GCHandle bufferHandle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+            try
             {
-                fixed (byte* ptr = buffer)
-                {
-                    randombytes_buf((IntPtr)ptr, (UIntPtr)size);
-                }
+                randombytes_buf(bufferHandle.AddrOfPinnedObject(), (UIntPtr)size);
+            }
+            finally
+            {
+                bufferHandle.Free();
             }
 
             return buffer;
@@ -549,7 +529,7 @@ namespace E2EELibrary.Core
 
             Initialize();
 
-            byte[] sharedSecret = Sodium.GenerateRandomBytes(32);
+            byte[] sharedSecret = GenerateRandomBytes(32);
             int result = crypto_scalarmult_curve25519(sharedSecret, secretKey, publicKey);
 
             if (result != 0)
@@ -570,7 +550,7 @@ namespace E2EELibrary.Core
 
             Initialize();
 
-            byte[] publicKey = Sodium.GenerateRandomBytes(32);
+            byte[] publicKey = GenerateRandomBytes(32);
             int result = crypto_scalarmult_curve25519_base(publicKey, secretKey);
 
             if (result != 0)
@@ -595,7 +575,7 @@ namespace E2EELibrary.Core
             if (ed25519PublicKey.Length != 32)
                 throw new ArgumentException("Ed25519 public key must be 32 bytes.", nameof(ed25519PublicKey));
 
-            byte[] curve25519PublicKey = Sodium.GenerateRandomBytes(32);
+            byte[] curve25519PublicKey = GenerateRandomBytes(32);
             int result = crypto_sign_ed25519_pk_to_curve25519(curve25519PublicKey, ed25519PublicKey);
             if (result != 0)
                 throw new InvalidOperationException("Conversion from Ed25519 to Curve25519 public key failed.");

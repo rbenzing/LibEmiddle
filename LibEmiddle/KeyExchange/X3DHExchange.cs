@@ -166,7 +166,7 @@ namespace E2EELibrary.KeyExchange
                 t = hmacExpand.ComputeHash(ms.ToArray());
 
                 int remaining = Math.Min(outputLength - offset, t.Length);
-                Buffer.BlockCopy(t, 0, okm, offset, remaining);
+                t.AsSpan(0, remaining).CopyTo(okm.AsSpan(offset, remaining));
                 offset += remaining;
             }
 

@@ -535,7 +535,6 @@ namespace E2EELibraryTests
     }
 
     // Enhanced testable class that exposes internal methods for testing
-    // Enhanced testable class that exposes internal methods for testing
     public class TestableMailboxManager : MailboxManager
     {
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, MailboxMessage> _incomingMessages;

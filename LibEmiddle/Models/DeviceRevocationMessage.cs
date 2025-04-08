@@ -86,8 +86,8 @@ namespace E2EELibrary.Models
             byte[] timestampBytes = BitConverter.GetBytes(RevocationTimestamp);
             byte[] dataToVerify = Sodium.GenerateRandomBytes(RevokedDeviceKey.Length + timestampBytes.Length);
 
-            Buffer.BlockCopy(RevokedDeviceKey, 0, dataToVerify, 0, RevokedDeviceKey.Length);
-            Buffer.BlockCopy(timestampBytes, 0, dataToVerify, RevokedDeviceKey.Length, timestampBytes.Length);
+            RevokedDeviceKey.AsSpan().CopyTo(dataToVerify.AsSpan(0, RevokedDeviceKey.Length));
+            timestampBytes.AsSpan().CopyTo(dataToVerify.AsSpan(RevokedDeviceKey.Length, timestampBytes.Length));
 
             // Verify the signature
             return MessageSigning.VerifySignature(dataToVerify, Signature, trustedPublicKey);

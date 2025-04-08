@@ -620,9 +620,9 @@ namespace E2EELibrary.MultiDevice
 
                 // Combine salt, nonce, and ciphertext
                 byte[] result = Sodium.GenerateRandomBytes(salt.Length + nonce.Length + ciphertext.Length);
-                Buffer.BlockCopy(salt, 0, result, 0, salt.Length);
-                Buffer.BlockCopy(nonce, 0, result, salt.Length, nonce.Length);
-                Buffer.BlockCopy(ciphertext, 0, result, salt.Length + nonce.Length, ciphertext.Length);
+                salt.AsSpan().CopyTo(result.AsSpan(0, salt.Length));
+                nonce.AsSpan().CopyTo(result.AsSpan(salt.Length, nonce.Length));
+                ciphertext.AsSpan().CopyTo(result.AsSpan(salt.Length + nonce.Length, ciphertext.Length));
 
                 return result;
             }
@@ -657,13 +657,19 @@ namespace E2EELibrary.MultiDevice
 
                     byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
                     byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
-                    Buffer.BlockCopy(data, 0, salt, 0, salt.Length);
-                    Buffer.BlockCopy(data, salt.Length, nonce, 0, nonce.Length);
+
+                    // Copy salt from data
+                    data.AsSpan(0, salt.Length).CopyTo(salt.AsSpan());
+
+                    // Copy nonce from data
+                    data.AsSpan(salt.Length, nonce.Length).CopyTo(nonce.AsSpan());
 
                     // Extract ciphertext
                     int ciphertextLength = data.Length - salt.Length - nonce.Length;
                     byte[] ciphertext = Sodium.GenerateRandomBytes(ciphertextLength);
-                    Buffer.BlockCopy(data, salt.Length + nonce.Length, ciphertext, 0, ciphertextLength);
+
+                    // Copy ciphertext from data
+                    data.AsSpan(salt.Length + nonce.Length, ciphertextLength).CopyTo(ciphertext.AsSpan());
 
                     // Derive key with proper secure handling
                     key = DeriveKeyFromPassword(password, salt);

@@ -20,13 +20,15 @@ namespace E2EELibrary.Core
             if (data == null || data.Length == 0)
                 return;
 
-            // Use libsodium's native sodium_memzero
-            unsafe
+            GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
+            try
             {
-                fixed (byte* ptr = data)
-                {
-                    Sodium.sodium_memzero((IntPtr)ptr, (UIntPtr)data.Length);
-                }
+                // Use libsodium's native sodium_memzero
+                Sodium.sodium_memzero(handle.AddrOfPinnedObject(), (UIntPtr)data.Length);
+            }
+            finally
+            {
+                handle.Free();
             }
 
             // Additional protection against optimizations
@@ -52,13 +54,25 @@ namespace E2EELibrary.Core
             int minLength = Math.Min(a.Length, b.Length);
             int result;
 
-            unsafe
+            // Pin both arrays to get stable memory addresses
+            GCHandle handleA = GCHandle.Alloc(a, GCHandleType.Pinned);
+            GCHandle handleB = GCHandle.Alloc(b, GCHandleType.Pinned);
+
+            try
             {
-                fixed (byte* aPtr = a, bPtr = b)
-                {
-                    // Compare only up to the minimum length to avoid buffer overruns
-                    result = Sodium.sodium_memcmp((IntPtr)aPtr, (IntPtr)bPtr, (UIntPtr)minLength);
-                }
+                // Compare only up to the minimum length to avoid buffer overruns
+                IntPtr ptrA = handleA.AddrOfPinnedObject();
+                IntPtr ptrB = handleB.AddrOfPinnedObject();
+
+                result = Sodium.sodium_memcmp(ptrA, ptrB, (UIntPtr)minLength);
+            }
+            finally
+            {
+                // Always release handles to avoid memory leaks
+                if (handleA.IsAllocated)
+                    handleA.Free();
+                if (handleB.IsAllocated)
+                    handleB.Free();
             }
 
             // Return true only if the comparison succeeds AND lengths are identical

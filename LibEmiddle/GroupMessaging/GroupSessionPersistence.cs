@@ -176,18 +176,19 @@ namespace E2EELibrary.GroupMessaging
             // Decrypt if password is provided
             if (!string.IsNullOrEmpty(password))
             {
-                // Extract salt and nonce
+                // Generate buffers with appropriate sizes
                 byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
                 byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
 
-                Buffer.BlockCopy(fileData, 0, salt, 0, salt.Length);
-                Buffer.BlockCopy(fileData, salt.Length, nonce, 0, nonce.Length);
+                // Use Span<T> to copy data without Buffer.BlockCopy
+                fileData.AsSpan(0, salt.Length).CopyTo(salt.AsSpan());
+                fileData.AsSpan(salt.Length, nonce.Length).CopyTo(nonce.AsSpan());
 
                 // Extract encrypted data
                 int encryptedDataOffset = salt.Length + nonce.Length;
                 byte[] encryptedData = Sodium.GenerateRandomBytes(fileData.Length - encryptedDataOffset);
-                Buffer.BlockCopy(fileData, encryptedDataOffset, encryptedData, 0, encryptedData.Length);
-
+                fileData.AsSpan(encryptedDataOffset, encryptedData.Length).CopyTo(encryptedData.AsSpan());
+                
                 // Derive key from password
                 using var deriveBytes = new Rfc2898DeriveBytes(
                     password,
@@ -319,8 +320,8 @@ namespace E2EELibrary.GroupMessaging
 
                 // Combine nonce and encrypted data
                 byte[] result = Sodium.GenerateRandomBytes(nonce.Length + encryptedData.Length);
-                Buffer.BlockCopy(nonce, 0, result, 0, nonce.Length);
-                Buffer.BlockCopy(encryptedData, 0, result, nonce.Length, encryptedData.Length);
+                nonce.AsSpan().CopyTo(result.AsSpan(0, nonce.Length));
+                encryptedData.AsSpan().CopyTo(result.AsSpan(nonce.Length, encryptedData.Length));
 
                 return result;
             }
@@ -345,8 +346,8 @@ namespace E2EELibrary.GroupMessaging
                 byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
                 byte[] encryptedData = Sodium.GenerateRandomBytes(serializedData.Length - Constants.NONCE_SIZE);
 
-                Buffer.BlockCopy(serializedData, 0, nonce, 0, nonce.Length);
-                Buffer.BlockCopy(serializedData, nonce.Length, encryptedData, 0, encryptedData.Length);
+                serializedData.AsSpan(0, nonce.Length).CopyTo(nonce.AsSpan());
+                serializedData.AsSpan(nonce.Length).CopyTo(encryptedData.AsSpan());
 
                 jsonData = AES.AESDecrypt(encryptedData, decryptionKey, nonce);
             }

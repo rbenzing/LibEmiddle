@@ -176,6 +176,9 @@ namespace E2EELibrary.Communication
             // Encrypt the message
             var (updatedSession, encryptedPayload) = DoubleRatchet.DoubleRatchetEncrypt(session, message);
 
+            ArgumentNullException.ThrowIfNull(updatedSession, nameof(updatedSession));
+            ArgumentNullException.ThrowIfNull(encryptedPayload, nameof(encryptedPayload));
+
             // Update the session
             _sessions[recipientId] = updatedSession;
 

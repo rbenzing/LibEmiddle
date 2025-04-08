@@ -50,19 +50,16 @@ namespace E2EELibrary.Core
 
             byte[] publicKey = Sodium.GenerateRandomBytes(ED25519_PUBLICKEYBYTES);
             byte[] privateKey = Sodium.GenerateRandomBytes(ED25519_SECRETKEYBYTES);
-
-            unsafe
+            
+            int result = Sodium.crypto_sign_keypair(
+                publicKey,
+                privateKey
+            );
+            if (result != 0)
             {
-                fixed (byte* pkPtr = publicKey, skPtr = privateKey)
-                {
-                    int result = crypto_sign_keypair((IntPtr)pkPtr, (IntPtr)skPtr);
-                    if (result != 0)
-                    {
-                        throw new InvalidOperationException("Failed to generate Ed25519 key pair.");
-                    }
-                }
+                throw new InvalidOperationException("Failed to generate Ed25519 key pair.");
             }
-
+ 
             return new KeyPair(publicKey, privateKey);
         }
 
@@ -84,24 +81,17 @@ namespace E2EELibrary.Core
             Sodium.Initialize();
 
             byte[] signature = Sodium.GenerateRandomBytes(ED25519_BYTES);
-            ulong signatureLength = 0;
+            
+            int result = Sodium.crypto_sign_detached(
+                signature,
+                out ulong signatureLength,
+                message,
+                (ulong)message.Length,
+                privateKey);
 
-            unsafe
+            if (result != 0 && signatureLength > 0)
             {
-                fixed (byte* sigPtr = signature, msgPtr = message, skPtr = privateKey)
-                {
-                    int result = crypto_sign_detached(
-                        (IntPtr)sigPtr,
-                        ref signatureLength,
-                        (IntPtr)msgPtr,
-                        (ulong)message.Length,
-                        (IntPtr)skPtr);
-
-                    if (result != 0)
-                    {
-                        throw new InvalidOperationException("Failed to create signature.");
-                    }
-                }
+                throw new InvalidOperationException("Failed to create signature.");
             }
 
             return signature;
@@ -129,41 +119,14 @@ namespace E2EELibrary.Core
 
             Sodium.Initialize();
 
-            unsafe
-            {
-                fixed (byte* sigPtr = signature, msgPtr = message, pkPtr = publicKey)
-                {
-                    int result = crypto_sign_verify_detached(
-                        (IntPtr)sigPtr,
-                        (IntPtr)msgPtr,
+            int result = Sodium.crypto_sign_verify_detached(
+                        signature,
+                        message,
                         (ulong)message.Length,
-                        (IntPtr)pkPtr);
+                        publicKey);
 
-                    return result == 0;
-                }
-            }
+            return result == 0;
+                
         }
-
-        #region P/Invoke declarations
-
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl, EntryPoint = "crypto_sign_keypair")]
-        private static extern unsafe int crypto_sign_keypair(IntPtr publicKey, IntPtr secretKey);
-
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl, EntryPoint = "crypto_sign_detached")]
-        private static extern unsafe int crypto_sign_detached(
-            IntPtr signature,
-            ref ulong signatureLength,
-            IntPtr message,
-            ulong messageLength,
-            IntPtr secretKey);
-
-        [DllImport("libsodium", CallingConvention = CallingConvention.Cdecl, EntryPoint = "crypto_sign_verify_detached")]
-        private static extern unsafe int crypto_sign_verify_detached(
-            IntPtr signature,
-            IntPtr message,
-            ulong messageLength,
-            IntPtr publicKey);
-
-        #endregion
     }
 }
