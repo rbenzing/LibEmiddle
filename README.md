@@ -227,6 +227,7 @@ For security concerns: Russell Benzing [me@russellbenzing.com]
 
 ## 🔗 References
 
+- [libsodium Library](https://doc.libsodium.org/)
 - [Signal Protocol Specifications](https://signal.org/docs/)
 - [The X3DH Key Agreement Protocol](https://signal.org/docs/specifications/x3dh/)
 - [The Double Ratchet Algorithm](https://signal.org/docs/specifications/doubleratchet/)
