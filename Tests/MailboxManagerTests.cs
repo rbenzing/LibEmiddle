@@ -12,6 +12,7 @@ using E2EELibrary.Core;
 using E2EELibrary.Models;
 using E2EELibrary.KeyManagement;
 using System.Linq;
+using System.Diagnostics;
 
 namespace E2EELibraryTests
 {
@@ -591,7 +592,7 @@ namespace E2EELibraryTests
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Error in TestPollForMessagesAsync: {ex}");
+                Trace.TraceError($"Error in TestPollForMessagesAsync: {ex}");
                 throw;
             }
         }
@@ -631,7 +632,7 @@ namespace E2EELibraryTests
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Error in TestProcessOutgoingMessagesAsync: {ex}");
+                Trace.TraceError($"Error in TestProcessOutgoingMessagesAsync: {ex}");
                 throw;
             }
         }

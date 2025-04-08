@@ -237,7 +237,7 @@ namespace E2EELibrary.GroupMessaging
                 catch (Exception ex)
                 {
                     // Log the error but continue processing other sessions
-                    Trace.TraceWarning($"Error loading session for group {dto.GroupId}: {ex.Message}");
+                    LoggingManager.LogError(nameof(GroupSessionPersistence), $"Error loading session for group {dto.GroupId}: {ex.Message}");
                 }
             }
 

@@ -114,7 +114,7 @@ namespace E2EELibrary.GroupMessaging
                     // If message was sent before we joined the group, reject it
                     if (encryptedMessage.Timestamp < joinTimestamp)
                     {
-                        Trace.TraceWarning($"Rejecting message sent before joining group: message timestamp {encryptedMessage.Timestamp}, joined at {joinTimestamp}");
+                        LoggingManager.LogWarning(nameof(GroupMessageCrypto), $"Rejecting message sent before joining group: message timestamp {encryptedMessage.Timestamp}, joined at {joinTimestamp}");
                         return null;
                     }
                 }

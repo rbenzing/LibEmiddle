@@ -244,7 +244,7 @@ namespace E2EELibrary.Communication
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"Error decrypting message {message.MessageId}: {ex.Message}");
+                    LoggingManager.LogError(nameof(MailboxManager), $"Error decrypting message {message.MessageId}: {ex.Message}");
                 }
 
                 results.Add((message, content));
@@ -274,7 +274,7 @@ namespace E2EELibrary.Communication
                     }
                     catch (Exception ex)
                     {
-                        Console.Error.WriteLine($"Error sending read receipt: {ex.Message}");
+                        LoggingManager.LogWarning(nameof(MailboxManager), $"Error sending read receipt: {ex.Message}");
                     }
                 }
 
@@ -285,7 +285,7 @@ namespace E2EELibrary.Communication
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"Error marking message as read on server: {ex.Message}");
+                    LoggingManager.LogError(nameof(MailboxManager), $"Error marking message as read on server: {ex.Message}");
                 }
 
                 return true;
@@ -322,7 +322,7 @@ namespace E2EELibrary.Communication
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Error deleting message on server: {ex.Message}");
+                LoggingManager.LogError(nameof(MailboxManager), $"Error deleting message on server: {ex.Message}");
                 return false;
             }
         }
@@ -426,7 +426,7 @@ namespace E2EELibrary.Communication
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.Error.WriteLine($"Error sending delivery receipt: {ex.Message}");
+                                    LoggingManager.LogError(nameof(MailboxManager), $"Error sending delivery receipt: {ex.Message}");
                                 }
                             }
 
@@ -444,7 +444,7 @@ namespace E2EELibrary.Communication
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"Error polling for messages: {ex.Message}");
+                    LoggingManager.LogError(nameof(MailboxManager), $"Error polling for messages: {ex.Message}");
 
                     try
                     {
@@ -501,7 +501,7 @@ namespace E2EELibrary.Communication
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"Error sending messages: {ex.Message}");
+                    LoggingManager.LogError(nameof(MailboxManager), $"Error sending messages: {ex.Message}");
 
                     try
                     {
@@ -606,7 +606,7 @@ namespace E2EELibrary.Communication
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Error importing session: {ex.Message}");
+                LoggingManager.LogError(nameof(MailboxManager), $"Error importing session: {ex.Message}");
                 return false;
             }
         }

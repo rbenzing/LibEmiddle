@@ -147,7 +147,7 @@ namespace E2EELibrary.Communication
                     catch (Exception ex)
                     {
                         // Log WebSocket error but try HTTP fallback
-                        Trace.TraceWarning($"WebSocket send error, falling back to HTTP: {ex.Message}");
+                        LoggingManager.LogError(nameof(HttpMailboxTransport), $"WebSocket send error, falling back to HTTP: {ex.Message}");
                         _isWebSocketConnected = false;
                     }
                     finally
@@ -188,13 +188,13 @@ namespace E2EELibrary.Communication
             catch (TaskCanceledException)
             {
                 // Request timeout
-                Trace.TraceWarning($"Request timeout when sending message {message.MessageId}");
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"Request timeout when sending message {message.MessageId}");
                 return false;
             }
             catch (Exception ex)
             {
                 // Log the error - in production this would use a proper logging framework
-                Trace.TraceWarning($"Error sending message {message.MessageId}: {ex.Message}");
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"Error sending message {message.MessageId}: {ex.Message}");
                 return false;
             }
         }
@@ -265,7 +265,7 @@ namespace E2EELibrary.Communication
             catch (Exception ex)
             {
                 // Log the error - in production this would use a proper logging framework
-                Trace.TraceWarning($"Error fetching messages: {ex.Message}");
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"Error fetching messages: {ex.Message}");
                 return new List<MailboxMessage>();
             }
         }
@@ -294,7 +294,7 @@ namespace E2EELibrary.Communication
             }
             catch (Exception ex)
             {
-                Trace.TraceWarning($"Failed to connect WebSocket: {ex.Message}");
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"Failed to connect WebSocket: {ex.Message}");
                 _isWebSocketConnected = false;
             }
             finally
@@ -339,7 +339,7 @@ namespace E2EELibrary.Communication
                     catch (Exception ex)
                     {
                         // Log WebSocket error but try HTTP fallback
-                        Trace.TraceWarning($"WebSocket delete error, falling back to HTTP: {ex.Message}");
+                        LoggingManager.LogError(nameof(HttpMailboxTransport), $"WebSocket delete error, falling back to HTTP: {ex.Message}");
                         _isWebSocketConnected = false;
                     }
                     finally
@@ -357,7 +357,7 @@ namespace E2EELibrary.Communication
             }
             catch (Exception ex)
             {
-                Trace.TraceWarning($"Error deleting message {messageId}: {ex.Message}");
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"Error deleting message {messageId}: {ex.Message}");
                 return false;
             }
         }
@@ -398,7 +398,7 @@ namespace E2EELibrary.Communication
                     catch (Exception ex)
                     {
                         // Log WebSocket error but try HTTP fallback
-                        Trace.TraceWarning($"WebSocket mark read error, falling back to HTTP: {ex.Message}");
+                        LoggingManager.LogError(nameof(HttpMailboxTransport), $"WebSocket mark read error, falling back to HTTP: {ex.Message}");
                         _isWebSocketConnected = false;
                     }
                     finally
@@ -422,7 +422,7 @@ namespace E2EELibrary.Communication
             }
             catch (Exception ex)
             {
-                Trace.TraceWarning($"Error marking message as read: {ex.Message}");
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"Error marking message as read: {ex.Message}");
                 return false;
             }
         }
@@ -460,7 +460,7 @@ namespace E2EELibrary.Communication
                     }
                     catch (Exception ex)
                     {
-                        Trace.TraceWarning($"Error closing WebSocket: {ex.Message}");
+                        LoggingManager.LogError(nameof(HttpMailboxTransport), $"Error closing WebSocket: {ex.Message}");
                     }
                 }
 

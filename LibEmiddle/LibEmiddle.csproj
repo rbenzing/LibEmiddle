@@ -47,6 +47,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.4" />
 		<PackageReference Include="Microsoft.TestPlatform" Version="17.13.0" />
 		<PackageReference Include="libsodium" Version="1.0.20" />
 	</ItemGroup>

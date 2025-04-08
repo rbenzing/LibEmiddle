@@ -45,7 +45,7 @@ namespace E2EELibrary.Core
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Error loading libsodium: {ex.Message}");
+                LoggingManager.LogError(nameof(Sodium), $"Error loading libsodium: {ex.Message}");
                 throw;
             }
         }
@@ -84,7 +84,7 @@ namespace E2EELibrary.Core
 
                 // Log the actual version for diagnostic purposes
                 string? actualVersion = Marshal.PtrToStringAnsi(sodium_version_string());
-                Trace.TraceWarning($"Loaded libsodium version: {actualVersion} (major={major}, minor={minor})");
+                LoggingManager.LogInformation(nameof(Sodium), $"Loaded libsodium version: {actualVersion} (major={major}, minor={minor})");
 
                 // Set misuse handler using Marshal for pointer conversion
                 IntPtr handlerPtr = Marshal.GetFunctionPointerForDelegate(new InternalErrorCallback(InternalError));
@@ -148,7 +148,7 @@ namespace E2EELibrary.Core
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Error during explicit library load: {ex.Message}");
+                LoggingManager.LogWarning(nameof(Sodium), $"Warning: Could not explicitly load the library: {ex.Message}");
                 // Continue to default loading mechanism
             }
 
@@ -169,17 +169,17 @@ namespace E2EELibrary.Core
                     IntPtr handle = NativeLibrary.Load(s_libraryPath);
 
                     // If we get here, the library loaded successfully
-                    Trace.TraceWarning($"Successfully loaded libsodium from: {s_libraryPath}");
+                    LoggingManager.LogInformation(nameof(Sodium), $"Successfully loaded libsodium from: {s_libraryPath}");
                     return true;
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Library file not found at: {s_libraryPath}");
+                    LoggingManager.LogError(nameof(Sodium), $"Library file not found at: {s_libraryPath}");
                 }
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Failed to load library from {s_libraryPath}: {ex.Message}");
+                LoggingManager.LogError(nameof(Sodium), $"Failed to load library from {s_libraryPath}: {ex.Message}");
             }
 
             return false;

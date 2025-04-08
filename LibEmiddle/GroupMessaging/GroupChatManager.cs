@@ -138,7 +138,7 @@ namespace E2EELibrary.GroupMessaging
                 !_memberManager.IsMember(distribution.GroupId, distribution.SenderIdentityKey))
             {
                 // Sender is not a member of the group - reject the distribution
-                Trace.TraceWarning("Rejecting distribution from non-member of the group");
+                LoggingManager.LogWarning(nameof(GroupChatManager), "Rejecting distribution from non-member of the group");
                 return false;
             }
 
@@ -209,7 +209,7 @@ namespace E2EELibrary.GroupMessaging
                 catch (Exception ex)
                 {
                     // Log the error but continue (don't block messaging if rotation fails)
-                    Trace.TraceWarning($"Failed to rotate group key for {groupId}: {ex.Message}");
+                    LoggingManager.LogError(nameof(GroupChatManager), $"Failed to rotate group key for {groupId}: {ex.Message}");
                 }
             }
         }
@@ -269,7 +269,7 @@ namespace E2EELibrary.GroupMessaging
                 // Here we're just verifying the member is added correctly
                 if (!_memberManager.IsMember(groupId, memberPublicKey))
                 {
-                    Trace.TraceWarning("Warning: Member was added but IsMember verification failed");
+                    LoggingManager.LogWarning(nameof(GroupChatManager), "Warning: Member was added but IsMember verification failed");
                 }
             }
 
@@ -312,12 +312,12 @@ namespace E2EELibrary.GroupMessaging
                 catch (UnauthorizedAccessException)
                 {
                     // Log the error but don't fail - the member was still removed
-                    Trace.TraceWarning("Warning: Group key rotation failed due to permission issues");
+                    LoggingManager.LogWarning(nameof(GroupChatManager), "Warning: Group key rotation failed due to permission issues");
                 }
                 catch (Exception ex)
                 {
                     // Log but don't fail the member removal operation
-                    Trace.TraceWarning($"Warning: Failed to rotate group key after member removal: {ex.Message}");
+                    LoggingManager.LogWarning(nameof(GroupChatManager), $"Warning: Failed to rotate group key after member removal: {ex.Message}");
                 }
             }
 

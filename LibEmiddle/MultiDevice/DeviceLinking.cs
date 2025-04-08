@@ -7,6 +7,7 @@ using E2EELibrary.KeyExchange;
 using E2EELibrary.Models;
 using E2EELibrary.Encryption;
 using E2EELibrary.Core;
+using E2EELibrary.GroupMessaging;
 
 namespace E2EELibrary.MultiDevice
 {
@@ -150,7 +151,7 @@ namespace E2EELibrary.MultiDevice
                 encryptedMessage.Nonce == null ||
                 encryptedMessage.SenderDHKey == null)
             {
-                Trace.TraceWarning("Device link message missing required fields (ciphertext, nonce, or SenderDHKey).");
+                LoggingManager.LogWarning(nameof(DeviceLinking), "Device link message missing required fields (ciphertext, nonce, or SenderDHKey).");
                 return null;
             }
             if (newDeviceKeyPair.publicKey == null)
@@ -166,7 +167,7 @@ namespace E2EELibrary.MultiDevice
                 long currentTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 if (Math.Abs(currentTimestamp - encryptedMessage.Timestamp) > AllowedTimestampSkewMilliseconds)
                 {
-                    Trace.TraceWarning("Device link message rejected due to timestamp outside allowed window.");
+                    LoggingManager.LogWarning(nameof(DeviceLinking), "Device link message rejected due to timestamp outside allowed window.");
                     return null;
                 }
 
@@ -191,7 +192,7 @@ namespace E2EELibrary.MultiDevice
                 var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
                 if (data == null || !data.ContainsKey("mainDevicePublicKey") || !data.ContainsKey("signature"))
                 {
-                    Trace.TraceWarning("Device link message payload missing required fields.");
+                    LoggingManager.LogWarning(nameof(DeviceLinking), "Device link message payload missing required fields.");
                     return null;
                 }
 
@@ -201,7 +202,7 @@ namespace E2EELibrary.MultiDevice
                 // Ensure that the main device public key from the payload matches the expected one.
                 if (!mainDeviceEd25519Public.SequenceEqual(mainDevicePublicKey))
                 {
-                    Trace.TraceWarning("Device link message rejected due to mismatched main device public key.");
+                    LoggingManager.LogWarning(nameof(DeviceLinking), "Device link message rejected due to mismatched main device public key.");
                     return null;
                 }
 
@@ -212,13 +213,13 @@ namespace E2EELibrary.MultiDevice
                 }
                 else
                 {
-                    Trace.TraceWarning("Device link message signature verification failed.");
+                    LoggingManager.LogWarning(nameof(DeviceLinking), "Device link message signature verification failed.");
                     return null;
                 }
             }
             catch (Exception ex)
             {
-                Trace.TraceError($"Error processing device link message: {ex}");
+                LoggingManager.LogError(nameof(DeviceLinking), $"Error processing device link message: {ex}");
                 return null;
             }
         }

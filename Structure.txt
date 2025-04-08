@@ -16,6 +16,7 @@ LibEmiddle/
 │       │   ├── Enums.cs
 │       │   ├── Helpers.cs
 │       │   ├── JsonSerialization.cs
+│       │   ├── LoggingManager.cs
 │       │   ├── ProtocolVersion.cs
 │       │   ├── SecureMemory.cs
 │       │   └── Sodium.cs

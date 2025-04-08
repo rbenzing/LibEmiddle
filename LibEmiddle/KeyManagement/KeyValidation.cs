@@ -1,5 +1,7 @@
 ﻿using E2EELibrary.Core;
+using E2EELibrary.Encryption;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace E2EELibrary.KeyManagement
 {
@@ -12,19 +14,19 @@ namespace E2EELibrary.KeyManagement
         /// Validates an X25519 public key to ensure it's not an invalid or dangerous value
         /// </summary>
         /// <param name="publicKey">X25519 public key to validate</param>
-        /// <returns>True if the key is valid, false otherwise</returns>
+        /// <returns>True if the key is valid.</returns>
         // In KeyValidation.cs
         public static bool ValidateX25519PublicKey(byte[] publicKey)
         {
             if (publicKey == null)
             {
-                Trace.TraceWarning("Validation failed: Public key is null");
+                LoggingManager.LogWarning(nameof(publicKey), $"Validation failed: Public key is null");
                 return false;
             }
 
             if (publicKey.Length != Constants.X25519_KEY_SIZE)
             {
-                Trace.TraceWarning($"Validation failed: Incorrect key length. Expected {Constants.X25519_KEY_SIZE}, got {publicKey.Length}");
+                LoggingManager.LogWarning(nameof(publicKey), $"Validation failed: Incorrect key length. Expected {Constants.X25519_KEY_SIZE}, got {publicKey.Length}");
                 return false;
             }
 
@@ -41,7 +43,7 @@ namespace E2EELibrary.KeyManagement
 
             if (allZeros)
             {
-                Trace.TraceWarning("Validation failed: Public key is all zeros");
+                LoggingManager.LogWarning(nameof(publicKey), $"Validation failed: Public key is all zeros");
                 return false;
             }
 
