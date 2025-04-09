@@ -33,6 +33,8 @@ namespace E2EELibrary.KeyManagement
                     nameof(ed25519PublicKey));
             }
 
+            Sodium.Initialize();
+
             try
             {
                 // Use libsodium's secure conversion method
