@@ -115,7 +115,7 @@ namespace E2EELibraryTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(CryptographicException))]
+        [ExpectedException(typeof(ArgumentException))]
         public void InitiateX3DHSession_WithInvalidSignedPreKey_ShouldThrowException()
         {
             // Arrange

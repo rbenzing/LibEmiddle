@@ -1,4 +1,5 @@
-﻿using System.Security;
+﻿using System.Collections.Concurrent;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using E2EELibrary.Core;
@@ -15,12 +16,22 @@ namespace E2EELibrary.Encryption
     /// </summary>
     public static class DoubleRatchet
     {
+
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionLocks =
+    new ConcurrentDictionary<string, SemaphoreSlim>();
+
+        private static readonly ConcurrentDictionary<string, long> _lockLastUsed =
+    new ConcurrentDictionary<string, long>();
+
         /// <summary>
         /// Encrypts a message using the Double Ratchet algorithm
         /// </summary>
         /// <param name="session">Current Double Ratchet session</param>
         /// <param name="message">Message to encrypt</param>
         /// <returns>Updated session and encrypted message</returns>
+        /// <exception cref="ArgumentNullException"></exception>
+        /// <exception cref="ArgumentException"></exception>
+        /// <exception cref="CryptographicException"></exception>
         public static (DoubleRatchetSession updatedSession, EncryptedMessage encryptedMessage)
             DoubleRatchetEncrypt(DoubleRatchetSession session, string message)
         {
@@ -70,6 +81,38 @@ namespace E2EELibrary.Encryption
             catch (Exception ex)
             {
                 throw new CryptographicException("Failed to encrypt message with Double Ratchet", ex);
+            }
+        }
+
+        /// <summary>
+        /// Encrypts a message using the Double Ratchet algorithm
+        /// </summary>
+        /// <param name="session">Current Double Ratchet session</param>
+        /// <param name="message">Message to encrypt</param>
+        /// <returns>Updated session and encrypted message</returns>
+        /// <exception cref="ArgumentNullException"></exception>
+        /// <exception cref="ArgumentException"></exception>
+        public static async Task<(DoubleRatchetSession updatedSession, EncryptedMessage encryptedMessage)>
+    DoubleRatchetEncryptAsync(DoubleRatchetSession session, string message)
+        {
+            if (session == null)
+                throw new ArgumentNullException(nameof(session));
+            if (string.IsNullOrEmpty(message))
+                throw new ArgumentException("Message cannot be null or empty", nameof(message));
+
+            // Get a lock for this specific session
+            var sessionLock = GetSessionLock(session.SessionId);
+
+            try
+            {
+                await sessionLock.WaitAsync();
+
+                // Use the existing synchronous implementation
+                return DoubleRatchetEncrypt(session, message);
+            }
+            finally
+            {
+                sessionLock.Release();
             }
         }
 
@@ -213,6 +256,134 @@ namespace E2EELibrary.Encryption
                 LoggingManager.LogError(nameof(DoubleRatchet), $"Unexpected error in Double Ratchet decryption: {ex.Message}");
                 return (null, null);
             }
+        }
+
+        /// <summary>
+        /// Asynchronously decrypts a message using the Double Ratchet algorithm with enhanced security and thread safety
+        /// </summary>
+        /// <param name="session">Current Double Ratchet session</param>
+        /// <param name="encryptedMessage">Encrypted message</param>
+        /// <returns>Updated session and decrypted message, or null values if decryption fails</returns>
+        public static async Task<(DoubleRatchetSession? updatedSession, string? decryptedMessage)>
+            DoubleRatchetDecryptAsync(DoubleRatchetSession session, EncryptedMessage encryptedMessage)
+        {
+            // Basic parameter validation
+            if (session == null)
+                throw new ArgumentNullException(nameof(session));
+            if (encryptedMessage == null)
+                throw new ArgumentNullException(nameof(encryptedMessage));
+            if (encryptedMessage.Ciphertext == null || encryptedMessage.Nonce == null || encryptedMessage.SenderDHKey == null)
+                throw new ArgumentException("Message is missing required fields");
+
+            // Get a lock for this specific session to ensure thread safety
+            var sessionLock = GetSessionLock(session.SessionId);
+
+            try
+            {
+                // Acquire the lock before performing any session operations
+                await sessionLock.WaitAsync();
+
+                // Use the existing synchronous implementation
+                return DoubleRatchetDecrypt(session, encryptedMessage);
+            }
+            catch (Exception ex)
+            {
+                // Log all unexpected exceptions
+                LoggingManager.LogError(nameof(DoubleRatchet), $"Error in DoubleRatchetDecryptAsync: {ex.Message}");
+                return (null, null);
+            }
+            finally
+            {
+                // Always release the lock
+                sessionLock.Release();
+
+                // Consider cleaning up locks that haven't been used for a while
+                if (_sessionLocks.Count > 1000)
+                {
+                    CleanupUnusedLocks();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Removes session locks that haven't been used recently to prevent memory leaks
+        /// </summary>
+        private static void CleanupUnusedLocks()
+        {
+            try
+            {
+                // Get current time for age calculation
+                long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                // Find locks that haven't been used in the last 10 minutes
+                TimeSpan inactivityThreshold = TimeSpan.FromMinutes(10);
+                long oldestAllowedTimestamp = currentTime - (long)inactivityThreshold.TotalMilliseconds;
+
+                // Find inactive locks (limited to 100 at a time to avoid long operations)
+                var inactiveLockIds = _lockLastUsed
+                    .Where(pair => pair.Value < oldestAllowedTimestamp)
+                    .Select(pair => pair.Key)
+                    .Take(100)
+                    .ToList();
+
+                int removedCount = 0;
+
+                // Remove each inactive lock
+                foreach (var sessionId in inactiveLockIds)
+                {
+                    // First try to remove the tracking timestamp
+                    if (_lockLastUsed.TryRemove(sessionId, out _))
+                    {
+                        // Then try to remove and dispose the actual lock
+                        if (_sessionLocks.TryRemove(sessionId, out var semaphore))
+                        {
+                            semaphore.Dispose();
+                            removedCount++;
+                        }
+                    }
+                }
+
+                // Log cleanup results if any locks were removed
+                if (removedCount > 0)
+                {
+                    LoggingManager.LogInformation(
+                        nameof(DoubleRatchet),
+                        $"Cleaned up {removedCount} unused session locks. {_sessionLocks.Count} active locks remain.");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't throw - this is a best-effort cleanup
+                LoggingManager.LogWarning(
+                    nameof(DoubleRatchet),
+                    $"Error cleaning up session locks: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Schedule cleanup for locks
+        /// </summary>
+        private static void ScheduleCleanupIfNeeded()
+        {
+            // Only run cleanup if we have a significant number of locks
+            if (_sessionLocks.Count > 500)
+            {
+                // Run cleanup on a background thread to avoid blocking
+                Task.Run(CleanupUnusedLocks);
+            }
+        }
+
+        /// <summary>
+        /// Gets the session lock semaphore
+        /// </summary>
+        /// <param name="sessionId"></param>
+        /// <returns></returns>
+        private static SemaphoreSlim GetSessionLock(string sessionId)
+        {
+            // Update the last used timestamp whenever a lock is accessed
+            _lockLastUsed[sessionId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            return _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
         }
     }
 }

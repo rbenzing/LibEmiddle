@@ -104,6 +104,49 @@ namespace E2EELibrary.KeyExchange
         }
 
         /// <summary>
+        /// Validates the bundle
+        /// </summary>
+        /// <param name="bundle"></param>
+        /// <returns></returns>
+        private static bool ValidateKeyBundle(X3DHPublicBundle bundle)
+        {
+            if (bundle == null)
+                return false;
+
+            if (bundle.IdentityKey == null || bundle.IdentityKey.Length != Constants.X25519_KEY_SIZE)
+                return false;
+
+            if (bundle.SignedPreKey == null || bundle.SignedPreKey.Length != Constants.X25519_KEY_SIZE)
+                return false;
+
+            if (bundle.SignedPreKeySignature == null || bundle.SignedPreKeySignature.Length == 0)
+                return false;
+
+            // Check for all zeros (invalid key)
+            bool identityAllZeros = true;
+            for (int i = 0; i < bundle.IdentityKey.Length; i++)
+            {
+                if (bundle.IdentityKey[i] != 0)
+                {
+                    identityAllZeros = false;
+                    break;
+                }
+            }
+
+            bool preKeyAllZeros = true;
+            for (int i = 0; i < bundle.SignedPreKey.Length; i++)
+            {
+                if (bundle.SignedPreKey[i] != 0)
+                {
+                    preKeyAllZeros = false;
+                    break;
+                }
+            }
+
+            return !identityAllZeros && !preKeyAllZeros;
+        }
+
+        /// <summary>
         /// Add proper key derivation following Signal spec
         /// </summary>
         /// <param name="secrets">Secret key materials to combine</param>
@@ -137,6 +180,8 @@ namespace E2EELibrary.KeyExchange
         {
             ArgumentNullException.ThrowIfNull(recipientBundle, nameof(recipientBundle));
 
+            if (!ValidateKeyBundle(recipientBundle))
+                throw new ArgumentException("Invalid or incomplete recipient bundle", nameof(recipientBundle));
             if (recipientBundle.IdentityKey == null || recipientBundle.SignedPreKey == null)
                 throw new ArgumentException("Missing required keys in recipient bundle", nameof(recipientBundle));
             if (senderIdentityKeyPair.publicKey == null || senderIdentityKeyPair.privateKey == null)

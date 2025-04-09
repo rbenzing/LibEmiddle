@@ -82,7 +82,7 @@ namespace E2EELibraryTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(CryptographicException))]
+        [ExpectedException(typeof(ArgumentException))]
         public void InitiateX3DHSession_InvalidPublicKey_ShouldThrowException()
         {
             // Arrange
@@ -98,7 +98,7 @@ namespace E2EELibraryTests
                 OneTimePreKeys = bobBundle.OneTimePreKeys
             };
 
-            // Act - should throw CryptographicException
+            // Act - should throw ArgumentException
             X3DHExchange.InitiateX3DHSession(invalidBundle, (alicePublic, alicePrivate));
         }
 

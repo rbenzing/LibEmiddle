@@ -829,9 +829,12 @@ namespace E2EELibrary.MultiDevice
                 }
 
                 // Clear all linked devices
-                foreach (var device in _linkedDevices.Values)
+                foreach (var deviceEntry in _linkedDevices)
                 {
-                    SecureMemory.SecureClear(device);
+                    if (_linkedDevices.TryRemove(deviceEntry.Key, out var device))
+                    {
+                        SecureMemory.SecureClear(device);
+                    }
                 }
 
                 _linkedDevices.Clear();

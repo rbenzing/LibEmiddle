@@ -20,6 +20,7 @@ namespace E2EELibrary.Core
             if (data == null || data.Length == 0)
                 return;
 
+            // Pin memory so GC doesn't move it during operation
             GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
             try
             {
@@ -31,7 +32,6 @@ namespace E2EELibrary.Core
                 handle.Free();
             }
 
-            // Additional protection against optimizations
             GC.KeepAlive(data);
         }
 

@@ -225,6 +225,75 @@ namespace E2EELibrary.KeyManagement
         }
 
         /// <summary>
+        /// Securely deletes a file
+        /// </summary>
+        /// <param name="filePath"></param>
+        public static void SecureDeleteFile(string filePath)
+        {
+            if (!File.Exists(filePath))
+                return;
+
+            try
+            {
+                // Get file info to determine size
+                var fileInfo = new FileInfo(filePath);
+                long fileSize = fileInfo.Length;
+
+                // Open the file for writing
+                using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Write))
+                {
+                    // Create a buffer of random data
+                    byte[] randomBuffer = Sodium.GenerateRandomBytes(4096);
+
+                    // Overwrite file with random data multiple times
+                    for (int i = 0; i < 3; i++)
+                    {
+                        fileStream.Position = 0;
+
+                        // Write in chunks
+                        long remaining = fileSize;
+                        while (remaining > 0)
+                        {
+                            int writeSize = (int)Math.Min(randomBuffer.Length, remaining);
+                            fileStream.Write(randomBuffer, 0, writeSize);
+                            remaining -= writeSize;
+                        }
+
+                        fileStream.Flush();
+                    }
+
+                    // Final pass with zeros
+                    fileStream.Position = 0;
+                    new Span<byte>(randomBuffer).Fill(0);
+
+                    long remainingZero = fileSize;
+                    while (remainingZero > 0)
+                    {
+                        int writeSize = (int)Math.Min(randomBuffer.Length, remainingZero);
+                        fileStream.Write(randomBuffer, 0, writeSize);
+                        remainingZero -= writeSize;
+                    }
+
+                    fileStream.Flush();
+
+                    // Clear the buffer
+                    SecureMemory.SecureClear(randomBuffer);
+                }
+
+                // Finally delete the file
+                File.Delete(filePath);
+            }
+            catch (Exception ex)
+            {
+                // Log error but don't throw - best effort cleanup
+                LoggingManager.LogError(nameof(KeyStorage), $"Error securely deleting file: {ex.Message}");
+
+                // Try regular delete as fallback
+                try { File.Delete(filePath); } catch { }
+            }
+        }
+
+        /// <summary>
         /// Helper method to derive a key from a password using PBKDF2
         /// </summary>
         private static byte[] DeriveKeyFromPassword(string password, byte[] salt)
