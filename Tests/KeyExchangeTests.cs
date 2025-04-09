@@ -68,7 +68,7 @@ namespace E2EELibraryTests
             };
 
             // Act
-            var session = X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate));
+            var session = X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
 
             // Assert
             Assert.IsNotNull(session);
@@ -86,7 +86,7 @@ namespace E2EELibraryTests
             var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Act & Assert - Should throw ArgumentNullException
-            X3DHExchange.InitiateX3DHSession(null, (alicePublic, alicePrivate));
+            X3DHExchange.InitiateX3DHSession(null, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
         }
 
         [TestMethod]
@@ -105,7 +105,7 @@ namespace E2EELibraryTests
             };
 
             // Act
-            var session = X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate));
+            var session = X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
 
             // Assert
             Assert.IsNotNull(session);
@@ -132,11 +132,11 @@ namespace E2EELibraryTests
             };
 
             // Act & Assert - Should throw ArgumentException
-            X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate));
+            X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
         }
 
         [TestMethod]
-        [ExpectedException(typeof(CryptographicException))]
+        [ExpectedException(typeof(ArgumentException))]
         public void InitiateX3DHSession_WithInvalidSignature_ShouldThrowException()
         {
             // Arrange
@@ -157,8 +157,8 @@ namespace E2EELibraryTests
                 OneTimePreKeys = bobBundle.OneTimePreKeys
             };
 
-            // Act & Assert - Should throw CryptographicException
-            X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate));
+            // Act & Assert - Should throw ArgumentException
+            X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
         }
 
         [TestMethod]

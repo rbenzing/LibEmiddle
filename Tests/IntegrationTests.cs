@@ -33,7 +33,7 @@ namespace E2EELibraryTests
             };
 
             // Step 3: Alice fetches Bob's bundle and initiates a session
-            var aliceSession = X3DHExchange.InitiateX3DHSession(bobPublicBundle, aliceIdentityKeyPair);
+            var aliceSession = X3DHExchange.InitiateX3DHSession(bobPublicBundle, aliceIdentityKeyPair, out var usedOneTimePreKeyId);
 
             // Create a session ID that will be shared between Alice and Bob
             string sessionId = "alice-bob-session-" + Guid.NewGuid().ToString();

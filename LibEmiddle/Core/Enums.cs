@@ -27,6 +27,27 @@
         }
 
         /// <summary>
+        /// Key rotation strategy types
+        /// </summary>
+        public enum KeyRotationStrategy
+        {
+            /// <summary>
+            /// Always rotate keys everytime
+            /// </summary>
+            Standard = 0,
+
+            /// <summary>
+            /// Rotate keys hourly
+            /// </summary>
+            Hourly = 1,
+
+            /// <summary>
+            /// Rotate keys daily
+            /// </summary>
+            Daily = 2,
+        }
+
+        /// <summary>
         /// Type of mailbox message
         /// </summary>
         public enum MessageType

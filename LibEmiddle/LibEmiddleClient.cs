@@ -188,7 +188,7 @@ namespace E2EELibrary
         public static X3DHSession InitiateSession(X3DHPublicBundle recipientBundle,
                                           (byte[] publicKey, byte[] privateKey) senderIdentityKeyPair)
         {
-            return X3DHExchange.InitiateX3DHSession(recipientBundle, senderIdentityKeyPair);
+            return X3DHExchange.InitiateX3DHSession(recipientBundle, senderIdentityKeyPair, out var usedOneTimePreKeyId);
         }
 
         /// <summary>

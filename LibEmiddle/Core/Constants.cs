@@ -7,6 +7,11 @@
     public static class Constants
     {
         /// <summary>
+        /// The eMiddle protocol version
+        /// </summary>
+        public const string PROTOCOL_VERSION = "1.0";
+
+        /// <summary>
         /// Size of nonce used in AES-GCM encryption (12 bytes)
         /// </summary>
         public const int NONCE_SIZE = 12;
@@ -70,5 +75,15 @@
         /// Default number of days before salt rotation
         /// </summary>
         public const int DEFAULT_SALT_ROTATION_DAYS = 30;
+
+        /// <summary>
+        /// Default number of days before group key rotation
+        /// </summary>
+        public const int DEFAULT_KEY_ROTATION_DAILY = 7;
+
+        /// <summary>
+        /// Default number of hours before group key rotation
+        /// </summary>
+        public const int DEFAULT_KEY_ROTATION_HOURLY = 1;
     }
 }

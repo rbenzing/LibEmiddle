@@ -163,7 +163,7 @@ namespace E2EELibraryTests
             serialized[middle] ^= 0xFF;
             serialized[middle + 1] ^= 0xFF;
 
-            // Act & Assert - Should throw FormatException or InvalidDataException
+            // Act & Assert - Should throw FormatException
             SessionPersistence.DeserializeSession(serialized);
         }
 

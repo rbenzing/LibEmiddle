@@ -61,7 +61,7 @@ namespace E2EELibraryTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(CryptographicException))]
+        [ExpectedException(typeof(ArgumentException))]
         public void InitiateX3DHSession_InvalidSignature_ShouldThrowException()
         {
             // Arrange
@@ -77,8 +77,8 @@ namespace E2EELibraryTests
                 OneTimePreKeys = bobBundle.OneTimePreKeys
             };
 
-            // Act - should throw CryptographicException
-            X3DHExchange.InitiateX3DHSession(invalidBundle, (alicePublic, alicePrivate));
+            // Act - should throw ArgumentException
+            X3DHExchange.InitiateX3DHSession(invalidBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
         }
 
         [TestMethod]
@@ -99,7 +99,7 @@ namespace E2EELibraryTests
             };
 
             // Act - should throw ArgumentException
-            X3DHExchange.InitiateX3DHSession(invalidBundle, (alicePublic, alicePrivate));
+            X3DHExchange.InitiateX3DHSession(invalidBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
         }
 
         [TestMethod]
@@ -119,7 +119,7 @@ namespace E2EELibraryTests
             };
 
             // Act - should throw ArgumentException
-            X3DHExchange.InitiateX3DHSession(invalidBundle, (alicePublic, alicePrivate));
+            X3DHExchange.InitiateX3DHSession(invalidBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
         }
 
         [TestMethod]
@@ -155,7 +155,7 @@ namespace E2EELibraryTests
             };
 
             // Act - Should not throw exception, but should skip invalid keys
-            var session = X3DHExchange.InitiateX3DHSession(mixedBundle, (alicePublic, alicePrivate));
+            var session = X3DHExchange.InitiateX3DHSession(mixedBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
 
             // Assert
             Assert.IsNotNull(session, "Session should be created despite invalid pre-keys");
@@ -179,7 +179,8 @@ namespace E2EELibraryTests
                     SignedPreKeySignature = bobBundle.SignedPreKeySignature,
                     OneTimePreKeys = bobBundle.OneTimePreKeys
                 },
-                aliceKeyPair
+                aliceKeyPair,
+                out var usedOneTimePreKeyId
             );
 
             // Initialize Double Ratchet root key and chain key
