@@ -349,6 +349,38 @@ namespace E2EELibrary.Core
         #region X25519 Key Exchange Functions
 
         /// <summary>
+        /// Creates a master key (prk) given an optional salt salt (which can be NULL, or 
+        /// salt_len bytes), and input keying material ikm of size ikm_len bytes.
+        /// </summary>
+        /// <param name="prk"></param>
+        /// <param name="salt"></param>
+        /// <param name="saltLength"></param>
+        /// <param name="ikm"></param>
+        /// <param name="ikmLength"></param>
+        /// <returns></returns>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_kdf_hkdf_sha256_extract(
+            byte[] prk,
+            byte[]? salt, UIntPtr saltLength,
+            byte[] ikm, UIntPtr ikmLength);
+
+        /// <summary>
+        /// A standard alternative to crypto_kdf_derive_from_key(). It is slower, but 
+        /// the context can be of any size.
+        /// </summary>
+        /// <param name="output"></param>
+        /// <param name="outputLength"></param>
+        /// <param name="info"></param>
+        /// <param name="infoLength"></param>
+        /// <param name="prk"></param>
+        /// <returns></returns>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_kdf_hkdf_sha256_expand(
+            byte[] output, UIntPtr outputLength,
+            byte[] info, UIntPtr infoLength,
+            byte[] prk);
+
+        /// <summary>
         /// Computes a shared secret using X25519 key exchange.
         /// </summary>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
@@ -363,6 +395,15 @@ namespace E2EELibrary.Core
         #endregion
 
         #region X25519 Key Generation
+
+        /// <summary>
+        /// Checks that p represents a point on the edwards25519 curve, in canonical form, 
+        /// on the main subgroup, and that the point doesn’t have a small order.
+        /// </summary>
+        /// <param name="p"></param>
+        /// <returns></returns>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int crypto_core_ed25519_is_valid_point(byte[] p);
 
         /// <summary>
         /// Randomly generates a secret key and the corresponding public key.
