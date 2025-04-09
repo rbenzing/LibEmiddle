@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using E2EELibrary.Communication;
 using E2EELibrary.KeyManagement;
@@ -7,7 +6,6 @@ using E2EELibrary.KeyExchange;
 using E2EELibrary.Models;
 using E2EELibrary.Encryption;
 using E2EELibrary.Core;
-using E2EELibrary.GroupMessaging;
 
 namespace E2EELibrary.MultiDevice
 {
@@ -42,13 +40,19 @@ namespace E2EELibrary.MultiDevice
             catch (Exception)
             {
                 // If conversion fails, assume the key is already in X25519 form.
+                bool validKey = KeyValidation.ValidateX25519PublicKey(newDevicePublicKey);
+                if (!validKey)
+                {
+                    throw new CryptographicException(nameof(newDevicePublicKey), "Public key is invalid.");
+                }
                 normalizedPublicKey = newDevicePublicKey;
             }
 
-            using (var hmac = new HMACSHA256(existingSharedKey))
-            {
-                return hmac.ComputeHash(normalizedPublicKey);
-            }
+            return KeyConversion.HkdfDerive(
+                existingSharedKey,
+                normalizedPublicKey,
+                Encoding.UTF8.GetBytes("DeviceLinkKeyDerivation") // Must match the X25519 overload below.
+            );
         }
 
         /// <summary>
@@ -60,23 +64,16 @@ namespace E2EELibrary.MultiDevice
         /// <returns>Shared key for the new device</returns>
         public static byte[] DeriveSharedKeyForNewDeviceX25519(byte[] existingSharedKey, byte[] x25519PublicKey)
         {
+            if (existingSharedKey == null)
+                throw new ArgumentNullException(nameof(existingSharedKey));
             if (x25519PublicKey == null)
                 throw new ArgumentNullException(nameof(x25519PublicKey));
 
-            return ComputeSharedKey(existingSharedKey, x25519PublicKey);
-        }
-
-        private static byte[] ComputeSharedKey(byte[] existingSharedKey, byte[] normalizedPublicKey)
-        {
-            if (existingSharedKey == null)
-                throw new ArgumentNullException(nameof(existingSharedKey));
-            if (normalizedPublicKey == null)
-                throw new ArgumentNullException(nameof(normalizedPublicKey));
-
-            using (var hmac = new HMACSHA256(existingSharedKey))
-            {
-                return hmac.ComputeHash(normalizedPublicKey);
-            }
+            return KeyConversion.HkdfDerive(
+                existingSharedKey,
+                x25519PublicKey,
+                Encoding.UTF8.GetBytes("DeviceLinkKeyDerivation")
+            );
         }
 
         /// <summary>

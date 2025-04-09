@@ -349,6 +349,22 @@ namespace E2EELibrary.Core
         #region X25519 Key Exchange Functions
 
         /// <summary>
+        /// Computes HMAC-SHA256 on the input data
+        /// </summary>
+        /// <param name="output"></param>
+        /// <param name="outputLength"></param>
+        /// <param name="info"></param>
+        /// <param name="infoLength"></param>
+        /// <param name="prk"></param>
+        /// <returns></returns>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int crypto_auth_hmacsha256(
+            byte[] output, UIntPtr outputLength,
+            byte[] info, UIntPtr infoLength,
+            byte[] prk);
+
+
+        /// <summary>
         /// Creates a master key (prk) given an optional salt salt (which can be NULL, or 
         /// salt_len bytes), and input keying material ikm of size ikm_len bytes.
         /// </summary>
@@ -570,7 +586,7 @@ namespace E2EELibrary.Core
 
             Initialize();
 
-            byte[] sharedSecret = GenerateRandomBytes(32);
+            byte[] sharedSecret = GenerateRandomBytes(Constants.AES_KEY_SIZE);
             int result = crypto_scalarmult_curve25519(sharedSecret, secretKey, publicKey);
 
             if (result != 0)
@@ -591,7 +607,7 @@ namespace E2EELibrary.Core
 
             Initialize();
 
-            byte[] publicKey = GenerateRandomBytes(32);
+            byte[] publicKey = GenerateRandomBytes(Constants.AES_KEY_SIZE);
             int result = crypto_scalarmult_curve25519_base(publicKey, secretKey);
 
             if (result != 0)
@@ -605,6 +621,34 @@ namespace E2EELibrary.Core
         #region New Public Key Conversion
 
         /// <summary>
+        /// Computes HMAC-SHA256 on the input data (normalizedPublicKey) using the provided key (existingSharedKey).
+        /// </summary>
+        /// <param name="existingSharedKey">The shared key (32 bytes required).</param>
+        /// <param name="normalizedPublicKey">The data to be HMACed.</param>
+        /// <returns>The 32-byte HMAC-SHA256 result.</returns>
+        public static byte[] ComputeHmacSha256(byte[] existingSharedKey, byte[] normalizedPublicKey)
+        {
+            // Ensure the existingSharedKey is of the required length.
+            if (existingSharedKey.Length != Constants.AES_KEY_SIZE)
+            {
+                throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long.", nameof(existingSharedKey));
+            }
+
+            byte[] output = new byte[Constants.AES_KEY_SIZE];
+            int ret = crypto_auth_hmacsha256(
+                output, (UIntPtr)output.Length,
+                normalizedPublicKey, (UIntPtr)normalizedPublicKey.Length,
+                existingSharedKey);
+
+            if (ret != 0)
+            {
+                throw new InvalidOperationException($"crypto_auth_hmacsha256 failed with return value {ret}");
+            }
+
+            return output;
+        }
+
+        /// <summary>
         /// Converts an Ed25519 public key to an X25519 (Curve25519) public key.
         /// </summary>
         /// <param name="ed25519PublicKey">The Ed25519 public key (32 bytes).</param>
@@ -613,10 +657,10 @@ namespace E2EELibrary.Core
         {
             if (ed25519PublicKey == null)
                 throw new ArgumentNullException(nameof(ed25519PublicKey));
-            if (ed25519PublicKey.Length != 32)
+            if (ed25519PublicKey.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException("Ed25519 public key must be 32 bytes.", nameof(ed25519PublicKey));
 
-            byte[] curve25519PublicKey = GenerateRandomBytes(32);
+            byte[] curve25519PublicKey = GenerateRandomBytes(Constants.AES_KEY_SIZE);
             int result = crypto_sign_ed25519_pk_to_curve25519(curve25519PublicKey, ed25519PublicKey);
             if (result != 0)
                 throw new InvalidOperationException("Conversion from Ed25519 to Curve25519 public key failed.");

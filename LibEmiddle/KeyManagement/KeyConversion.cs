@@ -1,5 +1,4 @@
-﻿using System;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using E2EELibrary.Core;
 
 namespace E2EELibrary.KeyManagement
@@ -145,6 +144,59 @@ namespace E2EELibrary.KeyManagement
                 // Securely clear sensitive key material
                 SecureMemory.SecureClear(sourceKey);
             }
+        }
+
+        /// <summary>
+        /// Implements HKDF (RFC 5869) using libsodium's crypto_kdf_hkdf_sha256_* functions
+        /// </summary>
+        /// <param name="inputKeyMaterial">Initial key material</param>
+        /// <param name="salt">Optional salt (can be null)</param>
+        /// <param name="info">Context and application specific information</param>
+        /// <param name="outputLength">Desired output key material length</param>
+        /// <returns>Derived key material</returns>
+        public static byte[] HkdfDerive(
+            byte[] inputKeyMaterial,
+            byte[]? salt = null,
+            byte[]? info = null,
+            int outputLength = 32)
+        {
+            // Use empty byte array if salt is null
+            salt ??= new byte[32];
+
+            // Use empty byte array if info is null
+            info ??= Array.Empty<byte>();
+
+            // Allocate buffer for PRK (pseudorandom key)
+            byte[] prk = new byte[32];
+
+            // Extract step
+            int extractResult = Sodium.crypto_kdf_hkdf_sha256_extract(
+                prk,
+                salt,
+                (UIntPtr)salt.Length,
+                inputKeyMaterial,
+                (UIntPtr)inputKeyMaterial.Length
+            );
+
+            if (extractResult != 0)
+                throw new CryptographicException("HKDF extract failed");
+
+            // Allocate output buffer
+            byte[] output = new byte[outputLength];
+
+            // Expand step
+            int expandResult = Sodium.crypto_kdf_hkdf_sha256_expand(
+                output,
+                (UIntPtr)outputLength,
+                info,
+                (UIntPtr)(info?.Length ?? 0),
+                prk
+            );
+
+            if (expandResult != 0)
+                throw new CryptographicException("HKDF expand failed");
+
+            return output;
         }
     }
 }

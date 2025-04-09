@@ -110,67 +110,20 @@ namespace E2EELibrary.KeyExchange
         /// <returns>Derived shared secret</returns>
         private static byte[] DeriveSharedSecret(params byte[][] secrets)
         {
-            // Use HKDF for proper key derivation
+            // Combine input key materials
             byte[] combinedInput = new byte[secrets.Sum(s => s.Length)];
             int offset = 0;
-
             foreach (var secret in secrets)
             {
                 secret.CopyTo(combinedInput, offset);
                 offset += secret.Length;
             }
 
-            // Use a proper info string as per spec
-            byte[] info = Encoding.UTF8.GetBytes("X3DH_Signal_Protocol_v1");
-
-            // 32 bytes output (AES-256 key)
-            return Hkdf(combinedInput, null, info, 32);
-        }
-
-        /// <summary>
-        /// Implement proper HKDF as per RFC 5869
-        /// </summary>
-        /// <param name="inputKeyMaterial">Initial key material</param>
-        /// <param name="salt">Optional salt (can be null)</param>
-        /// <param name="info">Context and application specific information</param>
-        /// <param name="outputLength">Length of output in bytes</param>
-        /// <returns>Derived key material</returns>
-        private static byte[] Hkdf(byte[] inputKeyMaterial, byte[]? salt, byte[] info, int outputLength)
-        {
-            salt ??= new byte[32]; // Use empty salt if not provided
-
-            // HKDF-Extract
-            byte[] prk;
-            using (var hmac = new HMACSHA256(salt))
-            {
-                prk = hmac.ComputeHash(inputKeyMaterial);
-            }
-
-            // HKDF-Expand
-            byte[] okm = new byte[outputLength];
-            byte[] t = Array.Empty<byte>();
-            byte[] counter = new byte[1];
-            int offset = 0;
-
-            using var hmacExpand = new HMACSHA256(prk);
-
-            for (counter[0] = 1; offset < outputLength; counter[0]++)
-            {
-                hmacExpand.Initialize();
-
-                using var ms = new MemoryStream();
-                ms.Write(t);
-                ms.Write(info);
-                ms.Write(counter);
-
-                t = hmacExpand.ComputeHash(ms.ToArray());
-
-                int remaining = Math.Min(outputLength - offset, t.Length);
-                t.AsSpan(0, remaining).CopyTo(okm.AsSpan(offset, remaining));
-                offset += remaining;
-            }
-
-            return okm;
+            // Use HKDF for key derivation
+            return KeyConversion.HkdfDerive(
+                combinedInput,
+                info: Encoding.UTF8.GetBytes("DeriveSharedSecret")
+            );
         }
 
         /// <summary>

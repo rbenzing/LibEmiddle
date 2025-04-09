@@ -1,5 +1,7 @@
 ﻿using System.Security.Cryptography;
+using System.Text;
 using E2EELibrary.Core;
+using E2EELibrary.KeyManagement;
 
 namespace E2EELibrary.GroupMessaging
 {
@@ -42,15 +44,10 @@ namespace E2EELibrary.GroupMessaging
                 return existingChainKey;
             }
 
-            // Otherwise, derive a new chain key using HKDF
-            using var hmac = new HMACSHA256(senderKey);
-            byte[] info = System.Text.Encoding.UTF8.GetBytes($"GroupChainKey-{groupId}");
-            byte[] chainKey = hmac.ComputeHash(info);
-
-            // Store for future use
-            _chainKeys[groupId] = chainKey;
-
-            return chainKey;
+            return KeyConversion.HkdfDerive(
+                senderKey,
+                info: Encoding.UTF8.GetBytes($"GroupChainKey-{groupId}")
+            );
         }
 
         /// <summary>
@@ -66,16 +63,18 @@ namespace E2EELibrary.GroupMessaging
             }
 
             // Perform a ratchet step to derive a new chain key and message key
-            using var hmac = new HMACSHA256(currentChainKey);
-
-            // CK_next = HMAC-SHA256(CK, 0x01)
-            byte[] nextChainKey = hmac.ComputeHash(new byte[] { 0x01 });
+            byte[] nextChainKey = KeyConversion.HkdfDerive(
+                currentChainKey,
+                info: Encoding.UTF8.GetBytes($"NextChainKey-{groupId}"),
+                outputLength: Constants.AES_KEY_SIZE
+            );
 
             // Reset HMAC with the same key but new message
-            hmac.Initialize();
-
-            // MK = HMAC-SHA256(CK, 0x02)
-            byte[] messageKey = hmac.ComputeHash(new byte[] { 0x02 });
+            byte[] messageKey = KeyConversion.HkdfDerive(
+                currentChainKey,
+                info: Encoding.UTF8.GetBytes($"MessageKey-{groupId}"),
+                outputLength: Constants.AES_KEY_SIZE
+            );
 
             // Update the stored chain key
             _chainKeys[groupId] = nextChainKey;
@@ -105,9 +104,14 @@ namespace E2EELibrary.GroupMessaging
         /// <returns>Derived key for specific purpose</returns>
         public byte[] DeriveSubkey(byte[] groupKey, string purpose)
         {
-            using var hmac = new HMACSHA256(groupKey);
-            byte[] info = System.Text.Encoding.UTF8.GetBytes(purpose);
-            return hmac.ComputeHash(info);
+            ArgumentNullException.ThrowIfNull(groupKey, nameof(groupKey));
+            ArgumentException.ThrowIfNullOrEmpty(purpose, nameof(purpose));
+
+            return KeyConversion.HkdfDerive(
+                groupKey,
+                info: Encoding.UTF8.GetBytes($"SubkeyDerivation-{purpose}"),
+                outputLength: Constants.AES_KEY_SIZE
+            );
         }
 
         /// <summary>

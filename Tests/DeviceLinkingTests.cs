@@ -1,13 +1,12 @@
-﻿using System;
-using System.Text;
-using System.Linq;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-using System.Security.Cryptography;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.MultiDevice;
-using E2EELibrary.Core;
-using E2EELibrary.Models;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Security.Cryptography;
+using E2EELibrary.Core;
+using E2EELibrary.KeyManagement;
+using E2EELibrary.Models;
+using E2EELibrary.MultiDevice;
 
 namespace E2EELibraryTests
 {
