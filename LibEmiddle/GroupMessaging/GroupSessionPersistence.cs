@@ -5,7 +5,6 @@ using E2EELibrary.Core;
 using E2EELibrary.Encryption;
 using E2EELibrary.Models;
 using E2EELibrary.KeyExchange;
-using System.Diagnostics;
 
 namespace E2EELibrary.GroupMessaging
 {
@@ -101,11 +100,11 @@ namespace E2EELibrary.GroupMessaging
         public void SaveToFile(string filePath, string? password = null)
         {
             // Create a serializable representation of sessions
-            List<GroupSessionDto> sessionDtos;
+            List<GroupSession> sessionDtos;
 
             lock (_sessionsLock)
             {
-                sessionDtos = _groupSessions.Values.Select(s => new GroupSessionDto
+                sessionDtos = _groupSessions.Values.Select(s => new GroupSession
                 {
                     GroupId = s.GroupId,
                     SenderKeyBase64 = Convert.ToBase64String(s.SenderKey),
@@ -208,7 +207,7 @@ namespace E2EELibrary.GroupMessaging
 
             // Deserialize JSON
             string json = Encoding.UTF8.GetString(jsonData);
-            var sessionDtos = JsonSerializer.Deserialize<List<GroupSessionDto>>(json);
+            var sessionDtos = JsonSerializer.Deserialize<List<GroupSession>>(json);
 
             if (sessionDtos == null)
             {
@@ -298,7 +297,7 @@ namespace E2EELibrary.GroupMessaging
             }
 
             // Create DTO
-            var sessionDto = new GroupSessionDto
+            var sessionDto = new GroupSession
             {
                 GroupId = session.GroupId,
                 SenderKeyBase64 = Convert.ToBase64String(session.SenderKey),
@@ -358,7 +357,7 @@ namespace E2EELibrary.GroupMessaging
 
             // Deserialize
             string json = Encoding.UTF8.GetString(jsonData);
-            var dto = JsonSerializer.Deserialize<GroupSessionDto>(json);
+            var dto = JsonSerializer.Deserialize<GroupSession>(json);
 
             if (dto == null)
             {
@@ -475,41 +474,5 @@ namespace E2EELibrary.GroupMessaging
             sessionKey.AsSpan().CopyTo(copy);
             return copy;
         }
-    }
-
-    /// <summary>
-    /// Data transfer object for serializing group sessions
-    /// </summary>
-    public class GroupSessionDto
-    {
-        /// <summary>
-        /// Group identifier
-        /// </summary>
-        public string GroupId { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Sender key as Base64
-        /// </summary>
-        public string SenderKeyBase64 { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Creator's identity key as Base64
-        /// </summary>
-        public string CreatorIdentityKeyBase64 { get; set; } = string.Empty;
-
-        /// <summary>
-        /// When the group was created
-        /// </summary>
-        public long CreationTimestamp { get; set; }
-
-        /// <summary>
-        /// When the key was last rotated
-        /// </summary>
-        public long LastKeyRotation { get; set; }
-
-        /// <summary>
-        /// Additional group metadata
-        /// </summary>
-        public Dictionary<string, string>? Metadata { get; set; }
     }
 }

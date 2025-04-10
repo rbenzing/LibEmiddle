@@ -13,6 +13,16 @@ namespace E2EELibrary.Models
         public string GroupId { get; set; } = string.Empty;
 
         /// <summary>
+        /// Sender key as Base64
+        /// </summary>
+        public string SenderKeyBase64 { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Creator's identity key as Base64
+        /// </summary>
+        public string CreatorIdentityKeyBase64 { get; set; } = string.Empty;
+
+        /// <summary>
         /// Sender key for this group
         /// </summary>
         public byte[] SenderKey { get; set; } = Array.Empty<byte>();
