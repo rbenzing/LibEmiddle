@@ -43,7 +43,10 @@ LibEmiddle/
 │       │   ├── KeyPair.cs
 │       │   ├── KeyStorage.cs
 │       │   └── KeyValidation.cs
+│       ├── Messaging/
+│       │   └── ChatSessionManager.cs
 │       ├── Models/
+│       │   ├── ChatSession.cs
 │       │   ├── DeviceLinkMessage.cs
 │       │   ├── DeviceRevocationMessage.cs
 │       │   ├── DeviceSyncMessage.cs
@@ -72,6 +75,7 @@ LibEmiddle/
 │   └── LibEmiddle.Tests/
 │       ├── Mocks/
 │       │   └──  MailboxMockFactory.cs
+│       ├── ChatSessionTests.cs
 │       ├── DeviceLinkingTests.cs
 │       ├── DeviceRevocationTests.cs
 │       ├── DoubleRatchetTests.cs

@@ -6,6 +6,32 @@
     public static class Enums
     {
         /// <summary>
+        /// Chat session states
+        /// </summary>
+        public enum ChatSessionState
+        {
+            /// <summary>
+            /// Chat is initialized
+            /// </summary>
+            Initialized,
+            
+            /// <summary>
+            /// Chat is active
+            /// </summary>
+            Active,
+            
+            /// <summary>
+            /// Chat is suspended
+            /// </summary>
+            Suspended,
+            
+            /// <summary>
+            /// Chat is terminated
+            /// </summary>
+            Terminated
+        }
+
+        /// <summary>
         /// Represents a member's role in a group
         /// </summary>
         public enum MemberRole

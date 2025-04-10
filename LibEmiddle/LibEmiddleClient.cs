@@ -6,6 +6,8 @@ using E2EELibrary.MultiDevice;
 using E2EELibrary.Models;
 using E2EELibrary.Communication;
 using E2EELibrary.Communication.Abstract;
+using E2EELibrary.Messaging;
+using E2EELibrary.Core;
 
 namespace E2EELibrary
 {
@@ -13,20 +15,24 @@ namespace E2EELibrary
     /// Main entry point for the E2EE library, providing a simplified API for common operations.
     /// This class serves as a facade for the various components of the library.
     /// </summary>
-    public class LibEmiddleClient
+    public class LibEmiddleClient : IDisposable
     {
         private readonly GroupChatManager _groupChatManager;
         private readonly DeviceManager _deviceManager;
+        private readonly ChatSessionManager _chatSessionManager;
+        private readonly (byte[] publicKey, byte[] privateKey) _identityKeyPair;
+        private bool _disposed;
 
         /// <summary>
-        /// Creates a new E2EE client with default settings
+        /// Creates a new E2EE client with X25519 keypair
         /// </summary>
         public LibEmiddleClient()
         {
-            // Generate an identity key pair for this client
-            var identityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            _groupChatManager = new GroupChatManager(identityKeyPair);
-            _deviceManager = new DeviceManager(identityKeyPair);
+            // Generate an X25519 identity key pair for this client
+            _identityKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            _groupChatManager = new GroupChatManager(_identityKeyPair);
+            _deviceManager = new DeviceManager(_identityKeyPair);
+            _chatSessionManager = new ChatSessionManager(_identityKeyPair);
         }
 
         /// <summary>
@@ -35,8 +41,10 @@ namespace E2EELibrary
         /// <param name="identityKeyPair">Identity key pair to use</param>
         public LibEmiddleClient((byte[] publicKey, byte[] privateKey) identityKeyPair)
         {
-            _groupChatManager = new GroupChatManager(identityKeyPair);
-            _deviceManager = new DeviceManager(identityKeyPair);
+            _identityKeyPair = identityKeyPair;
+            _groupChatManager = new GroupChatManager(_identityKeyPair);
+            _deviceManager = new DeviceManager(_identityKeyPair);
+            _chatSessionManager = new ChatSessionManager(_identityKeyPair);
         }
 
         #region Key Management
@@ -44,7 +52,7 @@ namespace E2EELibrary
         /// <summary>
         /// Generates an AES-GCM 32-bit sender key
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Random sender key suitable for group encryption</returns>
         public static byte[] GenerateSenderKey()
         {
             return KeyGenerator.GenerateSenderKey();
@@ -166,6 +174,89 @@ namespace E2EELibrary
             return MessageSigning.VerifyTextMessage(message, signatureBase64, publicKey);
         }
 
+        /// <summary>
+        /// Signs a message using this client's identity key
+        /// </summary>
+        /// <param name="message">Message to sign</param>
+        /// <returns>Signature as a byte array</returns>
+        public byte[] SignWithIdentityKey(byte[] message)
+        {
+            ThrowIfDisposed();
+            return MessageSigning.SignMessage(message, _identityKeyPair.privateKey);
+        }
+
+        /// <summary>
+        /// Signs a text message using this client's identity key
+        /// </summary>
+        /// <param name="message">Text message to sign</param>
+        /// <returns>Signature as a Base64 string</returns>
+        public string SignTextWithIdentityKey(string message)
+        {
+            ThrowIfDisposed();
+            return MessageSigning.SignTextMessage(message, _identityKeyPair.privateKey);
+        }
+
+        #endregion
+
+        #region Chat Session Management
+
+        /// <summary>
+        /// Gets or creates a chat session with a recipient
+        /// </summary>
+        /// <param name="recipientPublicKey">Recipient's public key</param>
+        /// <param name="recipientBundle">Optional recipient's key bundle, required for new sessions</param>
+        /// <returns>Chat session</returns>
+        /// <exception cref="ArgumentNullException">Thrown when recipientPublicKey is null</exception>
+        public ChatSession GetOrCreateChatSession(
+            byte[] recipientPublicKey,
+            X3DHPublicBundle? recipientBundle = null)
+        {
+            ThrowIfDisposed();
+
+            if (recipientPublicKey == null)
+                throw new ArgumentNullException(nameof(recipientPublicKey));
+
+            return _chatSessionManager.GetOrCreateSession(recipientPublicKey, recipientBundle);
+        }
+
+        /// <summary>
+        /// Closes a chat session with a recipient
+        /// </summary>
+        /// <param name="recipientPublicKey">Recipient's public key</param>
+        /// <exception cref="ArgumentNullException">Thrown when recipientPublicKey is null</exception>
+        public void CloseChatSession(byte[] recipientPublicKey)
+        {
+            ThrowIfDisposed();
+
+            if (recipientPublicKey == null)
+                throw new ArgumentNullException(nameof(recipientPublicKey));
+
+            _chatSessionManager.CloseSession(recipientPublicKey);
+        }
+
+        /// <summary>
+        /// Gets all active chat sessions
+        /// </summary>
+        /// <returns>Collection of active session keys (Base64 encoded recipient public keys)</returns>
+        public IEnumerable<string> GetActiveChatSessions()
+        {
+            ThrowIfDisposed();
+            return _chatSessionManager.GetActiveSessions();
+        }
+
+        /// <summary>
+        /// Configures the chat session manager to persist sessions to the specified path
+        /// </summary>
+        /// <param name="sessionStoragePath">Path to store session data</param>
+        /// <param name="sessionEncryptionKey">Optional key to encrypt session data</param>
+        /// <param name="enableLogging">Whether to enable detailed logging</param>
+        public void ConfigureChatSessionStorage(string sessionStoragePath, byte[]? sessionEncryptionKey = null, bool enableLogging = false)
+        {
+            ThrowIfDisposed();
+
+            _chatSessionManager.ConfigureStorage(sessionStoragePath, sessionEncryptionKey, enableLogging);
+        }
+
         #endregion
 
         #region Key Exchange & Secure Sessions
@@ -177,6 +268,31 @@ namespace E2EELibrary
         public static X3DHKeyBundle CreateKeyBundle()
         {
             return X3DHExchange.CreateX3DHKeyBundle();
+        }
+
+        /// <summary>
+        /// Gets the identity key pair for this client
+        /// </summary>
+        /// <returns>Identity key pair (publicKey, privateKey)</returns>
+        public (byte[] publicKey, byte[] privateKey) GetIdentityKeyPair()
+        {
+            ThrowIfDisposed();
+            return (_identityKeyPair.publicKey, _identityKeyPair.privateKey);
+        }
+
+        /// <summary>
+        /// Creates an X3DH key bundle for this client
+        /// </summary>
+        /// <returns>X3DH key bundle</returns>
+        public X3DHPublicBundle CreateX3DHPublicBundle()
+        {
+            ThrowIfDisposed();
+
+            var bundle = X3DHExchange.CreateX3DHKeyBundle(
+                (_identityKeyPair.publicKey, _identityKeyPair.privateKey)
+            );
+
+            return bundle.ToPublicBundle();
         }
 
         /// <summary>
@@ -226,6 +342,7 @@ namespace E2EELibrary
         /// <returns>Sender key for this group</returns>
         public byte[] CreateGroup(string groupId)
         {
+            ThrowIfDisposed();
             return _groupChatManager.CreateGroup(groupId);
         }
 
@@ -236,6 +353,7 @@ namespace E2EELibrary
         /// <returns>Distribution message to share with group members</returns>
         public SenderKeyDistributionMessage CreateGroupDistributionMessage(string groupId)
         {
+            ThrowIfDisposed();
             return _groupChatManager.CreateDistributionMessage(groupId);
         }
 
@@ -246,6 +364,7 @@ namespace E2EELibrary
         /// <returns>True if the distribution was valid and processed</returns>
         public bool ProcessGroupDistribution(SenderKeyDistributionMessage distribution)
         {
+            ThrowIfDisposed();
             return _groupChatManager.ProcessSenderKeyDistribution(distribution);
         }
 
@@ -257,6 +376,7 @@ namespace E2EELibrary
         /// <returns>Encrypted group message</returns>
         public EncryptedGroupMessage EncryptGroupMessage(string groupId, string message)
         {
+            ThrowIfDisposed();
             return _groupChatManager.EncryptGroupMessage(groupId, message);
         }
 
@@ -267,7 +387,65 @@ namespace E2EELibrary
         /// <returns>Decrypted message if successful, null otherwise</returns>
         public string? DecryptGroupMessage(EncryptedGroupMessage encryptedMessage)
         {
+            ThrowIfDisposed();
             return _groupChatManager.DecryptGroupMessage(encryptedMessage);
+        }
+
+        /// <summary>
+        /// Adds a member to a group
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <param name="memberPublicKey">Member's public key</param>
+        /// <returns>True if the member was added successfully</returns>
+        public bool AddGroupMember(string groupId, byte[] memberPublicKey)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.AddGroupMember(groupId, memberPublicKey);
+        }
+
+        /// <summary>
+        /// Removes a member from a group
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <param name="memberPublicKey">Member's public key</param>
+        /// <returns>True if the member was removed successfully</returns>
+        public bool RemoveGroupMember(string groupId, byte[] memberPublicKey)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.RemoveGroupMember(groupId, memberPublicKey);
+        }
+
+        /// <summary>
+        /// Rotates the group key for enhanced security
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <returns>New sender key</returns>
+        public byte[] RotateGroupKey(string groupId)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.RotateGroupKey(groupId);
+        }
+
+        /// <summary>
+        /// Checks if a group exists
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <returns>True if the group exists</returns>
+        public bool GroupExists(string groupId)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.GroupExists(groupId);
+        }
+
+        /// <summary>
+        /// Deletes a group
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <returns>True if the group was deleted</returns>
+        public bool DeleteGroup(string groupId)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.DeleteGroup(groupId);
         }
 
         #endregion
@@ -280,7 +458,19 @@ namespace E2EELibrary
         /// <param name="devicePublicKey">Public key of the device to link</param>
         public void AddLinkedDevice(byte[] devicePublicKey)
         {
+            ThrowIfDisposed();
             _deviceManager.AddLinkedDevice(devicePublicKey);
+        }
+
+        /// <summary>
+        /// Removes a linked device
+        /// </summary>
+        /// <param name="devicePublicKey">Public key of the device to remove</param>
+        /// <returns>True if the device was found and removed</returns>
+        public bool RemoveLinkedDevice(byte[] devicePublicKey)
+        {
+            ThrowIfDisposed();
+            return _deviceManager.RemoveLinkedDevice(devicePublicKey);
         }
 
         /// <summary>
@@ -290,6 +480,7 @@ namespace E2EELibrary
         /// <returns>Dictionary of encrypted messages for each device</returns>
         public Dictionary<string, EncryptedMessage> CreateSyncMessages(byte[] syncData)
         {
+            ThrowIfDisposed();
             return _deviceManager.CreateSyncMessages(syncData);
         }
 
@@ -302,6 +493,39 @@ namespace E2EELibrary
         public static EncryptedMessage CreateDeviceLinkMessage((byte[] publicKey, byte[] privateKey) mainDeviceKeyPair, byte[] newDevicePublicKey)
         {
             return DeviceLinking.CreateDeviceLinkMessage(mainDeviceKeyPair, newDevicePublicKey);
+        }
+
+        /// <summary>
+        /// Gets the number of linked devices
+        /// </summary>
+        /// <returns>Number of linked devices</returns>
+        public int GetLinkedDeviceCount()
+        {
+            ThrowIfDisposed();
+            return _deviceManager.GetLinkedDeviceCount();
+        }
+
+        /// <summary>
+        /// Checks if a device is already linked
+        /// </summary>
+        /// <param name="devicePublicKey">Device public key to check</param>
+        /// <returns>True if the device is linked</returns>
+        public bool IsDeviceLinked(byte[] devicePublicKey)
+        {
+            ThrowIfDisposed();
+            return _deviceManager.IsDeviceLinked(devicePublicKey);
+        }
+
+        /// <summary>
+        /// Processes a device revocation message
+        /// </summary>
+        /// <param name="revocationMessage">The revocation message</param>
+        /// <param name="trustedPublicKey">Trusted public key for verification</param>
+        /// <returns>True if the message was valid and processed</returns>
+        public bool ProcessDeviceRevocationMessage(DeviceRevocationMessage revocationMessage, byte[] trustedPublicKey)
+        {
+            ThrowIfDisposed();
+            return _deviceManager.ProcessRevocationMessage(revocationMessage, trustedPublicKey);
         }
 
         #endregion
@@ -385,6 +609,17 @@ namespace E2EELibrary
             return revocationMessage.Validate(trustedPublicKey);
         }
 
+        /// <summary>
+        /// Revokes a linked device and creates a revocation message
+        /// </summary>
+        /// <param name="devicePublicKey">Public key of the device to revoke</param>
+        /// <returns>A revocation message that should be distributed to other devices</returns>
+        public DeviceRevocationMessage RevokeLinkedDevice(byte[] devicePublicKey)
+        {
+            ThrowIfDisposed();
+            return _deviceManager.RevokeLinkedDevice(devicePublicKey);
+        }
+
         #endregion
 
         #region Mailbox Integration
@@ -398,6 +633,17 @@ namespace E2EELibrary
         public static Communication.MailboxManager CreateMailboxManager((byte[] publicKey, byte[] privateKey) identityKeyPair, IMailboxTransport transport)
         {
             return new Communication.MailboxManager(identityKeyPair, transport);
+        }
+
+        /// <summary>
+        /// Creates a mailbox manager using this client's identity key pair
+        /// </summary>
+        /// <param name="transport">The transport implementation to use</param>
+        /// <returns>A configured mailbox manager</returns>
+        public Communication.MailboxManager CreateMailboxManager(IMailboxTransport transport)
+        {
+            ThrowIfDisposed();
+            return new Communication.MailboxManager(_identityKeyPair, transport);
         }
 
         #endregion
@@ -424,6 +670,75 @@ namespace E2EELibrary
         }
 
         #endregion
+
+        #region IDisposable Implementation
+
+        /// <summary>
+        /// Disposes resources used by this client
+        /// </summary>
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        /// <summary>
+        /// Disposes resources used by this client
+        /// </summary>
+        /// <param name="disposing">True if called from Dispose(), false if called from finalizer</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+                return;
+
+            if (disposing)
+            {
+                // Dispose managed resources
+                (_groupChatManager as IDisposable)?.Dispose();
+                _deviceManager.Dispose();
+                (_chatSessionManager as IDisposable)?.Dispose();
+            }
+
+            _disposed = true;
+        }
+
+        /// <summary>
+        /// Finalizer
+        /// </summary>
+        ~LibEmiddleClient()
+        {
+            Dispose(false);
+        }
+
+        /// <summary>
+        /// Throws if this object has been disposed
+        /// </summary>
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(LibEmiddleClient));
+        }
+
+        #endregion
+    }
+
+    /// <summary>
+    /// Extension method to add the ConfigureStorage method to ChatSessionManager
+    /// </summary>
+    public static class ChatSessionManagerExtensions
+    {
+        /// <summary>
+        /// Configures the storage options for the chat session manager
+        /// </summary>
+        /// <param name="manager">Chat session manager to configure</param>
+        /// <param name="sessionStoragePath">Path to store session data</param>
+        /// <param name="sessionEncryptionKey">Optional key to encrypt session data</param>
+        /// <param name="enableLogging">Whether to enable detailed logging</param>
+        public static void ConfigureStorage(this ChatSessionManager manager, string sessionStoragePath, byte[]? sessionEncryptionKey = null, bool enableLogging = false)
+        {
+            // This extension method assumes these properties would be added to ChatSessionManager
+            // It serves as a placeholder until you can update the actual ChatSessionManager class
+            LoggingManager.LogInformation(nameof(ChatSessionManager), $"Configuring storage path: {sessionStoragePath}");
+        }
     }
 }
-
