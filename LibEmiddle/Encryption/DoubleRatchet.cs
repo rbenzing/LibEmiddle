@@ -6,37 +6,32 @@ using E2EELibrary.Core;
 using E2EELibrary.KeyExchange;
 using E2EELibrary.KeyManagement;
 using E2EELibrary.Models;
+using static E2EELibrary.Core.Enums;
 
 namespace E2EELibrary.Encryption
 {
     /// <summary>
-    /// Implements the Double Ratchet algorithm for end-to-end encrypted communications.
-    /// The Double Ratchet algorithm provides secure messaging with forward secrecy and break-in recovery
-    /// properties, continuously refreshing encryption keys as messages are exchanged.
+    /// Provides encryption and decryption using the Double Ratchet algorithm with forward secrecy and DH ratcheting.
     /// </summary>
     public static class DoubleRatchet
     {
-
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionLocks =
-    new ConcurrentDictionary<string, SemaphoreSlim>();
-
-        private static readonly ConcurrentDictionary<string, long> _lockLastUsed =
-    new ConcurrentDictionary<string, long>();
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionLocks = new();
+        private static readonly ConcurrentDictionary<string, long> _lockLastUsed = new();
 
         /// <summary>
-        /// Encrypts a message using the Double Ratchet algorithm
+        /// Encrypts a message using the Double Ratchet algorithm.
         /// </summary>
-        /// <param name="session">Current Double Ratchet session</param>
-        /// <param name="message">Message to encrypt</param>
-        /// <returns>Updated session and encrypted message</returns>
+        /// <param name="session">The current session state.</param>
+        /// <param name="message">Plaintext message to encrypt.</param>
+        /// <param name="rotationStrategy">Key rotation policy.</param>
+        /// <returns>Updated session and encrypted message.</returns>
         /// <exception cref="ArgumentNullException"></exception>
         /// <exception cref="ArgumentException"></exception>
         /// <exception cref="CryptographicException"></exception>
         public static (DoubleRatchetSession updatedSession, EncryptedMessage encryptedMessage)
-            DoubleRatchetEncrypt(DoubleRatchetSession session, string message)
+            DoubleRatchetEncrypt(DoubleRatchetSession session, string message, KeyRotationStrategy rotationStrategy = KeyRotationStrategy.Standard)
         {
-            if (session == null)
-                throw new ArgumentNullException(nameof(session));
+            ArgumentNullException.ThrowIfNull(session);
             if (string.IsNullOrEmpty(message))
                 throw new ArgumentException("Message cannot be null or empty", nameof(message));
             if (session.SendingChainKey == null || session.SendingChainKey.Length != Constants.AES_KEY_SIZE)
@@ -45,7 +40,7 @@ namespace E2EELibrary.Encryption
             try
             {
                 // Get next message key and update chain key
-                var (newChainKey, messageKey) = DoubleRatchetExchange.RatchetStep(session.SendingChainKey);
+                var (newChainKey, messageKey) = DoubleRatchetExchange.RatchetStep(session.SendingChainKey, session.SessionId, rotationStrategy);
 
                 using var secureMessageKey = new SecureMemory.SecureArray<byte>(messageKey);
 
@@ -74,7 +69,7 @@ namespace E2EELibrary.Encryption
                 );
 
                 // Securely clear the message key when done
-                SecureMemory.SecureClear(secureMessageKey.Value);
+                SecureMemory.SecureClear(messageKey);
 
                 return (updatedSession, encryptedMessage);
             }
@@ -85,30 +80,27 @@ namespace E2EELibrary.Encryption
         }
 
         /// <summary>
-        /// Encrypts a message using the Double Ratchet algorithm
+        /// Asynchronously encrypts a message using the Double Ratchet algorithm with session locking.
         /// </summary>
         /// <param name="session">Current Double Ratchet session</param>
         /// <param name="message">Message to encrypt</param>
+        /// <param name="rotationStrategy">The key rotation strategy to use.</param>
         /// <returns>Updated session and encrypted message</returns>
         /// <exception cref="ArgumentNullException"></exception>
         /// <exception cref="ArgumentException"></exception>
         public static async Task<(DoubleRatchetSession updatedSession, EncryptedMessage encryptedMessage)>
-    DoubleRatchetEncryptAsync(DoubleRatchetSession session, string message)
+            DoubleRatchetEncryptAsync(DoubleRatchetSession session, string message, KeyRotationStrategy rotationStrategy = KeyRotationStrategy.Standard)
         {
-            if (session == null)
-                throw new ArgumentNullException(nameof(session));
+            ArgumentNullException.ThrowIfNull(session);
             if (string.IsNullOrEmpty(message))
                 throw new ArgumentException("Message cannot be null or empty", nameof(message));
-
-            // Get a lock for this specific session
             var sessionLock = GetSessionLock(session.SessionId);
 
             try
             {
                 await sessionLock.WaitAsync();
-
                 // Use the existing synchronous implementation
-                return DoubleRatchetEncrypt(session, message);
+                return DoubleRatchetEncrypt(session, message, rotationStrategy);
             }
             finally
             {
@@ -117,43 +109,45 @@ namespace E2EELibrary.Encryption
         }
 
         /// <summary>
-        /// Decrypts a message using the Double Ratchet algorithm with enhanced security and defensive programming
+        /// Decrypts a message using the Double Ratchet algorithm.
         /// </summary>
         /// <param name="session">Current Double Ratchet session</param>
         /// <param name="encryptedMessage">Encrypted message</param>
         /// <returns>Updated session and decrypted message, or null values if decryption fails</returns>
         public static (DoubleRatchetSession? updatedSession, string? decryptedMessage)
-    DoubleRatchetDecrypt(DoubleRatchetSession session, EncryptedMessage encryptedMessage)
+            DoubleRatchetDecrypt(DoubleRatchetSession session, EncryptedMessage encryptedMessage)
         {
             // Basic parameter validation
-            if (session == null)
-                throw new ArgumentNullException(nameof(session));
-            if (encryptedMessage == null)
-                throw new ArgumentNullException(nameof(encryptedMessage));
+            ArgumentNullException.ThrowIfNull(session);
+            ArgumentNullException.ThrowIfNull(encryptedMessage);
+
             if (encryptedMessage.Ciphertext == null || encryptedMessage.Nonce == null || encryptedMessage.SenderDHKey == null)
-                throw new ArgumentException("Message is missing required fields");
+                throw new ArgumentException("Message is missing required fields", nameof(encryptedMessage));
 
             try
             {
                 // Validate session ID
-                if (string.IsNullOrEmpty(encryptedMessage.SessionId))
+                if (string.IsNullOrEmpty(encryptedMessage.SessionId) ||
+                    session.SessionId != encryptedMessage.SessionId)
+                {
+                    LoggingManager.LogWarning(nameof(DoubleRatchet), $"Session ID mismatch: expected {session.SessionId}, got {encryptedMessage.SessionId}");
                     return (null, null);
-                if (session.SessionId != encryptedMessage.SessionId)
-                    return (null, null);
+                }
 
                 // Check for replay
                 if (session.HasProcessedMessageId(encryptedMessage.MessageId))
                 {
-                    // Define specific error for replay detection rather than silent failure
-                    throw new CryptographicException("Message already processed (possible replay attack)");
+                    LoggingManager.LogWarning(nameof(DoubleRatchet), $"Message replay detected: {encryptedMessage.MessageId}");
+                    return (null, null);
                 }
 
                 // Validate timestamp
                 long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                if (Math.Abs(currentTime - encryptedMessage.Timestamp) > Constants.MAX_MESSAGE_AGE_MS)
+                if (encryptedMessage.Timestamp <= 0 ||
+                    Math.Abs(currentTime - encryptedMessage.Timestamp) > Constants.MAX_MESSAGE_AGE_MS)
                 {
-                    // Define specific error for timestamp validation rather than silent failure
-                    throw new SecurityException("Message timestamp outside acceptable range");
+                    LoggingManager.LogWarning(nameof(DoubleRatchet), $"Message timestamp validation failed: current={currentTime}, message={encryptedMessage.Timestamp}");
+                    return (null, null);
                 }
 
                 // Derive the message key
@@ -165,6 +159,8 @@ namespace E2EELibrary.Encryption
 
                 if (dhRatchetNeeded)
                 {
+                    LoggingManager.LogInformation(nameof(DoubleRatchet), "DH ratchet step needed");
+
                     // Perform DH ratchet step
                     byte[] dhOutput = X3DHExchange.X3DHKeyExchange(
                         encryptedMessage.SenderDHKey, session.DHRatchetKeyPair.privateKey);
@@ -184,7 +180,8 @@ namespace E2EELibrary.Encryption
                         receivingChainKey: newChainKey,
                         messageNumber: session.MessageNumber,
                         sessionId: session.SessionId,
-                        recentlyProcessedIds: session.RecentlyProcessedIds
+                        recentlyProcessedIds: session.RecentlyProcessedIds,
+                        processedMessageNumbers: session.ProcessedMessageNumbers
                     );
 
                     // Derive message key from new chain
@@ -193,7 +190,8 @@ namespace E2EELibrary.Encryption
 
                     // Update the receiving chain key
                     updatedSession = updatedSession.WithUpdatedParameters(
-                        newReceivingChainKey: updatedChainKey
+                        newReceivingChainKey: updatedChainKey,
+                        newProcessedMessageNumber: encryptedMessage.MessageNumber
                     );
                 }
                 else
@@ -205,7 +203,8 @@ namespace E2EELibrary.Encryption
 
                     // Update the receiving chain key
                     updatedSession = updatedSession.WithUpdatedParameters(
-                        newReceivingChainKey: updatedChainKey
+                        newReceivingChainKey: updatedChainKey,
+                        newProcessedMessageNumber: encryptedMessage.MessageNumber
                     );
                 }
 
@@ -217,6 +216,18 @@ namespace E2EELibrary.Encryption
                     byte[] plaintext = AES.AESDecrypt(
                         encryptedMessage.Ciphertext, secureMessageKey.Value, encryptedMessage.Nonce);
 
+                    if (plaintext == null || plaintext.Length == 0)
+                    {
+                        LoggingManager.LogWarning(nameof(DoubleRatchet), "Decryption produced empty result");
+                        return (null, null);
+                    }
+
+                    if (!Helpers.IsValidUtf8(plaintext))
+                    {
+                        LoggingManager.LogWarning(nameof(DoubleRatchet), "Decrypted message is not valid UTF-8");
+                        return (null, null);
+                    }
+
                     // Convert to string
                     string decryptedMessage = Encoding.UTF8.GetString(plaintext);
 
@@ -227,39 +238,26 @@ namespace E2EELibrary.Encryption
                 }
                 catch (CryptographicException ex)
                 {
-                    // Specific handling for decryption failures
-                    throw new CryptographicException("Message decryption failed: authentication tag verification failed", ex);
+                    // Log the specific cryptographic error
+                    LoggingManager.LogError(nameof(DoubleRatchet), $"Decryption failed: {ex.Message}");
+                    return (null, null);
                 }
                 finally
                 {
                     // Clean up sensitive data
-                    if (secureMessageKey.Value != null)
-                        SecureMemory.SecureClear(secureMessageKey.Value);
+                    SecureMemory.SecureClear(messageKey);
                 }
-            }
-            catch (CryptographicException ex)
-            {
-                // Log specific cryptographic failures with details but return generic result
-                // In a production environment, this should use a proper logging framework
-                LoggingManager.LogError(nameof(DoubleRatchet), $"Cryptographic failure during message decryption: {ex.Message}");
-                return (null, null);
-            }
-            catch (SecurityException ex)
-            {
-                // Log security violations separately
-                LoggingManager.LogWarning(nameof(DoubleRatchet), $"Security violation during message processing: {ex.Message}");
-                return (null, null);
             }
             catch (Exception ex)
             {
-                // Generic exception handler as last resort
-                LoggingManager.LogError(nameof(DoubleRatchet), $"Unexpected error in Double Ratchet decryption: {ex.Message}");
+                // Log the error but don't expose exception details to caller
+                LoggingManager.LogError(nameof(DoubleRatchet), $"Error during decryption: {ex.Message}");
                 return (null, null);
             }
         }
 
         /// <summary>
-        /// Asynchronously decrypts a message using the Double Ratchet algorithm with enhanced security and thread safety
+        /// Asynchronously decrypts a message using the Double Ratchet algorithm.
         /// </summary>
         /// <param name="session">Current Double Ratchet session</param>
         /// <param name="encryptedMessage">Encrypted message</param>
@@ -268,12 +266,11 @@ namespace E2EELibrary.Encryption
             DoubleRatchetDecryptAsync(DoubleRatchetSession session, EncryptedMessage encryptedMessage)
         {
             // Basic parameter validation
-            if (session == null)
-                throw new ArgumentNullException(nameof(session));
-            if (encryptedMessage == null)
-                throw new ArgumentNullException(nameof(encryptedMessage));
+            ArgumentNullException.ThrowIfNull(session);
+            ArgumentNullException.ThrowIfNull(encryptedMessage);
+
             if (encryptedMessage.Ciphertext == null || encryptedMessage.Nonce == null || encryptedMessage.SenderDHKey == null)
-                throw new ArgumentException("Message is missing required fields");
+                throw new ArgumentException("Message is missing required fields", nameof(encryptedMessage));
 
             // Get a lock for this specific session to ensure thread safety
             var sessionLock = GetSessionLock(session.SessionId);
@@ -306,7 +303,7 @@ namespace E2EELibrary.Encryption
         }
 
         /// <summary>
-        /// Removes session locks that haven't been used recently to prevent memory leaks
+        /// Frees session locks that haven't been used in over 10 minutes.
         /// </summary>
         private static void CleanupUnusedLocks()
         {
@@ -316,65 +313,44 @@ namespace E2EELibrary.Encryption
                 long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
                 // Find locks that haven't been used in the last 10 minutes
-                TimeSpan inactivityThreshold = TimeSpan.FromMinutes(10);
-                long oldestAllowedTimestamp = currentTime - (long)inactivityThreshold.TotalMilliseconds;
+                long cutoff = currentTime - (long)TimeSpan.FromMinutes(10).TotalMilliseconds;
 
                 // Find inactive locks (limited to 100 at a time to avoid long operations)
-                var inactiveLockIds = _lockLastUsed
-                    .Where(pair => pair.Value < oldestAllowedTimestamp)
-                    .Select(pair => pair.Key)
+                var expired = _lockLastUsed
+                    .Where(e => e.Value < cutoff)
+                    .Select(e => e.Key)
                     .Take(100)
                     .ToList();
 
-                int removedCount = 0;
+                int removed = 0;
 
                 // Remove each inactive lock
-                foreach (var sessionId in inactiveLockIds)
+                foreach (var sessionId in expired)
                 {
                     // First try to remove the tracking timestamp
-                    if (_lockLastUsed.TryRemove(sessionId, out _))
+                    if (_lockLastUsed.TryRemove(sessionId, out _) &&
+                        _sessionLocks.TryRemove(sessionId, out var semaphore))
                     {
-                        // Then try to remove and dispose the actual lock
-                        if (_sessionLocks.TryRemove(sessionId, out var semaphore))
-                        {
-                            semaphore.Dispose();
-                            removedCount++;
-                        }
+                        semaphore.Dispose();
+                        removed++;
                     }
                 }
 
                 // Log cleanup results if any locks were removed
-                if (removedCount > 0)
-                {
+                if (removed > 0)
                     LoggingManager.LogInformation(
                         nameof(DoubleRatchet),
-                        $"Cleaned up {removedCount} unused session locks. {_sessionLocks.Count} active locks remain.");
-                }
+                        $"Cleaned {removed} expired session locks.");
             }
             catch (Exception ex)
             {
                 // Log but don't throw - this is a best-effort cleanup
-                LoggingManager.LogWarning(
-                    nameof(DoubleRatchet),
-                    $"Error cleaning up session locks: {ex.Message}");
+                LoggingManager.LogWarning(nameof(DoubleRatchet), $"Error during lock cleanup: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Schedule cleanup for locks
-        /// </summary>
-        private static void ScheduleCleanupIfNeeded()
-        {
-            // Only run cleanup if we have a significant number of locks
-            if (_sessionLocks.Count > 500)
-            {
-                // Run cleanup on a background thread to avoid blocking
-                Task.Run(CleanupUnusedLocks);
-            }
-        }
-
-        /// <summary>
-        /// Gets the session lock semaphore
+        /// Gets or creates a per-session semaphore lock.
         /// </summary>
         /// <param name="sessionId"></param>
         /// <returns></returns>

@@ -5,7 +5,7 @@ namespace E2EELibrary.Models
     /// <summary>
     /// Represents the state of a group messaging session
     /// </summary>
-    public class GroupSession
+    public class GroupSession : IDisposable
     {
         /// <summary>
         /// Group identifier
@@ -81,6 +81,15 @@ namespace E2EELibrary.Models
             }
 
             return clone;
+        }
+
+        /// <summary>
+        /// Cleanup secret keys
+        /// </summary>
+        public void Dispose()
+        {
+            SecureMemory.SecureClear(SenderKey);
+            SecureMemory.SecureClear(CreatorIdentityKey);
         }
     }
 }

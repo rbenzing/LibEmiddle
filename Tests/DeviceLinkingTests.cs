@@ -106,35 +106,35 @@ namespace E2EELibraryTests
             var scenarios = new List<(
                 Func<(byte[] publicKey, byte[] privateKey)> mainDeviceKeyPairFunc,
                 string scenarioDescription)>
-    {
-        // Scenario 1: Standard Ed25519 Key Generation
-        (() => KeyGenerator.GenerateEd25519KeyPair(), "Standard Ed25519 Key Generation"),
+            {
+                // Scenario 1: Standard Ed25519 Key Generation
+                (() => KeyGenerator.GenerateEd25519KeyPair(), "Standard Ed25519 Key Generation"),
 
-        // Scenario 2: Ed25519 to X25519 Conversion
-        // (This returns a key pair that is already converted and should be rejected.)
-        (() => {
-            var ed25519Pair = KeyGenerator.GenerateEd25519KeyPair();
-            var x25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.privateKey);
-            var x25519Public = Sodium.ScalarMultBase(x25519Private);
-            return (x25519Public, x25519Private);
-        }, "Ed25519 to X25519 Conversion"),
+                // Scenario 2: Ed25519 to X25519 Conversion
+                // (This returns a key pair that is already converted and should be rejected.)
+                (() => {
+                    var ed25519Pair = KeyGenerator.GenerateEd25519KeyPair();
+                    var x25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.privateKey);
+                    var x25519Public = Sodium.ScalarMultBase(x25519Private);
+                    return (x25519Public, x25519Private);
+                }, "Ed25519 to X25519 Conversion"),
 
-        // Scenario 3: Minimal Entropy Keys – valid key pair derived from an all-zero seed.
-        (() => {
-            var seed = new byte[32]; // 32 zero bytes
-            return KeyGenerator.GenerateEd25519KeyPairFromSeed(seed);
-        }, "Minimal Entropy Keys"),
+                // Scenario 3: Minimal Entropy Keys – valid key pair derived from an all-zero seed.
+                (() => {
+                    var seed = new byte[32]; // 32 zero bytes
+                    return KeyGenerator.GenerateEd25519KeyPairFromSeed(seed);
+                }, "Minimal Entropy Keys"),
 
-        // Scenario 4: Maximum Entropy Keys – valid key pair derived from a fixed high-entropy seed.
-        (() => {
-            var seed = Enumerable.Range(0, 32).Select(i => (byte)(i * 17)).ToArray();
-            return KeyGenerator.GenerateEd25519KeyPairFromSeed(seed);
-        }, "Maximum Entropy Keys"),
+                // Scenario 4: Maximum Entropy Keys – valid key pair derived from a fixed high-entropy seed.
+                (() => {
+                    var seed = Enumerable.Range(0, 32).Select(i => (byte)(i * 17)).ToArray();
+                    return KeyGenerator.GenerateEd25519KeyPairFromSeed(seed);
+                }, "Maximum Entropy Keys"),
 
-        // Scenario 5: X25519 Key Pair
-        // (This scenario uses a pure X25519 key pair and should be rejected.)
-        (() => KeyGenerator.GenerateX25519KeyPair(), "X25519 Key Pair")
-    };
+                // Scenario 5: X25519 Key Pair
+                // (This scenario uses a pure X25519 key pair and should be rejected.)
+                (() => KeyGenerator.GenerateX25519KeyPair(), "X25519 Key Pair")
+            };
 
             foreach (var (mainDeviceKeyPairFunc, scenarioDescription) in scenarios)
             {

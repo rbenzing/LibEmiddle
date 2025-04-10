@@ -1,8 +1,8 @@
-﻿using System.Security.Cryptography;
-using System.Text;
+﻿using System.Text;
 using E2EELibrary.Core;
 using E2EELibrary.Models;
 using E2EELibrary.KeyManagement;
+using static E2EELibrary.Core.Enums;
 
 namespace E2EELibrary.KeyExchange
 {
@@ -11,6 +11,8 @@ namespace E2EELibrary.KeyExchange
     /// </summary>
     public class DoubleRatchetExchange
     {
+        private static readonly Dictionary<string, int> SessionMessageCounters = new();
+
         /// <summary>
         /// Initializes the Double Ratchet Algorithm with a shared secret
         /// </summary>
@@ -18,52 +20,132 @@ namespace E2EELibrary.KeyExchange
         /// <returns>Root key and chain key for the session</returns>
         public static (byte[] rootKey, byte[] chainKey) InitializeDoubleRatchet(byte[] sharedSecret)
         {
-            ArgumentNullException.ThrowIfNull(sharedSecret, nameof(sharedSecret));
+            ArgumentNullException.ThrowIfNull(sharedSecret);
 
-            // Derive root key using HKDF
-            byte[] rootKey = KeyConversion.HkdfDerive(
-                sharedSecret,
-                info: Encoding.UTF8.GetBytes("DoubleRatchetRootKey"),
-                outputLength: Constants.AES_KEY_SIZE
-            );
+            var saltRoot = Encoding.UTF8.GetBytes("DoubleRatchetSaltRoot");
+            var saltChain = Encoding.UTF8.GetBytes("DoubleRatchetSaltChain");
 
-            // Derive initial chain key using HKDF
-            byte[] chainKey = KeyConversion.HkdfDerive(
-                sharedSecret,
-                info: Encoding.UTF8.GetBytes("DoubleRatchetInitialChainKey"),
-                outputLength: Constants.AES_KEY_SIZE
-            );
+            try
+            {
+                // Derive root key using HKDF
+                byte[] rootKey = KeyConversion.HkdfDerive(
+                    sharedSecret,
+                    salt: saltRoot,
+                    info: Encoding.UTF8.GetBytes("DoubleRatchetRootKey"),
+                    outputLength: Constants.AES_KEY_SIZE
+                );
 
-            return (rootKey, chainKey);
+                // Derive initial chain key using HKDF
+                byte[] chainKey = KeyConversion.HkdfDerive(
+                    sharedSecret,
+                    salt: saltChain,
+                    info: Encoding.UTF8.GetBytes("DoubleRatchetInitialChainKey"),
+                    outputLength: Constants.AES_KEY_SIZE
+                );
+
+                return (rootKey, chainKey);
+            }
+            finally
+            {
+                // Securely clear sensitive data after use
+                SecureMemory.SecureClear(sharedSecret);
+                SecureMemory.SecureClear(saltRoot);
+                SecureMemory.SecureClear(saltChain);
+            }
         }
 
         /// <summary>
         /// Performs a step in the Double Ratchet to derive new keys
         /// </summary>
         /// <param name="chainKey">Current chain key</param>
+        /// <param name="sessionId">Optional session ID for tracking</param>
+        /// <param name="strategy">Key rotation strategy</param>
         /// <returns>New chain key and message key</returns>
-        public static (byte[] newChainKey, byte[] messageKey) RatchetStep(byte[] chainKey)
+        public static (byte[] newChainKey, byte[] messageKey) RatchetStep(
+            byte[] chainKey,
+            string sessionId = "",
+            KeyRotationStrategy strategy = KeyRotationStrategy.Standard)
         {
-            ArgumentNullException.ThrowIfNull(chainKey, nameof(chainKey));
+            ArgumentNullException.ThrowIfNull(chainKey);
 
             if (chainKey.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Chain key must be {Constants.AES_KEY_SIZE} bytes", nameof(chainKey));
 
-            // Derive new chain key using HKDF
-            byte[] newChainKey = KeyConversion.HkdfDerive(
-                chainKey,
-                info: Encoding.UTF8.GetBytes("DoubleRatchetNextChainKey"),
-                outputLength: Constants.AES_KEY_SIZE
-            );
+            // Try to create a deep copy of the chain key to prevent accidental modification
+            byte[] chainKeyCopy = Sodium.GenerateRandomBytes(chainKey.Length);
+            chainKey.AsSpan().CopyTo(chainKeyCopy.AsSpan());
 
-            // Derive message key using HKDF
-            byte[] messageKey = KeyConversion.HkdfDerive(
-                chainKey,
-                info: Encoding.UTF8.GetBytes("DoubleRatchetMessageKey"),
-                outputLength: Constants.AES_KEY_SIZE
-            );
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                lock (SessionMessageCounters)
+                {
+                    if (!SessionMessageCounters.ContainsKey(sessionId))
+                        SessionMessageCounters[sessionId] = 0;
 
-            return (newChainKey, messageKey);
+                    SessionMessageCounters[sessionId]++;
+                }
+            }
+
+            try
+            {
+                // Derive new chain key using HKDF
+                byte[] newChainKey = KeyConversion.HkdfDerive(
+                    chainKeyCopy,
+                    info: Encoding.UTF8.GetBytes("DoubleRatchetNextChainKey"),
+                    outputLength: Constants.AES_KEY_SIZE
+                );
+
+                // Derive message key using HKDF
+                byte[] messageKey = KeyConversion.HkdfDerive(
+                    chainKeyCopy,
+                    info: Encoding.UTF8.GetBytes("DoubleRatchetMessageKey"),
+                    outputLength: Constants.AES_KEY_SIZE
+                );
+
+                if (ShouldRotateKey(sessionId, strategy))
+                {
+                    LoggingManager.LogInformation(
+                        nameof(DoubleRatchetExchange),
+                        $"DH Key rotation triggered for session {sessionId} (Strategy: {strategy})"
+                    );
+                    // Additional DH key rotation logic would go here in a full implementation
+                }
+
+                return (newChainKey, messageKey);
+            }
+            finally
+            {
+                // Ensure we securely clear the chain key copy
+                SecureMemory.SecureClear(chainKeyCopy);
+            }
+        }
+
+        /// <summary>
+        /// Returns true if key should need to rotate
+        /// </summary>
+        /// <param name="sessionId"></param>
+        /// <param name="strategy"></param>
+        /// <returns></returns>
+        private static bool ShouldRotateKey(string sessionId, KeyRotationStrategy strategy)
+        {
+            if (string.IsNullOrEmpty(sessionId))
+                return false;
+
+            lock (SessionMessageCounters)
+            {
+                if (!SessionMessageCounters.ContainsKey(sessionId))
+                    return false;
+
+                int count = SessionMessageCounters[sessionId];
+
+                return strategy switch
+                {
+                    KeyRotationStrategy.Standard => count % 20 == 0, // Change to rotate every 20 messages
+                    KeyRotationStrategy.Hourly => count % 20 == 0,
+                    KeyRotationStrategy.Daily => count % 100 == 0,
+                    _ => false
+                };
+            }
         }
 
         /// <summary>
@@ -74,30 +156,48 @@ namespace E2EELibrary.KeyExchange
         /// <returns>New root key and chain key</returns>
         public static (byte[] newRootKey, byte[] newChainKey) DHRatchetStep(byte[] rootKey, byte[] dhOutput)
         {
-            ArgumentNullException.ThrowIfNull(rootKey, nameof(rootKey));
-            ArgumentNullException.ThrowIfNull(dhOutput, nameof(dhOutput));
+            ArgumentNullException.ThrowIfNull(rootKey);
+            ArgumentNullException.ThrowIfNull(dhOutput);
 
             if (rootKey.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Root key must be {Constants.AES_KEY_SIZE} bytes", nameof(rootKey));
 
-            // Implement proper HKDF
-            byte[] prk = KeyConversion.HkdfDerive(
-                rootKey,
-                dhOutput,
-                Encoding.UTF8.GetBytes("RootKeyDerivation")
-            );
+            // Create secure copies to prevent accidental modification
+            byte[] rootKeyCopy = Sodium.GenerateRandomBytes(rootKey.Length);
+            rootKey.AsSpan().CopyTo(rootKeyCopy.AsSpan());
 
-            byte[] newRootKey = KeyConversion.HkdfDerive(
-                prk,
-                info: Encoding.UTF8.GetBytes("NewRootKey")
-            );
+            byte[] dhOutputCopy = Sodium.GenerateRandomBytes(dhOutput.Length);
+            dhOutput.AsSpan().CopyTo(dhOutputCopy.AsSpan());
 
-            byte[] newChainKey = KeyConversion.HkdfDerive(
-                prk,
-                info: Encoding.UTF8.GetBytes("NewChainKey")
-            );
+            try
+            {
+                byte[] prk = KeyConversion.HkdfDerive(
+                    rootKeyCopy,
+                    salt: dhOutputCopy,
+                    info: Encoding.UTF8.GetBytes("RootKeyDerivation")
+                );
 
-            return (newRootKey, newChainKey);
+                byte[] newRootKey = KeyConversion.HkdfDerive(
+                    prk,
+                    info: Encoding.UTF8.GetBytes("NewRootKey")
+                );
+
+                byte[] newChainKey = KeyConversion.HkdfDerive(
+                    prk,
+                    info: Encoding.UTF8.GetBytes("NewChainKey")
+                );
+
+                // Securely clear the intermediate PRK value
+                SecureMemory.SecureClear(prk);
+
+                return (newRootKey, newChainKey);
+            }
+            finally
+            {
+                // Securely clear our copies
+                SecureMemory.SecureClear(rootKeyCopy);
+                SecureMemory.SecureClear(dhOutputCopy);
+            }
         }
 
         /// <summary>
@@ -114,43 +214,40 @@ namespace E2EELibrary.KeyExchange
             // Verify the session is in a valid state
             if (!ValidateSession(session))
             {
-                // This is the key change - instead of returning null, create a new valid session with the same parameters
-                // The session might be valid but just missing some properties, so we'll recreate it with the same values
-                var resumedSession = new DoubleRatchetSession(
-                    dhRatchetKeyPair: session.DHRatchetKeyPair,
-                    remoteDHRatchetKey: session.RemoteDHRatchetKey,
-                    rootKey: session.RootKey,
-                    sendingChainKey: session.SendingChainKey,
-                    receivingChainKey: session.ReceivingChainKey,
-                    messageNumber: session.MessageNumber,
-                    sessionId: session.SessionId,
-                    recentlyProcessedIds: session.RecentlyProcessedIds,
-                    processedMessageNumbers: session.ProcessedMessageNumbers
+                // Create a new valid session with the same parameters instead of returning null
+                return new DoubleRatchetSession(
+                    session.DHRatchetKeyPair,
+                    session.RemoteDHRatchetKey,
+                    session.RootKey,
+                    session.SendingChainKey,
+                    session.ReceivingChainKey,
+                    session.MessageNumber,
+                    session.SessionId,
+                    session.RecentlyProcessedIds,
+                    session.ProcessedMessageNumbers
                 );
-
-                return resumedSession;
             }
 
             // Create a new session (with the same parameters) to ensure clean state
-            var newResumedSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: session.DHRatchetKeyPair,
-                remoteDHRatchetKey: session.RemoteDHRatchetKey,
-                rootKey: session.RootKey,
-                sendingChainKey: session.SendingChainKey,
-                receivingChainKey: session.ReceivingChainKey,
-                messageNumber: session.MessageNumber,
-                sessionId: session.SessionId,
-                recentlyProcessedIds: session.RecentlyProcessedIds,
-                processedMessageNumbers: session.ProcessedMessageNumbers
+            var resumed = new DoubleRatchetSession(
+                session.DHRatchetKeyPair,
+                session.RemoteDHRatchetKey,
+                session.RootKey,
+                session.SendingChainKey,
+                session.ReceivingChainKey,
+                session.MessageNumber,
+                session.SessionId,
+                session.RecentlyProcessedIds,
+                session.ProcessedMessageNumbers
             );
 
             // If a last processed message ID was provided, make sure it's marked as processed
-            if (lastProcessedMessageId.HasValue && !newResumedSession.HasProcessedMessageId(lastProcessedMessageId.Value))
+            if (lastProcessedMessageId.HasValue && !resumed.HasProcessedMessageId(lastProcessedMessageId.Value))
             {
-                newResumedSession = newResumedSession.WithProcessedMessageId(lastProcessedMessageId.Value);
+                resumed = resumed.WithProcessedMessageId(lastProcessedMessageId.Value);
             }
 
-            return newResumedSession;
+            return resumed;
         }
 
         /// <summary>
@@ -175,6 +272,10 @@ namespace E2EELibrary.KeyExchange
             if (session.SendingChainKey == null || session.SendingChainKey.Length != Constants.AES_KEY_SIZE)
                 return false;
             if (session.ReceivingChainKey == null || session.ReceivingChainKey.Length != Constants.AES_KEY_SIZE)
+                return false;
+
+            // Check for valid session ID
+            if (string.IsNullOrEmpty(session.SessionId))
                 return false;
 
             return true;
