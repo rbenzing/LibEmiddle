@@ -123,7 +123,8 @@ namespace E2EELibrary.Models
             byte[]? newReceivingChainKey = null,
             int? newMessageNumber = null,
             Guid? newProcessedMessageId = null,
-            int? newProcessedMessageNumber = null)
+            int? newProcessedMessageNumber = null,
+            string? newSessionId = null)
         {
             // Create new collections for tracking IDs
             var updatedMessageIds = new List<Guid>(_recentlyProcessedIds);
@@ -155,7 +156,7 @@ namespace E2EELibrary.Models
                 newSendingChainKey ?? SendingChainKey,
                 newReceivingChainKey ?? ReceivingChainKey,
                 newMessageNumber ?? MessageNumber,
-                SessionId,
+                newSessionId ?? SessionId,
                 updatedMessageIds,
                 updatedMessageNumbers
             );
