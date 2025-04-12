@@ -298,10 +298,10 @@ namespace LibEmiddle.Tests.Unit
 
             // Act - Simulate concurrent message sending
             const int messageCount = 20;
-            Dictionary<int, string> aliceMessages = new Dictionary<int, string>();
-            Dictionary<int, EncryptedGroupMessage> aliceEncryptedMessages = new Dictionary<int, EncryptedGroupMessage>();
-            Dictionary<int, string> bobMessages = new Dictionary<int, string>();
-            Dictionary<int, EncryptedGroupMessage> bobEncryptedMessages = new Dictionary<int, EncryptedGroupMessage>();
+            ConcurrentDictionary<int, string> aliceMessages = new ConcurrentDictionary<int, string>();
+            ConcurrentDictionary<int, EncryptedGroupMessage> aliceEncryptedMessages = new ConcurrentDictionary<int, EncryptedGroupMessage>();
+            ConcurrentDictionary<int, string> bobMessages = new ConcurrentDictionary<int, string>();
+            ConcurrentDictionary<int, EncryptedGroupMessage> bobEncryptedMessages = new ConcurrentDictionary<int, EncryptedGroupMessage>();
 
             // Create thread-safe collections for results
             var exceptions = new ConcurrentBag<Exception>();
