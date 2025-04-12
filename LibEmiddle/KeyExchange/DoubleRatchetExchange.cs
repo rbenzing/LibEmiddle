@@ -141,8 +141,8 @@ namespace E2EELibrary.KeyExchange
                 return strategy switch
                 {
                     KeyRotationStrategy.Standard => count % 20 == 0, // Change to rotate every 20 messages
-                    KeyRotationStrategy.Hourly => count % 20 == 0,
-                    KeyRotationStrategy.Daily => count % 100 == 0,
+                    KeyRotationStrategy.Hourly => count % 1 == 0, // Change to rotate every 1 hour
+                    KeyRotationStrategy.Daily => count % 7 == 0, // Change to rotate every 7 days
                     _ => false
                 };
             }
