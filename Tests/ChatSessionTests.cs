@@ -5,6 +5,7 @@ using LibEmiddle.KeyExchange;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Models;
+using LibEmiddle.Messaging.Chat;
 
 namespace LibEmiddle.Tests.Unit
 {
