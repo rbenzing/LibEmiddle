@@ -1,8 +1,8 @@
-﻿using System.Diagnostics;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using LibEmiddle.Domain;
 
-namespace E2EELibrary.Core
+namespace LibEmiddle.Core
 {
     /// <summary>
     /// Provides a native interface to the libsodium cryptographic library.

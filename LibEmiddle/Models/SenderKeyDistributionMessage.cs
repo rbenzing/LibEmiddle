@@ -1,4 +1,4 @@
-﻿namespace E2EELibrary.Models
+﻿namespace LibEmiddle.Models
 {
     /// <summary>
     /// Sender key distribution message for group messaging

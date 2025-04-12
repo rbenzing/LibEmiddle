@@ -1,16 +1,17 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Text;
 using System.IO;
 using System.Text.Json;
 using System.Collections.Generic;
 using System.Security.Cryptography;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.Models;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.Core;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Core;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.Models;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class SessionPersistenceTests
@@ -287,8 +288,8 @@ namespace E2EELibraryTests
                 RootKey = Convert.ToBase64String(originalSession.RootKey),
                 SendingChainKey = Convert.ToBase64String(originalSession.SendingChainKey),
                 ReceivingChainKey = Convert.ToBase64String(originalSession.ReceivingChainKey),
-                MessageNumber = originalSession.MessageNumber,
-                SessionId = originalSession.SessionId,
+                originalSession.MessageNumber,
+                originalSession.SessionId,
                 ProcessedMessageIds = new[] { Guid.NewGuid(), Guid.NewGuid() }
             };
 

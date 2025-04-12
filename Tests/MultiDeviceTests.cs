@@ -2,20 +2,20 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using E2EELibrary;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.MultiDevice;
-using E2EELibrary.Core;
-using E2EELibrary.Communication;
-using E2EELibrary.Encryption;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.Models;
+using LibEmiddle.MultiDevice;
+using LibEmiddle.Core;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Models;
 using System.Linq;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Diagnostics;
+using LibEmiddle.API;
+using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class MultiDeviceTests
@@ -225,11 +225,11 @@ namespace E2EELibraryTests
                     data = Convert.ToBase64String(originalSyncData),
                     signature = Convert.ToBase64String(signature),
                     timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    protocolVersion = "E2EELibrary/v1.0"
+                    protocolVersion = "LibEmiddle/v1.0"
                 };
 
                 // Serialize to JSON string
-                string jsonMessage = System.Text.Json.JsonSerializer.Serialize(syncMessage);
+                string jsonMessage = JsonSerializer.Serialize(syncMessage);
                 Trace.TraceWarning($"Serialized JSON message, length: {jsonMessage.Length}");
                 Trace.TraceWarning($"JSON content: {jsonMessage}");
 
@@ -268,7 +268,7 @@ namespace E2EELibraryTests
                 Trace.TraceWarning($"Decrypted JSON successfully: {decryptedJson}");
 
                 // Parse the decrypted JSON
-                var parsedMessage = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(decryptedJson);
+                var parsedMessage = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(decryptedJson);
 
                 // Extract and verify the fields
                 string senderKeyBase64 = parsedMessage["senderPublicKey"].GetString();
@@ -537,11 +537,11 @@ namespace E2EELibraryTests
                 SenderPublicKey = mainDeviceKeyPair.publicKey,
                 Data = syncData,
                 Signature = MessageSigning.SignMessage(syncData, mainDeviceKeyPair.privateKey),
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (6 * 60 * 1000) // 6 minutes old
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 6 * 60 * 1000 // 6 minutes old
             };
 
             // Serialize
-            string json = System.Text.Json.JsonSerializer.Serialize(new
+            string json = JsonSerializer.Serialize(new
             {
                 senderPublicKey = Convert.ToBase64String(syncMessage.SenderPublicKey),
                 data = Convert.ToBase64String(syncMessage.Data),

@@ -1,9 +1,9 @@
-﻿using System;
-using System.Text;
-using E2EELibrary.Communication;
-using E2EELibrary.Core;
+﻿using System.Text;
+using LibEmiddle.Core;
+using LibEmiddle.Domain;
+using LibEmiddle.Messaging.Transport;
 
-namespace E2EELibrary.Models
+namespace LibEmiddle.Models
 {
     /// <summary>
     /// Message indicating a device has been revoked.
@@ -100,7 +100,7 @@ namespace E2EELibrary.Models
         /// <returns>True if the version is compatible</returns>
         private bool IsValidProtocolVersion(string version)
         {
-            // Check format (e.g., "E2EELibrary/v1.0")
+            // Check format (e.g., "LibEmiddle/v1.0")
             string[] parts = version.Split('/');
             if (parts.Length != 2 || !parts[1].StartsWith("v"))
                 return false;

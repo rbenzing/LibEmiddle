@@ -1,5 +1,4 @@
-﻿
-namespace E2EELibrary.Models
+﻿namespace LibEmiddle.Models
 {
     /// <summary>
     /// Enhanced EncryptedSenderKeyDistribution class with additional security features

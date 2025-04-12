@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using E2EELibrary.Models;
+using LibEmiddle.Domain;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class MessageDeserializationTests
@@ -261,7 +261,7 @@ namespace E2EELibraryTests
                 MessageNumber = 42,
                 SenderDHKey = new byte[] { 9, 10, 11, 12 },
                 // Set timestamp to 10 minutes in the future
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + (10 * 60 * 1000)
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 10 * 60 * 1000
             };
 
             // Act

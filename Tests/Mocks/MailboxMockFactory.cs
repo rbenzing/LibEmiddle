@@ -2,10 +2,10 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Moq;
-using E2EELibrary.Models;
-using E2EELibrary.Communication.Abstract;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Domain;
 
-namespace E2EELibraryTests.Mocks
+namespace LibEmiddle.Tests.Unit.Mocks
 {
     /// <summary>
     /// Provides factory methods for creating mock mailbox transports.

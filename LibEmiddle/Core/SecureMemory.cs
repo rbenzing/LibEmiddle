@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
-namespace E2EELibrary.Core
+namespace LibEmiddle.Core
 {
     /// <summary>
     /// Provides utilities for securely handling sensitive data in memory.

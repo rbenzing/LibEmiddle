@@ -1,14 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using E2EELibrary;
-using E2EELibrary.GroupMessaging;
-using E2EELibrary.Models;
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Diagnostics;
+using LibEmiddle.API;
+using LibEmiddle.Messaging.Group;
+using LibEmiddle.Models;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class LargeGroupMessagingTests
@@ -304,8 +304,8 @@ namespace E2EELibraryTests
             Dictionary<int, EncryptedGroupMessage> bobEncryptedMessages = new Dictionary<int, EncryptedGroupMessage>();
 
             // Create thread-safe collections for results
-            var exceptions = new System.Collections.Concurrent.ConcurrentBag<Exception>();
-            var decryptionResults = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
+            var exceptions = new ConcurrentBag<Exception>();
+            var decryptionResults = new ConcurrentDictionary<int, string>();
 
             // Create the messages in advance
             for (int i = 0; i < messageCount; i++)

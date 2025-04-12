@@ -2,7 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace E2EELibrary.Core
+namespace LibEmiddle.Core
 {
     /// <summary>
     /// Centralized logging manager for the E2EE library

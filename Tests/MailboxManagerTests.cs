@@ -6,15 +6,16 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
-using E2EELibrary.Communication;
-using E2EELibrary.Communication.Abstract;
-using E2EELibrary.Core;
-using E2EELibrary.Models;
-using E2EELibrary.KeyManagement;
+using LibEmiddle.Core;
+using LibEmiddle.Models;
 using System.Linq;
 using System.Diagnostics;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.Messaging.Transport;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class MailboxManagerTests

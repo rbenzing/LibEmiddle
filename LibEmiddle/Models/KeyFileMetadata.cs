@@ -1,4 +1,4 @@
-﻿namespace E2EELibrary.Models
+﻿namespace LibEmiddle.Models
 {
     /// <summary>
     /// Metadata class for key files to support salt rotation

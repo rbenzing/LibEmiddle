@@ -1,12 +1,11 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.IO;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
-using E2EELibrary;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.Core;
+using LibEmiddle.API;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class KeyManagementTests
@@ -44,8 +43,8 @@ namespace E2EELibraryTests
             var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Act
-            string base64Key = E2EELibrary.KeyManagement.KeyPair.ExportKeyToBase64(publicKey);
-            byte[] importedKey = E2EELibrary.KeyManagement.KeyPair.ImportKeyFromBase64(base64Key);
+            string base64Key = KeyPair.ExportKeyToBase64(publicKey);
+            byte[] importedKey = KeyPair.ImportKeyFromBase64(base64Key);
 
             // Assert
             CollectionAssert.AreEqual(publicKey, importedKey);
@@ -105,7 +104,7 @@ namespace E2EELibraryTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(System.IO.FileNotFoundException))]
+        [ExpectedException(typeof(FileNotFoundException))]
         public void LoadKeyFromFile_WithNonExistentFile_ShouldThrowException()
         {
             // Act - should throw FileNotFoundException
@@ -113,7 +112,7 @@ namespace E2EELibraryTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(System.Security.Cryptography.CryptographicException))]
+        [ExpectedException(typeof(CryptographicException))]
         public void LoadKeyFromFile_WithWrongPassword_ShouldThrowException()
         {
             // Arrange

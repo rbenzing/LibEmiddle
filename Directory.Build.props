@@ -1,0 +1,65 @@
+﻿<Project>
+  <!-- General properties for all projects in the solution -->
+  <PropertyGroup>
+    <Product>LibEmiddle</Product>
+    <Copyright>Copyright © $(Company) $([System.DateTime]::Now.Year)</Copyright>
+    <Authors>Russell Benzing</Authors>
+    <Company>Russell Benzing Inc</Company>
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <VersionSuffix></VersionSuffix>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/rbenzing/LibEmiddle</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/rbenzing/LibEmiddle.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>encryption;e2ee;security;cryptography;libsodium</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <!-- Common build settings -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS1591</WarningsNotAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn> <!-- Suppress XML doc warnings -->
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <Features>strict</Features>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+  <!-- SourceLink Configuration -->
+  <PropertyGroup>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.pdb</AllowedOutputExtensionsInPackageBuildOutputFolder>
+  </PropertyGroup>
+
+  <!-- Deterministic build settings for CI environments -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DeterministicSourcePaths>true</DeterministicSourcePaths>
+  </PropertyGroup>
+
+  <!-- Platform-specific definitions -->
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+    <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux)))' == 'true'">
+    <DefineConstants>$(DefineConstants);LINUX</DefineConstants>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))' == 'true'">
+    <DefineConstants>$(DefineConstants);OSX</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Import custom build properties if present -->
+  <Import Project="$(MSBuildThisFileDirectory)build\Common.props" Condition="Exists('$(MSBuildThisFileDirectory)build\Common.props')" />
+  <Import Project="$(MSBuildThisFileDirectory)build\PackageVersions.props" Condition="Exists('$(MSBuildThisFileDirectory)build\PackageVersions.props')" />
+</Project>

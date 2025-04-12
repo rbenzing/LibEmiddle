@@ -1,11 +1,12 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Text;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
-using E2EELibrary;
-using E2EELibrary.Encryption;
+using LibEmiddle.API;
+using LibEmiddle.Crypto;
+using LibEmiddle.Messaging.Group;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class PerformanceTests
@@ -135,7 +136,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var groupChatManager = new E2EELibrary.GroupMessaging.GroupChatManager(aliceKeyPair);
+            var groupChatManager = new GroupChatManager(aliceKeyPair);
             string groupId = "performance-test-group";
             groupChatManager.CreateGroup(groupId);
 
@@ -173,13 +174,13 @@ namespace E2EELibraryTests
             var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = E2EELibrary.KeyExchange.X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
-            var (rootKey, chainKey) = E2EELibrary.KeyExchange.DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            byte[] sharedSecret = KeyExchange.X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            var (rootKey, chainKey) = KeyExchange.DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             // Create a session ID that will be shared between Alice and Bob
             string sessionId = "alice-bob-session-" + Guid.NewGuid().ToString();
 
-            var aliceDRSession = new E2EELibrary.Models.DoubleRatchetSession(
+            var aliceDRSession = new LibEmiddle.Models.DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
                 remoteDHRatchetKey: bobKeyPair.publicKey,
                 rootKey: rootKey,
@@ -189,7 +190,7 @@ namespace E2EELibraryTests
                 sessionId: sessionId
             );
 
-            var bobDRSession = new E2EELibrary.Models.DoubleRatchetSession(
+            var bobDRSession = new LibEmiddle.Models.DoubleRatchetSession(
                 dhRatchetKeyPair: bobKeyPair,
                 remoteDHRatchetKey: aliceKeyPair.publicKey,
                 rootKey: rootKey,

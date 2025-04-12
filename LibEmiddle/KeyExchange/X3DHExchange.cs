@@ -1,11 +1,12 @@
 ﻿using System.Text;
 using System.Security.Cryptography;
-using E2EELibrary.Core;
-using E2EELibrary.Models;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.Communication;
+using LibEmiddle.Core;
+using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.Models;
 
-namespace E2EELibrary.KeyExchange
+namespace LibEmiddle.KeyExchange
 {
     /// <summary>
     /// Implements the Extended Triple Diffie-Hellman (X3DH) key agreement protocol

@@ -1,12 +1,12 @@
 ﻿using System;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using E2EELibrary;
-using E2EELibrary.Encryption;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.GroupMessaging;
-using E2EELibrary.Models;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Models;
+using LibEmiddle.API;
+using LibEmiddle.Crypto;
+using LibEmiddle.Messaging.Group;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class IntegrationTests

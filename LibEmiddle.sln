@@ -5,9 +5,12 @@ VisualStudioVersion = 17.12.35527.113
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibEmiddle", "LibEmiddle\LibEmiddle.csproj", "{1ECBB23B-4685-4993-BF01-F6D9E37FE54B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibEmiddleTests", "Tests\LibEmiddleTests.csproj", "{86746BC1-8D65-4393-B407-E4C64910CA3A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibEmiddle.Tests.Unit", "Tests\LibEmiddle.Tests.Unit.csproj", "{86746BC1-8D65-4393-B407-E4C64910CA3A}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+	ProjectSection(SolutionItems) = preProject
+		Directory.Build.props = Directory.Build.props
+	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "runtimes", "runtimes", "{6F74C8D0-E8DE-43CF-9D0F-66D086406243}"
 EndProject
@@ -27,6 +30,12 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "native", "native", "{467D08
 		..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\Win32\Release\v143\dynamic\libsodium.dll = ..\..\Users\user\Downloads\libsodium-1.0.20-msvc\libsodium\Win32\Release\v143\dynamic\libsodium.dll
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibEmiddle.Abstractions", "LibEmiddle.Abstractions\LibEmiddle.Abstractions.csproj", "{4DB6D153-1DBC-4100-B18C-EB86594935C4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibEmiddle.Domain", "LibEmiddle.Domain\LibEmiddle.Domain.csproj", "{68101920-8E0C-4EE9-91E7-278192F1D6DD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{0E6A0267-3B5A-48C6-A90C-25974C9CFF34}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +50,14 @@ Global
 		{86746BC1-8D65-4393-B407-E4C64910CA3A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{86746BC1-8D65-4393-B407-E4C64910CA3A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{86746BC1-8D65-4393-B407-E4C64910CA3A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4DB6D153-1DBC-4100-B18C-EB86594935C4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4DB6D153-1DBC-4100-B18C-EB86594935C4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4DB6D153-1DBC-4100-B18C-EB86594935C4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4DB6D153-1DBC-4100-B18C-EB86594935C4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{68101920-8E0C-4EE9-91E7-278192F1D6DD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{68101920-8E0C-4EE9-91E7-278192F1D6DD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{68101920-8E0C-4EE9-91E7-278192F1D6DD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{68101920-8E0C-4EE9-91E7-278192F1D6DD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -52,6 +69,8 @@ Global
 		{3FF003CF-1253-45E4-8883-42CCA6CF2F90} = {6F74C8D0-E8DE-43CF-9D0F-66D086406243}
 		{4288914F-EDF0-4732-9463-A17364B57917} = {82453A83-141F-4BF4-8A39-7492E1C93820}
 		{467D088E-2C76-4DBE-9B1A-75BFC09BDA5F} = {3FF003CF-1253-45E4-8883-42CCA6CF2F90}
+		{4DB6D153-1DBC-4100-B18C-EB86594935C4} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{68101920-8E0C-4EE9-91E7-278192F1D6DD} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {C2ED0BBE-6E1F-4E59-9294-2ED1DA7D115C}

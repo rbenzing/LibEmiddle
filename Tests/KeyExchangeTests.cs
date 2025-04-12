@@ -1,13 +1,13 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Text;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
-using E2EELibrary;
-using E2EELibrary.Models;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.Core;
+using LibEmiddle.API;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Models;
+using LibEmiddle.Domain;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class KeyExchangeTests

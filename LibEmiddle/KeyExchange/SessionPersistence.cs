@@ -1,10 +1,11 @@
 ﻿using System.Security.Cryptography;
 using System.Text.Json;
-using E2EELibrary.Models;
-using E2EELibrary.Core;
-using E2EELibrary.Encryption;
+using LibEmiddle.Core;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.Models;
 
-namespace E2EELibrary.KeyExchange
+namespace LibEmiddle.KeyExchange
 {
     /// <summary>
     /// Provides functionality for persisting and resuming encryption sessions.

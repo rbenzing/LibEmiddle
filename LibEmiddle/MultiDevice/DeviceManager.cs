@@ -4,14 +4,14 @@ using System.Text;
 using System.Text.Json;
 using System.Security;
 using System.Security.Cryptography;
-using E2EELibrary.Core;
-using E2EELibrary.Communication;
-using E2EELibrary.Encryption;
-using E2EELibrary.Models;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.KeyManagement;
+using LibEmiddle.Core;
+using LibEmiddle.Models;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 
-namespace E2EELibrary.MultiDevice
+namespace LibEmiddle.MultiDevice
 {
     /// <summary>
     /// Multi-device session manager for syncing session states

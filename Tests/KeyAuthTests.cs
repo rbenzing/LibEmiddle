@@ -4,9 +4,10 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using E2EELibrary.Core;
+using LibEmiddle.Crypto;
+using LibEmiddle.Core;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class KeyAuthLoadTests
@@ -50,8 +51,7 @@ namespace E2EELibraryTests
         {
             // Arrange
             var keyPair = KeyAuth.GenerateKeyPair();
-            var largeMessage = new byte[1024 * 1024]; // 1MB message
-            new Random().NextBytes(largeMessage);
+            var largeMessage = SecureMemory.CreateSecureBuffer(1024 * 1024); // 1MB message
 
             // Act
             byte[] signature = KeyAuth.SignDetached(largeMessage, keyPair.PrivateKey);

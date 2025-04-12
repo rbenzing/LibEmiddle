@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
+using System;
 using System.Threading.Tasks;
 using System.Net.WebSockets;
 using System.Text;
@@ -6,15 +8,13 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Security;
 using System.Text.Json;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Moq;
-using E2EELibrary.Communication;
-using E2EELibrary.Models;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.Communication.Abstract;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Crypto;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Models;
+using LibEmiddle.Messaging.Transport;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class SecureWebSocketClientTests
@@ -236,7 +236,7 @@ namespace E2EELibraryTests
                 { "nonce", Convert.ToBase64String(new byte[]{4,5,6}) },
                 { "messageNumber", 1 },
                 { "senderDHKey", Convert.ToBase64String(new byte[]{7,8,9}) },
-                { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (6 * 60 * 1000) }
+                { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 6 * 60 * 1000 }
             };
             string json = JsonSerializer.Serialize(messageData);
             byte[] jsonBytes = Encoding.UTF8.GetBytes(json);

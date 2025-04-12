@@ -3,12 +3,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
-using E2EELibrary.Core;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.Models;
-using E2EELibrary.MultiDevice;
+using LibEmiddle.Core;
+using LibEmiddle.Domain;
+using LibEmiddle.MultiDevice;
+using LibEmiddle.Crypto;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class DeviceLinkingTests
@@ -230,11 +230,9 @@ namespace E2EELibraryTests
                 () => {
                     var randomMessage = new EncryptedMessage
                     {
-                        Ciphertext = new byte[originalMessage.Ciphertext.Length],
-                        Nonce = new byte[originalMessage.Nonce.Length]
+                        Ciphertext = SecureMemory.CreateSecureBuffer(originalMessage.Ciphertext.Length),
+                        Nonce = SecureMemory.CreateSecureBuffer(originalMessage.Nonce.Length)
                     };
-                    new Random().NextBytes(randomMessage.Ciphertext);
-                    new Random().NextBytes(randomMessage.Nonce);
                     return randomMessage;
                 }
             };

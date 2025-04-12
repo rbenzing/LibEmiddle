@@ -1,15 +1,15 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Text;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
 using System.Collections.Generic;
-using E2EELibrary;
-using E2EELibrary.Encryption;
-using E2EELibrary.Models;
-using E2EELibrary.Core;
 using System.Diagnostics;
+using LibEmiddle.Models;
+using LibEmiddle.API;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class EncryptionTests
@@ -153,7 +153,7 @@ namespace E2EELibraryTests
             tamperedMessage.Ciphertext[middlePosition] ^= 1; // Flip one bit
 
             // Act & Assert
-            Assert.ThrowsException<System.Security.Cryptography.CryptographicException>(() =>
+            Assert.ThrowsException<CryptographicException>(() =>
             {
                 LibEmiddleClient.DecryptMessage(tamperedMessage, key);
             }, "Tampered message should fail authentication");
@@ -275,7 +275,7 @@ namespace E2EELibraryTests
             byte[] nonce = NonceGenerator.GenerateNonce();
 
             // Act - Measure time for encryption and decryption
-            System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
+            Stopwatch stopwatch = new Stopwatch();
 
             stopwatch.Start();
             byte[] ciphertext = AES.AESEncrypt(largeData, key, nonce);

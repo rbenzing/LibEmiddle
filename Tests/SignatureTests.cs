@@ -1,10 +1,11 @@
 ﻿using System;
 using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using E2EELibrary;
-using E2EELibrary.Communication;
+using LibEmiddle.API;
+using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Core;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class SignatureTests
@@ -103,13 +104,8 @@ namespace E2EELibraryTests
         {
             // Arrange
             byte[] smallMessage = Encoding.UTF8.GetBytes("Small message");
-            byte[] mediumMessage = new byte[1024]; // 1KB
-            byte[] largeMessage = new byte[1024 * 10]; // 10KB
-
-            // Generate some sample data
-            Random random = new Random();
-            random.NextBytes(mediumMessage);
-            random.NextBytes(largeMessage);
+            byte[] mediumMessage = SecureMemory.CreateSecureBuffer(1024); // 1KB
+            byte[] largeMessage = SecureMemory.CreateSecureBuffer(1024 * 10); // 10KB
 
             var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
 

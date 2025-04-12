@@ -1,4 +1,4 @@
-﻿namespace E2EELibrary.Models
+﻿namespace LibEmiddle.Models
 {
     /// <summary>
     /// Public portion of X3DH key bundle, containing only public keys.

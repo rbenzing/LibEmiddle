@@ -1,5 +1,4 @@
-﻿
-namespace E2EELibrary.Models
+﻿namespace LibEmiddle.Models
 {
     /// <summary>
     /// Device link message for multi-device setups

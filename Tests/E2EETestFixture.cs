@@ -1,11 +1,11 @@
 ﻿using System;
 using System.IO;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using E2EELibrary;
-using E2EELibrary.Core;
+using LibEmiddle.Core;
 using System.Diagnostics;
+using LibEmiddle.API;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     /// <summary>
     /// Test class initialization and cleanup

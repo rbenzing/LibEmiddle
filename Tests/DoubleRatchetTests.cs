@@ -4,13 +4,14 @@ using System.Text;
 using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
-using E2EELibrary;
-using E2EELibrary.Encryption;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.Models;
-using E2EELibrary.Core;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Core;
+using LibEmiddle.API;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.Models;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class DoubleRatchetTests
@@ -148,7 +149,7 @@ namespace E2EELibraryTests
 
             // Set timestamp to 10 minutes in the past (beyond the 5 minute threshold)
             encrypted.MessageId = Guid.NewGuid();
-            encrypted.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (10 * 60 * 1000);
+            encrypted.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 10 * 60 * 1000;
             encrypted.SessionId = sessionId;
 
             // Act

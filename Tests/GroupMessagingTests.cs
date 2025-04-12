@@ -1,13 +1,13 @@
 ﻿using System;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Reflection;
-using E2EELibrary;
-using E2EELibrary.Core;
-using E2EELibrary.GroupMessaging;
+using LibEmiddle.Core;
 using System.Threading;
 using System.Diagnostics;
+using LibEmiddle.API;
+using LibEmiddle.Messaging.Group;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class GroupMessagingTests

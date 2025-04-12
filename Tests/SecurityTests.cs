@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using E2EELibrary;
-using E2EELibrary.Encryption;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.Models;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Models;
+using LibEmiddle.API;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class SecurityTests
@@ -128,10 +129,10 @@ namespace E2EELibraryTests
 
             // With our immutable implementation, the method returns null values for failed decryption
             var (resultSession1, resultMessage1) = DoubleRatchet.DoubleRatchetDecrypt(compromisedBobSession, savedEncryptedMessage1);
-            canDecryptMessage1 = (resultSession1 != null && resultMessage1 != null);
+            canDecryptMessage1 = resultSession1 != null && resultMessage1 != null;
 
             var (resultSession2, resultMessage2) = DoubleRatchet.DoubleRatchetDecrypt(compromisedBobSession, savedEncryptedMessage2);
-            canDecryptMessage2 = (resultSession2 != null && resultMessage2 != null);
+            canDecryptMessage2 = resultSession2 != null && resultMessage2 != null;
 
             // Assert
             // Check that legitimate recipients could decrypt messages
@@ -187,7 +188,7 @@ namespace E2EELibraryTests
             tamperedMessage.Ciphertext[middlePosition] ^= 1; // Flip one bit
 
             // Act & Assert
-            Assert.ThrowsException<System.Security.Cryptography.CryptographicException>(() =>
+            Assert.ThrowsException<CryptographicException>(() =>
             {
                 LibEmiddleClient.DecryptMessage(tamperedMessage, key);
             }, "Tampered message should fail authentication");

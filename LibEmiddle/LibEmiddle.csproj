@@ -18,8 +18,8 @@
 		<PackageTags>encryption;security;e2ee;double-ratchet;x3dh;messaging</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
-		<PackageProjectUrl>https://github.com/rbenzing/E2EELibrary</PackageProjectUrl>
-		<RepositoryUrl>https://github.com/rbenzing/E2EELibrary</RepositoryUrl>
+		<PackageProjectUrl>https://github.com/rbenzing/LibEmiddle</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/rbenzing/LibEmiddle</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PublishRepositoryUrl>true</PublishRepositoryUrl>
 		<EmbedUntrackedSources>true</EmbedUntrackedSources>
@@ -53,6 +53,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <EditorConfigFiles Remove=".editorconfig" />
+	  <ProjectReference Include="..\LibEmiddle.Abstractions\LibEmiddle.Abstractions.csproj" />
 	</ItemGroup>
 </Project>

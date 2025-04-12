@@ -2,14 +2,14 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
 using System.Collections.Generic;
-using E2EELibrary;
-using E2EELibrary.Models;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.Core;
-using E2EELibrary.Communication;
+using LibEmiddle.Models;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Core;
+using LibEmiddle.API;
+using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Crypto;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class X3DHExceptionTests

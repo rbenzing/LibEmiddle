@@ -1,10 +1,10 @@
 ﻿using System.Text;
-using E2EELibrary.Core;
-using E2EELibrary.Models;
-using E2EELibrary.KeyManagement;
-using static E2EELibrary.Core.Enums;
+using LibEmiddle.Core;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.Models;
 
-namespace E2EELibrary.KeyExchange
+namespace LibEmiddle.KeyExchange
 {
     /// <summary>
     /// Implements the Double Ratchet Algorithm for secure messaging
@@ -64,7 +64,7 @@ namespace E2EELibrary.KeyExchange
         public static (byte[] newChainKey, byte[] messageKey) RatchetStep(
             byte[] chainKey,
             string sessionId = "",
-            KeyRotationStrategy strategy = KeyRotationStrategy.Standard)
+            Enums.KeyRotationStrategy strategy = Enums.KeyRotationStrategy.Standard)
         {
             ArgumentNullException.ThrowIfNull(chainKey);
 
@@ -126,7 +126,7 @@ namespace E2EELibrary.KeyExchange
         /// <param name="sessionId"></param>
         /// <param name="strategy"></param>
         /// <returns></returns>
-        private static bool ShouldRotateKey(string sessionId, KeyRotationStrategy strategy)
+        private static bool ShouldRotateKey(string sessionId, Enums.KeyRotationStrategy strategy)
         {
             if (string.IsNullOrEmpty(sessionId))
                 return false;
@@ -140,9 +140,9 @@ namespace E2EELibrary.KeyExchange
 
                 return strategy switch
                 {
-                    KeyRotationStrategy.Standard => count % 20 == 0, // Change to rotate every 20 messages
-                    KeyRotationStrategy.Hourly => count % 1 == 0, // Change to rotate every 1 hour
-                    KeyRotationStrategy.Daily => count % 7 == 0, // Change to rotate every 7 days
+                    Enums.KeyRotationStrategy.Standard => count % 20 == 0, // Change to rotate every 20 messages
+                    Enums.KeyRotationStrategy.Hourly => count % 1 == 0, // Change to rotate every 1 hour
+                    Enums.KeyRotationStrategy.Daily => count % 7 == 0, // Change to rotate every 7 days
                     _ => false
                 };
             }

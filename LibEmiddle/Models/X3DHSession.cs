@@ -1,4 +1,4 @@
-﻿namespace E2EELibrary.Models
+﻿namespace LibEmiddle.Models
 {
     /// <summary>
     /// X3DH session data - immutable to prevent unauthorized state changes.
@@ -143,7 +143,7 @@
         public bool IsValid(long maxAgeMs = 2592000000) // 30 days by default
         {
             long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            return (currentTime - CreationTimestamp) <= maxAgeMs;
+            return currentTime - CreationTimestamp <= maxAgeMs;
         }
     }
 }

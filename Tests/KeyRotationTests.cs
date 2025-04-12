@@ -1,19 +1,18 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
-using System.Collections.Concurrent;
-using E2EELibrary.GroupMessaging;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.Models;
-using E2EELibrary.Core;
-using E2EELibrary.Encryption;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.MultiDevice;
-using System.Collections.Generic;
-using System.Threading.Tasks;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.MultiDevice;
+using LibEmiddle.Messaging.Group;
+using LibEmiddle.Models;
+using LibEmiddle.Core;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class KeyRotationTests
@@ -614,11 +613,8 @@ namespace E2EELibraryTests
             var secondDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
 
             // Create test data
-            byte[] sensitiveData = new byte[32];
-            new Random().NextBytes(sensitiveData);
-
-            byte[] newSensitiveData = new byte[32];
-            new Random().NextBytes(newSensitiveData);
+            byte[] sensitiveData = SecureMemory.CreateSecureBuffer(32);
+            byte[] newSensitiveData = SecureMemory.CreateSecureBuffer(32);
 
             // Create device managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);

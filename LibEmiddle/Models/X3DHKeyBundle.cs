@@ -1,6 +1,6 @@
-﻿using E2EELibrary.Core;
+﻿using LibEmiddle.Core;
 
-namespace E2EELibrary.Models
+namespace LibEmiddle.Models
 {
     /// <summary>
     /// X3DH key bundle for initial key exchange, following the Signal Protocol specification.
@@ -157,14 +157,14 @@ namespace E2EELibrary.Models
         {
             return new X3DHPublicBundle
             {
-                IdentityKey = this.IdentityKey,
-                SignedPreKey = this.SignedPreKey,
-                SignedPreKeySignature = this.SignedPreKeySignature,
-                OneTimePreKeys = this.OneTimePreKeys,
-                SignedPreKeyId = this.SignedPreKeyId,
-                OneTimePreKeyIds = this.OneTimePreKeyIds,
-                ProtocolVersion = this.ProtocolVersion,
-                CreationTimestamp = this.CreationTimestamp
+                IdentityKey = IdentityKey,
+                SignedPreKey = SignedPreKey,
+                SignedPreKeySignature = SignedPreKeySignature,
+                OneTimePreKeys = OneTimePreKeys,
+                SignedPreKeyId = SignedPreKeyId,
+                OneTimePreKeyIds = OneTimePreKeyIds,
+                ProtocolVersion = ProtocolVersion,
+                CreationTimestamp = CreationTimestamp
             };
         }
 

@@ -2,13 +2,13 @@
 using System.Collections.Generic;
 using System.Security;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using E2EELibrary;
-using E2EELibrary.MultiDevice;
-using E2EELibrary.Models;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.Core;
+using LibEmiddle.MultiDevice;
+using LibEmiddle.Models;
+using LibEmiddle.Core;
+using LibEmiddle.API;
+using LibEmiddle.Crypto;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class DeviceRevocationTests

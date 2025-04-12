@@ -1,6 +1,6 @@
-﻿using E2EELibrary.Core;
+﻿using LibEmiddle.Domain;
 
-namespace E2EELibrary.Models
+namespace LibEmiddle.Models
 {
     /// <summary>
     /// Double Ratchet session data - fully immutable to prevent state corruption.

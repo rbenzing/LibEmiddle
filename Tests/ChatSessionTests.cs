@@ -1,12 +1,12 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Linq;
-using E2EELibrary.Models;
-using E2EELibrary.Core;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.KeyManagement;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.Models;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class ChatSessionTests
@@ -241,7 +241,7 @@ namespace E2EELibraryTests
             bobChatSession.Suspend("Testing decryption in suspended state");
 
             // Act
-            string? decryptedMessage = bobChatSession.DecryptMessage(encryptedMessage);
+            string decryptedMessage = bobChatSession.DecryptMessage(encryptedMessage);
 
             // Assert
             Assert.IsNotNull(decryptedMessage);
@@ -290,10 +290,10 @@ namespace E2EELibraryTests
 
             // Act - Send messages both ways
             EncryptedMessage encryptedMessage1 = _aliceChatSession.EncryptMessage(message1);
-            string? decryptedMessage1 = bobChatSession.DecryptMessage(encryptedMessage1);
+            string decryptedMessage1 = bobChatSession.DecryptMessage(encryptedMessage1);
 
             EncryptedMessage encryptedMessage2 = bobChatSession.EncryptMessage(message2);
-            string? decryptedMessage2 = _aliceChatSession.DecryptMessage(encryptedMessage2);
+            string decryptedMessage2 = _aliceChatSession.DecryptMessage(encryptedMessage2);
 
             // Assert
             var aliceHistory = _aliceChatSession.GetMessageHistory();

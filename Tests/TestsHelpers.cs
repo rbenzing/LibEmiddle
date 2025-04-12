@@ -1,6 +1,6 @@
-﻿using E2EELibrary.Core;
+﻿using LibEmiddle.Core;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     public static class TestsHelpers
     {

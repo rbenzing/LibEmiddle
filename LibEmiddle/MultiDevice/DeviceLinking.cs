@@ -1,13 +1,13 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
-using E2EELibrary.Communication;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.Models;
-using E2EELibrary.Encryption;
-using E2EELibrary.Core;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Core;
+using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.Models;
 
-namespace E2EELibrary.MultiDevice
+namespace LibEmiddle.MultiDevice
 {
     /// <summary>
     /// Provides functionality for linking multiple devices and sharing encryption keys between them.

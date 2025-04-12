@@ -1,13 +1,11 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.IO;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
-using E2EELibrary;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.Core;
-using E2EELibrary.Encryption;
+using LibEmiddle.API;
+using LibEmiddle.Crypto;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class KeyStorageTests

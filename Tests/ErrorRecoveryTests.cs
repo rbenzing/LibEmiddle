@@ -1,25 +1,25 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Security.Cryptography;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Moq;
-using E2EELibrary;
-using E2EELibrary.Communication;
-using E2EELibrary.Models;
-using E2EELibrary.Core;
-using E2EELibrary.KeyExchange;
-using E2EELibrary.KeyManagement;
-using E2EELibrary.Encryption;
-using E2EELibrary.GroupMessaging;
-using E2EELibrary.MultiDevice;
-using E2EELibrary.Communication.Abstract;
 using System.Linq;
 using System.Diagnostics;
+using LibEmiddle.Models;
+using LibEmiddle.Core;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.MultiDevice;
+using LibEmiddle.Abstractions;
+using LibEmiddle.API;
+using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.Messaging.Group;
 
-namespace E2EELibraryTests
+namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class ErrorRecoveryTests
