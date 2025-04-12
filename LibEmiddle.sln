@@ -5,7 +5,7 @@ VisualStudioVersion = 17.12.35527.113
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibEmiddle", "LibEmiddle\LibEmiddle.csproj", "{1ECBB23B-4685-4993-BF01-F6D9E37FE54B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibEmiddle.Tests.Unit", "Tests\LibEmiddle.Tests.Unit.csproj", "{86746BC1-8D65-4393-B407-E4C64910CA3A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibEmiddle.Tests.Unit", "LibEmiddle.Tests.Unit\LibEmiddle.Tests.Unit.csproj", "{86746BC1-8D65-4393-B407-E4C64910CA3A}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
 	ProjectSection(SolutionItems) = preProject
