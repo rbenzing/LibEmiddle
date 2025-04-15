@@ -1,6 +1,4 @@
-﻿using System.Security.Cryptography;
-using System.Text;
-using LibEmiddle.Core;
+﻿using System.Text;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 
@@ -22,24 +20,10 @@ namespace LibEmiddle.Messaging.Transport
             ArgumentNullException.ThrowIfNull(message, nameof(message));
             ArgumentNullException.ThrowIfNull(privateKey, nameof(privateKey));
 
-            // Ed25519 private keys should be 64 bytes, but we can handle 32-byte keys by expanding them
-            if (privateKey.Length == Constants.X25519_KEY_SIZE)
+            // Ed25519 private keys should be 64 bytes
+            if (privateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
             {
-                // For 32-byte keys, we need to expand them to 64 bytes for Ed25519 signing
-                byte[] expandedKey = new byte[Constants.ED25519_PRIVATE_KEY_SIZE];
-
-                // Copy the first 32 bytes to the expanded key
-                privateKey.AsSpan(0, Constants.X25519_KEY_SIZE).CopyTo(expandedKey.AsSpan(0, Constants.X25519_KEY_SIZE));
-
-                // Fill the second half with derivable data
-                using (var sha256 = SHA256.Create())
-                {
-                    byte[] secondHalf = sha256.ComputeHash(privateKey);
-                    secondHalf.AsSpan(0, Constants.X25519_KEY_SIZE)
-                        .CopyTo(expandedKey.AsSpan(Constants.X25519_KEY_SIZE, Constants.X25519_KEY_SIZE));
-                }
-
-                return KeyAuth.SignDetached(message, expandedKey);
+                throw new ArgumentException("Invalid private key.", nameof(privateKey));
             }
 
             return KeyAuth.SignDetached(message, privateKey);
@@ -49,14 +33,20 @@ namespace LibEmiddle.Messaging.Transport
         /// Verifies an Ed25519 signature
         /// </summary>
         /// <param name="message">Original message</param>
-        /// <param name="signature">Signature to verify</param>
-        /// <param name="publicKey">Public key of signer</param>
+        /// <param name="signature">Signature to verify (64 bytes Ed25519)</param>
+        /// <param name="publicKey">Public key of signer (32 bytes Ed25519)</param>
         /// <returns>True if signature is valid</returns>
         public static bool VerifySignature(byte[] message, byte[] signature, byte[] publicKey)
         {
             ArgumentNullException.ThrowIfNull(message, nameof(message));
             ArgumentNullException.ThrowIfNull(signature, nameof(signature));
             ArgumentNullException.ThrowIfNull(publicKey, nameof(publicKey));
+
+            // Use Ed25519 validation here.
+            if (!KeyValidation.ValidateEd25519PublicKey(publicKey))
+            {
+                throw new ArgumentException("Invalid public key.", nameof(publicKey));
+            }
 
             return KeyAuth.VerifyDetached(signature, message, publicKey);
         }
@@ -65,7 +55,7 @@ namespace LibEmiddle.Messaging.Transport
         /// Signs a text message with a simpler API
         /// </summary>
         /// <param name="message">Message to sign</param>
-        /// <param name="privateKey">Private key for signing</param>
+        /// <param name="privateKey">Private key for signing (64 bytes Ed25519)</param>
         /// <returns>Signature as Base64 string</returns>
         public static string SignTextMessage(string message, byte[] privateKey)
         {
@@ -84,7 +74,7 @@ namespace LibEmiddle.Messaging.Transport
         /// </summary>
         /// <param name="message">Original message</param>
         /// <param name="signatureBase64">Signature as Base64 string</param>
-        /// <param name="publicKey">Public key of signer</param>
+        /// <param name="publicKey">Public key of signer (32 bytes X25519)</param>
         /// <returns>True if signature is valid</returns>
         public static bool VerifyTextMessage(string message, string signatureBase64, byte[] publicKey)
         {
@@ -110,7 +100,7 @@ namespace LibEmiddle.Messaging.Transport
         /// </summary>
         /// <typeparam name="T">Type of object to sign</typeparam>
         /// <param name="data">Data object to sign</param>
-        /// <param name="privateKey">Private key for signing</param>
+        /// <param name="privateKey">Private key for signing (64 bytes Ed25519)</param>
         /// <returns>Signature as a byte array</returns>
         public static byte[] SignObject<T>(T data, byte[] privateKey)
         {

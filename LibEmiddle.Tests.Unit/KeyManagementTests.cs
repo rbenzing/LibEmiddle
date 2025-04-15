@@ -2,59 +2,70 @@
 using System.IO;
 using System.Security.Cryptography;
 using LibEmiddle.API;
-using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class KeyManagementTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void GenerateSignatureKeyPair_ShouldReturnValidKeyPair()
         {
             // Act
-            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
+            KeyPair _identityKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Assert
-            Assert.IsNotNull(publicKey);
-            Assert.IsNotNull(privateKey);
-            Assert.AreEqual(32, publicKey.Length); // Ed25519 public key is 32 bytes
-            Assert.AreEqual(64, privateKey.Length); // Ed25519 private key is 64 bytes
+            Assert.IsNotNull(_identityKeyPair.PublicKey);
+            Assert.IsNotNull(_identityKeyPair.PrivateKey);
+            Assert.AreEqual(32, _identityKeyPair.PublicKey.Length); // Ed25519 public key is 32 bytes
+            Assert.AreEqual(64, _identityKeyPair.PrivateKey.Length); // Ed25519 private key is 64 bytes
         }
 
         [TestMethod]
         public void GenerateKeyExchangeKeyPair_ShouldReturnValidKeyPair()
         {
             // Act
-            var (publicKey, privateKey) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Assert
-            Assert.IsNotNull(publicKey);
-            Assert.IsNotNull(privateKey);
-            Assert.AreEqual(32, publicKey.Length); // X25519 public key is 32 bytes
-            Assert.AreEqual(32, privateKey.Length); // X25519 private key is 32 bytes
+            Assert.IsNotNull(_identityKeyPair.PublicKey);
+            Assert.IsNotNull(_identityKeyPair.PrivateKey);
+            Assert.AreEqual(32, _identityKeyPair.PublicKey.Length); // X25519 public key is 32 bytes
+            Assert.AreEqual(32, _identityKeyPair.PrivateKey.Length); // X25519 private key is 32 bytes
         }
 
         [TestMethod]
         public void ExportImportKeyToBase64_ShouldReturnOriginalKey()
         {
             // Arrange
-            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Act
-            string base64Key = KeyPair.ExportKeyToBase64(publicKey);
-            byte[] importedKey = KeyPair.ImportKeyFromBase64(base64Key);
+            string base64Key = _cryptoProvider.ExportKeyToBase64(_identityKeyPair.PublicKey);
+            byte[] importedKey = _cryptoProvider.ImportKeyFromBase64(base64Key);
 
             // Assert
-            CollectionAssert.AreEqual(publicKey, importedKey);
+            CollectionAssert.AreEqual(_identityKeyPair.PublicKey, importedKey);
         }
 
         [TestMethod]
         public void StoreAndLoadKeyFromFile_WithoutPassword_ShouldReturnOriginalKey()
         {
             // Arrange
-            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var publicKey = _identityKeyPair.PublicKey;
+
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
 
             try
@@ -80,7 +91,8 @@ namespace LibEmiddle.Tests.Unit
         public void StoreAndLoadKeyFromFile_WithPassword_ShouldReturnOriginalKey()
         {
             // Arrange
-            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var publicKey = _identityKeyPair.PublicKey;
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "TestP@ssw0rd";
 
@@ -116,7 +128,8 @@ namespace LibEmiddle.Tests.Unit
         public void LoadKeyFromFile_WithWrongPassword_ShouldThrowException()
         {
             // Arrange
-            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var publicKey = _identityKeyPair.PublicKey;
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "CorrectP@ssw0rd";
             string wrongPassword = "WrongP@ssw0rd";
@@ -143,10 +156,11 @@ namespace LibEmiddle.Tests.Unit
         public void ValidateX25519PublicKey_WithValidKey_ShouldReturnTrue()
         {
             // Arrange
-            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var publicKey = _identityKeyPair.PublicKey;
 
             // Act
-            bool isValid = KeyValidation.ValidateX25519PublicKey(publicKey);
+            bool isValid = _cryptoProvider.ValidateX25519PublicKey(publicKey);
 
             // Assert
             Assert.IsTrue(isValid, "A properly generated X25519 public key should be valid");
@@ -159,7 +173,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] allZeroKey = new byte[Constants.X25519_KEY_SIZE]; // All zeros
 
             // Act
-            bool isValid = KeyValidation.ValidateX25519PublicKey(allZeroKey);
+            bool isValid = _cryptoProvider.ValidateX25519PublicKey(allZeroKey);
 
             // Assert
             Assert.IsFalse(isValid, "An all-zero key should be invalid");
@@ -173,8 +187,8 @@ namespace LibEmiddle.Tests.Unit
             byte[] longKey = new byte[Constants.X25519_KEY_SIZE + 1]; // Too long
 
             // Act
-            bool shortKeyValid = KeyValidation.ValidateX25519PublicKey(shortKey);
-            bool longKeyValid = KeyValidation.ValidateX25519PublicKey(longKey);
+            bool shortKeyValid = _cryptoProvider.ValidateX25519PublicKey(shortKey);
+            bool longKeyValid = _cryptoProvider.ValidateX25519PublicKey(longKey);
 
             // Assert
             Assert.IsFalse(shortKeyValid, "A key that's too short should be invalid");
@@ -185,10 +199,10 @@ namespace LibEmiddle.Tests.Unit
         public void DeriveX25519PrivateKeyFromEd25519_ShouldProduceValidKey()
         {
             // Arrange
-            var (_, ed25519PrivateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Act
-            byte[] x25519PrivateKey = KeyConversion.DeriveX25519PrivateKeyFromEd25519(ed25519PrivateKey);
+            byte[] x25519PrivateKey = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(_identityKeyPair.PrivateKey);
 
             // Assert
             Assert.IsNotNull(x25519PrivateKey);

@@ -1,4 +1,4 @@
-﻿namespace LibEmiddle.Models
+﻿namespace LibEmiddle.Domain
 {
     /// <summary>
     /// Encrypted group message
@@ -35,5 +35,10 @@
         /// Message identifier for access control and replay protection
         /// </summary>
         public string? MessageId { get; set; }
+
+        /// <summary>
+        /// Chain key iteration number for ratchet protocol
+        /// </summary>
+        public uint Iteration { get; set; }
     }
 }

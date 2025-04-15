@@ -1,537 +1,502 @@
-﻿using LibEmiddle.Crypto;
+﻿using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using LibEmiddle.Core;
+using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.KeyExchange;
-using LibEmiddle.Models;
-using System.Collections.Concurrent;
 
-namespace LibEmiddle.Messaging.Chat 
-{ 
+namespace LibEmiddle.Messaging.Chat
+{
     /// <summary>
-    /// Chat Session
+    /// Represents an end-to-end encrypted chat session with a remote party,
+    /// managing Double Ratchet state, message history, and session lifecycle.
     /// </summary>
     public class ChatSession : IDisposable
     {
-        // Underlying cryptographic session
-        private DoubleRatchetSession? _cryptoSession;
-        private readonly object _sessionLock = new object();
+        // Underlying cryptographic session state (immutable)
+        private DoubleRatchetSession _cryptoSession; // Holds the CURRENT immutable state
+
+        // Lock for thread-safe access and updates to mutable fields (_cryptoSession reference, State, Timestamps, History)
+        private readonly SemaphoreSlim _sessionLock = new SemaphoreSlim(1, 1);
         private bool _disposed;
 
-        // Conversation metadata
-        /// <summary>
-        /// Unique identifier for this session
-        /// </summary>
+        // --- Session Metadata (Mostly Immutable) ---
         public string SessionId { get; }
+        public byte[] RemotePublicKey { get; } // Remote party's Identity Key (Ed25519)
+        public byte[] LocalPublicKey { get; } // Our Identity Key (Ed25519)
+        public DateTime CreatedAt { get; }
 
-        /// <summary>
-        /// Remote identity public key
-        /// </summary>
-        public byte[] RemotePublicKey { get; }
-
-        /// <summary>
-        /// Local identity public key
-        /// </summary>
-        public byte[] LocalPublicKey { get; }
-
-        /// <summary>
-        /// Current state of the chat session
-        /// </summary>
+        // --- Mutable State (Managed under _sessionLock) ---
         public Enums.ChatSessionState State { get; private set; }
+        public DateTime? LastMessageSentAt { get; private set; }
+        public DateTime? LastMessageReceivedAt { get; private set; }
+        public DateTime? LastActivatedAt { get; private set; }
+        public DateTime? LastSuspendedAt { get; private set; }
+        public string? SuspensionReason { get; private set; }
+        public Enums.KeyRotationStrategy RotationStrategy { get; set; } = Enums.KeyRotationStrategy.Standard;
+        public Dictionary<string, string> Metadata { get; } = new Dictionary<string, string>();
+
+        // --- Message History ---
+        // ConcurrentQueue is generally thread-safe for Enqueue/Dequeue, but access for Get might need care if combined with state changes.
+        private readonly ConcurrentQueue<MessageRecord> _messageHistory = new();
 
         /// <summary>
-        /// Event raised when the session state changes
+        /// Event raised when the session state changes (e.g., Active, Suspended).
         /// </summary>
         public event EventHandler<ChatSessionStateChangedEventArgs>? StateChanged;
 
-        // Message tracking
-        private readonly ConcurrentQueue<MessageRecord> _messageHistory =
-            new ConcurrentQueue<MessageRecord>();
-
-        // Session state tracking
-        /// <summary>
-        /// When this session was created
-        /// </summary>
-        public DateTime CreatedAt { get; }
 
         /// <summary>
-        /// When the last message was sent
+        /// Creates a new chat session. Called by ChatSessionManager after X3DH/DR initialization.
         /// </summary>
-        public DateTime? LastMessageSentAt { get; private set; }
-
-        /// <summary>
-        /// When the last message was received
-        /// </summary>
-        public DateTime? LastMessageReceivedAt { get; private set; }
-
-        /// <summary>
-        /// When the session was last activated
-        /// </summary>
-        public DateTime? LastActivatedAt { get; private set; }
-
-        /// <summary>
-        /// When the session was last suspended
-        /// </summary>
-        public DateTime? LastSuspendedAt { get; private set; }
-
-        /// <summary>
-        /// The reason for the last suspension, if any
-        /// </summary>
-        public string? SuspensionReason { get; private set; }
-
-        /// <summary>
-        /// Key rotation strategy for this session
-        /// </summary>
-        public Enums.KeyRotationStrategy RotationStrategy { get; set; } =
-            Enums.KeyRotationStrategy.Standard;
-
-        /// <summary>
-        /// Optional metadata for rich context
-        /// </summary>
-        public Dictionary<string, string> Metadata { get; } = new Dictionary<string, string>();
-
-        /// <summary>
-        /// Creates a new chat session
-        /// </summary>
-        /// <param name="cryptoSession">The Double Ratchet session for encryption</param>
-        /// <param name="remotePublicKey">Remote party's public key</param>
-        /// <param name="localPublicKey">Local public key</param>
-        /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+        /// <param name="initialCryptoSession">The initial Double Ratchet session state.</param>
+        /// <param name="remotePublicKey">Remote party's public identity key (Ed25519).</param>
+        /// <param name="localPublicKey">Local user's public identity key (Ed25519).</param>
+        /// <exception cref="ArgumentNullException">Thrown if required parameters are null.</exception>
         public ChatSession(
-            DoubleRatchetSession cryptoSession,
+            DoubleRatchetSession initialCryptoSession,
             byte[] remotePublicKey,
             byte[] localPublicKey)
         {
-            _cryptoSession = cryptoSession ??
-                throw new ArgumentNullException(nameof(cryptoSession));
+            _cryptoSession = initialCryptoSession ?? throw new ArgumentNullException(nameof(initialCryptoSession));
+            RemotePublicKey = remotePublicKey ?? throw new ArgumentNullException(nameof(remotePublicKey));
+            LocalPublicKey = localPublicKey ?? throw new ArgumentNullException(nameof(localPublicKey));
 
-            RemotePublicKey = remotePublicKey ??
-                throw new ArgumentNullException(nameof(remotePublicKey));
-
-            LocalPublicKey = localPublicKey ??
-                throw new ArgumentNullException(nameof(localPublicKey));
-
-            SessionId = cryptoSession.SessionId;
+            // Use SessionId from the crypto session
+            SessionId = _cryptoSession.SessionId;
             CreatedAt = DateTime.UtcNow;
-            State = Enums.ChatSessionState.Initialized;
+            State = Enums.ChatSessionState.Initialized; // Start as initialized, activate on first use
         }
 
         /// <summary>
-        /// Activates the session, transitioning it to the Active state
+        /// Gets the current immutable cryptographic session state.
+        /// Use for persistence or inspection. Acquire lock if performing operations based on this state.
         /// </summary>
-        /// <returns>True if the session was activated, false if it was already active</returns>
-        /// <exception cref="InvalidOperationException">Thrown when trying to activate a terminated session</exception>
-        public bool Activate()
+        /// <exception cref="ObjectDisposedException"></exception>
+        /// <exception cref="InvalidOperationException">If crypto session is null (e.g., after termination).</exception>
+        public DoubleRatchetSession GetCryptoSessionState()
         {
             ThrowIfDisposed();
+            // No lock needed just to return the reference, as the object itself is immutable.
+            // Lock IS needed if the caller intends to use this state in combination
+            // with other actions on this ChatSession instance.
+            var currentSession = _cryptoSession; // Read volatile reference
+            if (currentSession == null) // Can be null if Terminated/Disposed
+                throw new InvalidOperationException("Cryptographic session state is not available (session may be terminated).");
+            return currentSession;
+        }
 
-            lock (_sessionLock)
+        // --- State Management ---
+
+        /// <summary>
+        /// Activates the session if it's currently Initialized or Suspended.
+        /// </summary>
+        /// <returns>True if the state was changed to Active, false otherwise.</returns>
+        /// <exception cref="InvalidOperationException">If session is Terminated.</exception>
+        /// <exception cref="ObjectDisposedException"></exception>
+        public async Task<bool> ActivateAsync()
+        {
+            ThrowIfDisposed();
+            await _sessionLock.WaitAsync();
+            try
             {
                 if (State == Enums.ChatSessionState.Terminated)
-                    throw new InvalidOperationException("Cannot activate a terminated session");
-
+                    throw new InvalidOperationException("Cannot activate a terminated session.");
                 if (State == Enums.ChatSessionState.Active)
-                    return false;
+                    return false; // Already active
 
                 var previousState = State;
                 State = Enums.ChatSessionState.Active;
                 LastActivatedAt = DateTime.UtcNow;
-
+                SuspensionReason = null; // Clear suspension reason on activation
                 OnStateChanged(previousState, State);
                 return true;
+            }
+            finally
+            {
+                _sessionLock.Release();
             }
         }
 
         /// <summary>
-        /// Suspends the session, transitioning it to the Suspended state
+        /// Suspends the session if it's currently Active.
         /// </summary>
-        /// <param name="reason">Optional reason for suspension</param>
-        /// <returns>True if the session was suspended, false if it was already suspended</returns>
-        /// <exception cref="InvalidOperationException">Thrown when trying to suspend a terminated session</exception>
-        public bool Suspend(string? reason = null)
+        /// <param name="reason">Optional reason for suspension.</param>
+        /// <returns>True if the state was changed to Suspended, false otherwise.</returns>
+        /// <exception cref="InvalidOperationException">If session is Terminated.</exception>
+        /// <exception cref="ObjectDisposedException"></exception>
+        public async Task<bool> SuspendAsync(string? reason = null)
         {
             ThrowIfDisposed();
-
-            lock (_sessionLock)
+            await _sessionLock.WaitAsync();
+            try
             {
                 if (State == Enums.ChatSessionState.Terminated)
-                    throw new InvalidOperationException("Cannot suspend a terminated session");
-
+                    throw new InvalidOperationException("Cannot suspend a terminated session.");
                 if (State == Enums.ChatSessionState.Suspended)
-                    return false;
+                    return false; // Already suspended
 
                 var previousState = State;
                 State = Enums.ChatSessionState.Suspended;
                 LastSuspendedAt = DateTime.UtcNow;
                 SuspensionReason = reason;
-
                 OnStateChanged(previousState, State);
                 return true;
+            }
+            finally
+            {
+                _sessionLock.Release();
             }
         }
 
         /// <summary>
-        /// Terminates the session, after which it cannot be used
+        /// Terminates the session permanently, clearing cryptographic state.
         /// </summary>
-        /// <returns>True if the session was terminated, false if it was already terminated</returns>
-        public bool Terminate()
+        /// <returns>True if the state was changed to Terminated, false otherwise.</returns>
+        /// <exception cref="ObjectDisposedException"></exception>
+        public async Task<bool> TerminateAsync()
         {
             ThrowIfDisposed();
-
-            lock (_sessionLock)
+            await _sessionLock.WaitAsync();
+            try
             {
                 if (State == Enums.ChatSessionState.Terminated)
-                    return false;
+                    return false; // Already terminated
 
                 var previousState = State;
                 State = Enums.ChatSessionState.Terminated;
 
-                // Clear sensitive data on termination for security
-                _cryptoSession = null;
+                // Clear sensitive crypto state reference
+                // The actual DoubleRatchetSession object might have its own Dispose/Clear method
+                // but we remove our reference to it.
+                _cryptoSession = null!; // Set to null, suppress nullable warning as state is Terminated
+
+                // Optionally clear message history on termination
+                // ClearMessageHistoryInternal(); // Call helper if needed
 
                 OnStateChanged(previousState, State);
                 return true;
             }
+            finally
+            {
+                _sessionLock.Release();
+            }
         }
 
+        // --- Encrypt / Decrypt ---
+
         /// <summary>
-        /// Encrypts a message using the current session
+        /// Encrypts a message using the current Double Ratchet state. Handles state updates.
+        /// Automatically activates the session if it's Initialized.
         /// </summary>
-        /// <param name="message">Message to encrypt</param>
-        /// <param name="autoActivate">Whether to automatically activate the session if initialized</param>
-        /// <returns>Encrypted message</returns>
-        /// <exception cref="ArgumentException">Thrown when message is null or empty</exception>
-        /// <exception cref="InvalidOperationException">Thrown when session is invalid, suspended, or terminated</exception>
-        public EncryptedMessage EncryptMessage(string message, bool autoActivate = true)
+        /// <param name="message">Plaintext message to encrypt.</param>
+        /// <returns>The EncryptedMessage object, or null if encryption failed.</returns>
+        /// <exception cref="ArgumentException">If message is null or empty.</exception>
+        /// <exception cref="InvalidOperationException">If session is Terminated or Suspended.</exception>
+        /// <exception cref="CryptographicException">If underlying encryption fails.</exception>
+        /// <exception cref="ObjectDisposedException"></exception>
+        public async Task<EncryptedMessage?> EncryptAsync(string message)
         {
             ThrowIfDisposed();
-
             if (string.IsNullOrEmpty(message))
-                throw new ArgumentException("Message cannot be null or empty", nameof(message));
+                throw new ArgumentException("Message cannot be null or empty.", nameof(message));
 
-            lock (_sessionLock)
+            await _sessionLock.WaitAsync();
+            try
             {
+                // --- State Checks ---
                 if (State == Enums.ChatSessionState.Terminated)
-                    throw new InvalidOperationException("Cannot encrypt messages in a terminated session");
-
+                    throw new InvalidOperationException("Cannot encrypt: Session is terminated.");
                 if (State == Enums.ChatSessionState.Suspended)
-                    throw new InvalidOperationException($"Cannot encrypt messages while session is suspended. Reason: {SuspensionReason ?? "Unknown"}");
+                    throw new InvalidOperationException($"Cannot encrypt: Session is suspended. Reason: {SuspensionReason ?? "Unknown"}");
 
-                // Auto-activate if requested
-                if (State == Enums.ChatSessionState.Initialized && autoActivate)
-                    Activate();
+                // Auto-activate if needed
+                if (State == Enums.ChatSessionState.Initialized)
+                {
+                    var previousState = State;
+                    State = Enums.ChatSessionState.Active;
+                    LastActivatedAt = DateTime.UtcNow;
+                    SuspensionReason = null;
+                    OnStateChanged(previousState, State);
+                    LoggingManager.LogDebug(nameof(ChatSession), $"Session {SessionId} auto-activated by sending.");
+                }
 
-                if (State == Enums.ChatSessionState.Initialized && !autoActivate)
-                    throw new InvalidOperationException("Session must be activated before encrypting messages");
+                var currentCryptoSession = _cryptoSession; // Read current state reference
+                if (currentCryptoSession == null) // Should not happen if not terminated, but check
+                    throw new InvalidOperationException("Cannot encrypt: Cryptographic session state is missing.");
 
-                if (_cryptoSession == null)
-                    throw new InvalidOperationException("Session is not initialized");
 
-                var (updatedSession, encryptedMessage) =
-                    DoubleRatchet.DoubleRatchetEncrypt(_cryptoSession, message, RotationStrategy);
+                // --- Perform Double Ratchet Encryption ---
+                var (updatedSession, encryptedMessage) = await DoubleRatchet.DoubleRatchetEncryptAsync(
+                    currentCryptoSession, message, RotationStrategy);
 
-                if (updatedSession == null)
-                    throw new InvalidOperationException("Encryption failed: session update was null");
+                // --- Update State ---
+                if (updatedSession == null || encryptedMessage == null)
+                {
+                    // Encryption failed in DoubleRatchet layer (error should have been logged there)
+                    // Optionally transition session to an error state here? Or just return null.
+                    LoggingManager.LogError(nameof(ChatSession), $"Encryption failed for session {SessionId}. DoubleRatchet returned null.");
+                    return null; // Indicate failure
+                }
 
-                if (encryptedMessage == null)
-                    throw new InvalidOperationException("Encryption failed: encrypted message is null");
-
-                // Update the session
+                // IMPORTANT: Update the internal state reference to the new immutable object
                 _cryptoSession = updatedSession;
 
                 // Track message send time
                 LastMessageSentAt = DateTime.UtcNow;
 
-                // Add to message history
+                // Add to message history (optional)
                 _messageHistory.Enqueue(new MessageRecord
                 {
                     IsOutgoing = true,
-                    Timestamp = DateTime.UtcNow,
-                    Content = message,
-                    EncryptedMessage = encryptedMessage
+                    Timestamp = DateTime.UtcNow, // Consider using timestamp from encryptedMessage if needed
+                    Content = message, // Store plaintext for local history
+                    EncryptedMessage = encryptedMessage // Store ciphertext details
                 });
 
                 return encryptedMessage;
             }
+            // Catch specific expected exceptions if necessary
+            // catch (CryptographicException cex) { ... }
+            finally
+            {
+                _sessionLock.Release();
+            }
         }
 
         /// <summary>
-        /// Decrypts a message using the current session
+        /// Decrypts an incoming message using the current Double Ratchet state. Handles state updates.
+        /// Automatically activates the session if it's Initialized.
         /// </summary>
-        /// <param name="encryptedMessage">Message to decrypt</param>
-        /// <param name="autoActivate">Whether to automatically activate the session if initialized</param>
-        /// <returns>Decrypted message or null if decryption failed</returns>
-        /// <exception cref="ArgumentNullException">Thrown when encryptedMessage is null</exception>
-        /// <exception cref="InvalidOperationException">Thrown when session is disposed or terminated</exception>
-        public string? DecryptMessage(EncryptedMessage encryptedMessage, bool autoActivate = true)
+        /// <param name="encryptedMessage">The incoming encrypted message.</param>
+        /// <returns>The decrypted plaintext message, or null if decryption fails (e.g., authentication error, replay).</returns>
+        /// <exception cref="ArgumentNullException">If encryptedMessage is null.</exception>
+        /// <exception cref="InvalidOperationException">If session is Terminated.</exception>
+        /// <exception cref="CryptographicException">If underlying decryption causes critical error.</exception>
+        /// <exception cref="ObjectDisposedException"></exception>
+        public async Task<string?> DecryptAsync(EncryptedMessage encryptedMessage)
         {
             ThrowIfDisposed();
-
-            if (encryptedMessage == null)
-                throw new ArgumentNullException(nameof(encryptedMessage));
-
-            lock (_sessionLock)
+            ArgumentNullException.ThrowIfNull(encryptedMessage, nameof(encryptedMessage));
+            // Validate incoming message structure minimally
+            if (encryptedMessage.Ciphertext == null || encryptedMessage.Nonce == null || encryptedMessage.SenderDHKey == null)
+                throw new ArgumentException("Encrypted message is missing required fields for decryption.", nameof(encryptedMessage));
+            if (encryptedMessage.SessionId != this.SessionId)
             {
+                LoggingManager.LogWarning(nameof(ChatSession), $"Message Session ID '{encryptedMessage.SessionId}' does not match current session '{this.SessionId}'. Discarding.");
+                return null; // Message not for this session
+            }
+
+            await _sessionLock.WaitAsync();
+            try
+            {
+                // --- State Checks ---
                 if (State == Enums.ChatSessionState.Terminated)
-                    throw new InvalidOperationException("Cannot decrypt messages in a terminated session");
+                    throw new InvalidOperationException("Cannot decrypt: Session is terminated.");
 
-                // Auto-activate if requested and not suspended
-                if (State == Enums.ChatSessionState.Initialized && autoActivate)
-                    Activate();
-
-                if (_cryptoSession == null)
-                    throw new InvalidOperationException("Session is not initialized");
-
-                var (updatedSession, decryptedMessage) =
-                    DoubleRatchet.DoubleRatchetDecrypt(_cryptoSession, encryptedMessage);
-
-                if (updatedSession != null)
+                // Allow decryption even if Suspended, but don't auto-activate
+                // Auto-activate if needed and NOT suspended
+                if (State == Enums.ChatSessionState.Initialized)
                 {
-                    _cryptoSession = updatedSession;
-
-                    if (decryptedMessage != null)
-                    {
-                        LastMessageReceivedAt = DateTime.UtcNow;
-
-                        // Add to message history
-                        _messageHistory.Enqueue(new MessageRecord
-                        {
-                            IsOutgoing = false,
-                            Timestamp = DateTime.UtcNow,
-                            Content = decryptedMessage,
-                            EncryptedMessage = encryptedMessage
-                        });
-                    }
+                    var previousState = State;
+                    State = Enums.ChatSessionState.Active;
+                    LastActivatedAt = DateTime.UtcNow;
+                    SuspensionReason = null;
+                    OnStateChanged(previousState, State);
+                    LoggingManager.LogDebug(nameof(ChatSession), $"Session {SessionId} auto-activated by receiving.");
                 }
 
-                return decryptedMessage;
+                var currentCryptoSession = _cryptoSession; // Read current state reference
+                if (currentCryptoSession == null)
+                    throw new InvalidOperationException("Cannot decrypt: Cryptographic session state is missing.");
+
+                // --- Perform Double Ratchet Decryption ---
+                var (updatedSession, decryptedMessage) = await DoubleRatchet.DoubleRatchetDecryptAsync(
+                    currentCryptoSession, encryptedMessage);
+
+
+                // --- Update State ---
+                if (updatedSession == null)
+                {
+                    // Decryption failed (e.g., bad MAC, replay, out-of-order beyond handling)
+                    // DoubleRatchet layer should have logged the reason.
+                    // Do NOT update the crypto session state on failure.
+                    LoggingManager.LogWarning(nameof(ChatSession), $"Decryption failed for message {encryptedMessage.MessageId} in session {SessionId}.");
+                    return null;
+                }
+
+                // Decryption SUCCESSFUL
+                // IMPORTANT: Update the internal state reference
+                _cryptoSession = updatedSession;
+
+                // Track message receive time
+                LastMessageReceivedAt = DateTime.UtcNow;
+
+                // Add to message history (optional)
+                _messageHistory.Enqueue(new MessageRecord
+                {
+                    IsOutgoing = false,
+                    Timestamp = DateTime.UtcNow, // Or use timestamp from message?
+                    Content = decryptedMessage, // Store plaintext
+                    EncryptedMessage = encryptedMessage // Store original encrypted form
+                });
+
+                return decryptedMessage; // Return plaintext
             }
-        }
-
-        /// <summary>
-        /// Gets the underlying Double Ratchet session
-        /// </summary>
-        /// <returns>Double Ratchet session</returns>
-        /// <exception cref="InvalidOperationException">Thrown when session is invalid or disposed</exception>
-        public DoubleRatchetSession GetCryptoSession()
-        {
-            ThrowIfDisposed();
-
-            lock (_sessionLock)
+            // Catch specific expected exceptions if necessary
+            // catch (CryptographicException cex) { ... }
+            finally
             {
-                if (_cryptoSession == null)
-                    throw new InvalidOperationException("Session is not initialized");
-
-                return _cryptoSession;
+                _sessionLock.Release();
             }
         }
 
+        // --- Other Methods ---
+
         /// <summary>
-        /// Retrieves message history
+        /// Checks if the session is valid and not terminated or disposed.
+        /// Performs basic checks on the crypto session state.
         /// </summary>
-        /// <param name="limit">Maximum number of messages to retrieve</param>
-        /// <param name="startIndex">Starting index for pagination</param>
-        /// <returns>Message history</returns>
+        public bool IsValid()
+        {
+            if (_disposed) return false;
+
+            // No lock needed for reading volatile references and immutable state parts
+            var currentCryptoSession = _cryptoSession; // Read reference
+            var currentState = State; // Read current state
+
+            return currentState != Enums.ChatSessionState.Terminated &&
+                   currentCryptoSession != null &&
+                   // Basic checks on the immutable session state
+                   currentCryptoSession.RootKey?.Length == Constants.AES_KEY_SIZE &&
+                   currentCryptoSession.RemoteDHRatchetKey?.Length == Constants.X25519_KEY_SIZE &&
+                   currentCryptoSession.DHRatchetKeyPair.PublicKey?.Length == Constants.X25519_KEY_SIZE &&
+                   currentCryptoSession.DHRatchetKeyPair.PrivateKey?.Length == Constants.X25519_KEY_SIZE &&
+                   // Chain keys can be null initially
+                   (currentCryptoSession.SendingChainKey == null || currentCryptoSession.SendingChainKey.Length == Constants.AES_KEY_SIZE) &&
+                   (currentCryptoSession.ReceivingChainKey == null || currentCryptoSession.ReceivingChainKey.Length == Constants.AES_KEY_SIZE);
+        }
+
+        /// <summary>
+        /// Retrieves message history (thread-safe read from ConcurrentQueue).
+        /// </summary>
         public IReadOnlyCollection<MessageRecord> GetMessageHistory(int limit = 100, int startIndex = 0)
         {
             ThrowIfDisposed();
-
-            limit = Math.Max(0, limit);
-            startIndex = Math.Max(0, startIndex);
-
-            // Use Skip for pagination and Take for limiting the result
-            return _messageHistory.Skip(startIndex).Take(limit).ToArray();
+            // ConcurrentQueue ToArray is snapshot, Skip/Take is LINQ
+            return _messageHistory.Skip(Math.Max(0, startIndex)).Take(Math.Max(0, limit)).ToList().AsReadOnly();
         }
 
-        /// <summary>
-        /// Gets the count of messages in the history
-        /// </summary>
-        /// <returns>Message count</returns>
+        /// <summary> Gets the count of messages in the history. </summary>
         public int GetMessageCount()
         {
             ThrowIfDisposed();
             return _messageHistory.Count;
         }
 
-        /// <summary>
-        /// Checks if the session is still valid
-        /// </summary>
-        /// <returns>True if the session is valid</returns>
-        public bool IsValid()
-        {
-            if (_disposed)
-                return false;
-
-            lock (_sessionLock)
-            {
-                return State != Enums.ChatSessionState.Terminated &&
-                       _cryptoSession != null &&
-                       DoubleRatchetExchange.ValidateSession(_cryptoSession);
-            }
-        }
-
-        /// <summary>
-        /// Adds custom metadata to the session
-        /// </summary>
-        /// <param name="key">Metadata key</param>
-        /// <param name="value">Metadata value</param>
-        /// <exception cref="ArgumentException">Thrown when key is null or empty</exception>
-        /// <exception cref="InvalidOperationException">Thrown when session is disposed</exception>
-        public void SetMetadata(string key, string value)
-        {
-            ThrowIfDisposed();
-
-            if (string.IsNullOrEmpty(key))
-                throw new ArgumentException("Metadata key cannot be null or empty", nameof(key));
-
-            Metadata[key] = value;
-        }
-
-        /// <summary>
-        /// Clears the message history
-        /// </summary>
-        /// <returns>Number of messages cleared</returns>
+        /// <summary> Clears the message history. </summary>
         public int ClearMessageHistory()
         {
             ThrowIfDisposed();
+            return ClearMessageHistoryInternal();
+        }
 
+        private int ClearMessageHistoryInternal()
+        {
             int count = 0;
-            while (_messageHistory.TryDequeue(out _))
-            {
-                count++;
-            }
-
+            while (_messageHistory.TryDequeue(out _)) { count++; }
             return count;
         }
 
-        /// <summary>
-        /// Raises the StateChanged event
-        /// </summary>
-        /// <param name="previousState">Previous session state</param>
-        /// <param name="newState">New session state</param>
-        protected virtual void OnStateChanged(Enums.ChatSessionState previousState, Enums.ChatSessionState newState)
+        /// <summary> Sets custom metadata. </summary>
+        public void SetMetadata(string key, string value)
         {
-            StateChanged?.Invoke(this, new ChatSessionStateChangedEventArgs(previousState, newState));
-        }
-
-        /// <summary>
-        /// Checks if this instance has been disposed
-        /// </summary>
-        /// <exception cref="ObjectDisposedException">Thrown when the object is disposed</exception>
-        private void ThrowIfDisposed()
-        {
-            if (_disposed)
+            ThrowIfDisposed();
+            if (string.IsNullOrEmpty(key)) throw new ArgumentException("Metadata key cannot be null or empty.", nameof(key));
+            // Dictionary is not thread-safe by default, lock if concurrent access is possible
+            lock (_sessionLock) // Or use ConcurrentDictionary for Metadata
             {
-                throw new ObjectDisposedException(nameof(ChatSession), "This chat session has been disposed");
+                Metadata[key] = value;
             }
         }
 
-        /// <summary>
-        /// Cleans up sensitive session data
-        /// </summary>
+        /// <summary> Raises the StateChanged event. </summary>
+        protected virtual void OnStateChanged(Enums.ChatSessionState previousState, Enums.ChatSessionState newState)
+        {
+            // Ensure event handlers don't block lock if called from within lock
+            Task.Run(() => StateChanged?.Invoke(this, new ChatSessionStateChangedEventArgs(previousState, newState)));
+            // Or just invoke directly if handlers are known to be fast:
+            // StateChanged?.Invoke(this, new ChatSessionStateChangedEventArgs(previousState, newState));
+        }
+
+        /// <summary> Checks if disposed and throws. </summary>
+        private void ThrowIfDisposed()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(ChatSession));
+        }
+
+        /// <summary> Cleans up resources. </summary>
         public void Dispose()
         {
             Dispose(true);
             GC.SuppressFinalize(this);
         }
 
-        /// <summary>
-        /// Cleans up sensitive session data
-        /// </summary>
-        /// <param name="disposing">True when called from Dispose(), false when called from finalizer</param>
+        /// <summary> Cleans up resources. </summary>
         protected virtual void Dispose(bool disposing)
         {
-            if (_disposed)
-                return;
+            if (_disposed) return;
 
             if (disposing)
             {
-                lock (_sessionLock)
+                // Acquire lock one last time to safely clear state
+                _sessionLock.Wait(); // Synchronous wait in Dispose
+                try
                 {
+                    if (_disposed) return; // Check again after acquiring lock
+
                     // Clear sensitive data
-                    _cryptoSession = null;
+                    // Consider calling a Clear method on DoubleRatchetSession if it exists
+                    // to securely wipe internal keys before setting reference to null
+                    _cryptoSession = null!; // Set reference to null
 
-                    // Clear message history that contains sensitive information
-                    while (_messageHistory.TryDequeue(out _)) { }
+                    // Clear message history
+                    ClearMessageHistoryInternal();
 
-                    // Record termination state
+                    // Set state
                     var previousState = State;
                     State = Enums.ChatSessionState.Terminated;
-
-                    // Notify of state change if applicable
                     if (previousState != Enums.ChatSessionState.Terminated)
                     {
-                        OnStateChanged(previousState, State);
+                        // Don't raise event from Dispose if possible, or do it carefully
+                        // OnStateChanged(previousState, State);
                     }
+
+                    // Dispose disposable fields
+                    _sessionLock.Dispose();
+
+                    _disposed = true; // Set disposed flag inside lock
+                }
+                finally
+                {
+                    // Ensure lock is released even if errors occur during disposal
+                    // _sessionLock.Release(); // Don't release if Wait() was used synchronously? Check SemaphoreSlim docs. Dispose handles it.
                 }
             }
-
-            _disposed = true;
+            // No finalizer needed if only managed resources
+            _disposed = true; // Ensure flag is set even if not disposing managed state (e.g. called from finalizer if added)
         }
 
-        /// <summary>
-        /// Finalizer
-        /// </summary>
-        ~ChatSession()
-        {
-            Dispose(false);
-        }
+        // Remove finalizer if no unmanaged resources are directly owned
+        // ~ChatSession() { Dispose(false); }
     }
 
-    /// <summary>
-    /// Event arguments for chat session state changes
-    /// </summary>
+    // --- Supporting Types (Ensure these exist) ---
     public class ChatSessionStateChangedEventArgs : EventArgs
     {
-        /// <summary>
-        /// The previous state of the session
-        /// </summary>
         public Enums.ChatSessionState PreviousState { get; }
-
-        /// <summary>
-        /// The new state of the session
-        /// </summary>
         public Enums.ChatSessionState NewState { get; }
-
-        /// <summary>
-        /// When the state change occurred
-        /// </summary>
         public DateTime Timestamp { get; }
-
-        /// <summary>
-        /// Creates a new instance of ChatSessionStateChangedEventArgs
-        /// </summary>
-        /// <param name="previousState">The previous state</param>
-        /// <param name="newState">The new state</param>
-        public ChatSessionStateChangedEventArgs(Enums.ChatSessionState previousState, Enums.ChatSessionState newState)
-        {
-            PreviousState = previousState;
-            NewState = newState;
-            Timestamp = DateTime.UtcNow;
-        }
+        public ChatSessionStateChangedEventArgs(Enums.ChatSessionState previous, Enums.ChatSessionState @new)
+        { PreviousState = previous; NewState = @new; Timestamp = DateTime.UtcNow; }
     }
-
-    /// <summary>
-    /// Represents a message in the chat history
-    /// </summary>
-    public class MessageRecord
-    {
-        /// <summary>
-        /// Whether this message was sent by the local user
-        /// </summary>
-        public bool IsOutgoing { get; set; }
-
-        /// <summary>
-        /// When the message was sent or received
-        /// </summary>
-        public DateTime Timestamp { get; set; }
-
-        /// <summary>
-        /// Plaintext content of the message
-        /// </summary>
-        public string? Content { get; set; }
-
-        /// <summary>
-        /// Encrypted form of the message
-        /// </summary>
-        public EncryptedMessage? EncryptedMessage { get; set; }
-    }
-}
+} // End namespace

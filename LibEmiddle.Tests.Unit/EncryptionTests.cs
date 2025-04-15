@@ -4,23 +4,31 @@ using System.Text;
 using System.Security.Cryptography;
 using System.Collections.Generic;
 using System.Diagnostics;
-using LibEmiddle.Models;
 using LibEmiddle.API;
-using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class EncryptionTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void GenerateNonce_ShouldReturnUniqueValues()
         {
             // Act
-            byte[] nonce1 = NonceGenerator.GenerateNonce();
-            byte[] nonce2 = NonceGenerator.GenerateNonce();
-            byte[] nonce3 = NonceGenerator.GenerateNonce();
+            byte[] nonce1 = _cryptoProvider.GenerateNonce();
+            byte[] nonce2 = _cryptoProvider.GenerateNonce();
+            byte[] nonce3 = _cryptoProvider.GenerateNonce();
 
             // Assert
             Assert.IsFalse(TestsHelpers.AreByteArraysEqual(nonce1, nonce2));
@@ -38,11 +46,11 @@ namespace LibEmiddle.Tests.Unit
             {
                 rng.GetBytes(key);
             }
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act
-            byte[] ciphertext = AES.AESEncrypt(plaintext, key, nonce);
-            byte[] decrypted = AES.AESDecrypt(ciphertext, key, nonce);
+            byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, key, nonce);
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce);
 
             // Assert
             CollectionAssert.AreEqual(plaintext, decrypted);
@@ -82,13 +90,13 @@ namespace LibEmiddle.Tests.Unit
                 rng.GetBytes(wrongKey);
             }
 
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act
-            byte[] ciphertext = AES.AESEncrypt(plaintext, correctKey, nonce);
+            byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, correctKey, nonce);
 
             // Should throw an exception
-            byte[] decrypted = AES.AESDecrypt(ciphertext, wrongKey, nonce);
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, wrongKey, nonce);
         }
 
         [TestMethod]
@@ -97,10 +105,10 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             byte[] plaintext = Encoding.UTF8.GetBytes("Test message");
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act & Assert - Should throw ArgumentNullException
-            AES.AESEncrypt(plaintext, null, nonce);
+            _cryptoProvider.Encrypt(plaintext, null, nonce);
         }
 
         [TestMethod]
@@ -201,13 +209,13 @@ namespace LibEmiddle.Tests.Unit
 
             // Create invalid UTF-8 sequence
             byte[] invalidUtf8 = new byte[] { 0x48, 0x65, 0x6C, 0x6C, 0x6F, 0xC0, 0xC1, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF };
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             try
             {
                 // Attempt to encrypt the invalid UTF-8
-                byte[] ciphertext = AES.AESEncrypt(invalidUtf8, key, nonce);
-                byte[] decrypted = AES.AESDecrypt(ciphertext, key, nonce);
+                byte[] ciphertext = _cryptoProvider.Encrypt(invalidUtf8, key, nonce);
+                byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce);
 
                 // Convert back to string should fail or result in replacement characters
                 string result = Encoding.UTF8.GetString(decrypted);
@@ -229,11 +237,11 @@ namespace LibEmiddle.Tests.Unit
             byte[] plaintext = Encoding.UTF8.GetBytes("Test message with authentication tag");
             byte[] key = new byte[32]; // 256-bit key
             RandomNumberGenerator.Fill(key);
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act
-            byte[] ciphertextWithTag = AES.AESEncrypt(plaintext, key, nonce);
-            byte[] decrypted = AES.AESDecrypt(ciphertextWithTag, key, nonce);
+            byte[] ciphertextWithTag = _cryptoProvider.Encrypt(plaintext, key, nonce);
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertextWithTag, key, nonce);
 
             // Assert
             Assert.IsTrue(ciphertextWithTag.Length > plaintext.Length,
@@ -249,17 +257,17 @@ namespace LibEmiddle.Tests.Unit
             byte[] plaintext = Encoding.UTF8.GetBytes("Message with authentication tag");
             byte[] key = new byte[32];
             RandomNumberGenerator.Fill(key);
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Encrypt the message
-            byte[] ciphertextWithTag = AES.AESEncrypt(plaintext, key, nonce);
+            byte[] ciphertextWithTag = _cryptoProvider.Encrypt(plaintext, key, nonce);
 
             // Tamper with the authentication tag (last 16 bytes)
             int tagStart = ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE;
             ciphertextWithTag[tagStart] ^= 1; // Flip one bit in the tag
 
             // Act & Assert - Should throw CryptographicException
-            AES.AESDecrypt(ciphertextWithTag, key, nonce);
+            _cryptoProvider.Decrypt(ciphertextWithTag, key, nonce);
         }
 
         [TestMethod]
@@ -272,18 +280,18 @@ namespace LibEmiddle.Tests.Unit
 
             byte[] key = new byte[32];
             RandomNumberGenerator.Fill(key);
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act - Measure time for encryption and decryption
             Stopwatch stopwatch = new Stopwatch();
 
             stopwatch.Start();
-            byte[] ciphertext = AES.AESEncrypt(largeData, key, nonce);
+            byte[] ciphertext = _cryptoProvider.Encrypt(largeData, key, nonce);
             stopwatch.Stop();
             long encryptTime = stopwatch.ElapsedMilliseconds;
 
             stopwatch.Restart();
-            byte[] decrypted = AES.AESDecrypt(ciphertext, key, nonce);
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce);
             stopwatch.Stop();
             long decryptTime = stopwatch.ElapsedMilliseconds;
 
@@ -307,11 +315,11 @@ namespace LibEmiddle.Tests.Unit
 
             byte[] key = new byte[32];
             RandomNumberGenerator.Fill(key);
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act
-            byte[] ciphertext = AES.AESEncrypt(zeroData, key, nonce);
-            byte[] decrypted = AES.AESDecrypt(ciphertext, key, nonce);
+            byte[] ciphertext = _cryptoProvider.Encrypt(zeroData, key, nonce);
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce);
 
             // Assert
             CollectionAssert.AreEqual(zeroData, decrypted, "Decrypted zero data should match original");
@@ -333,11 +341,19 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class NonceGeneratorTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void GenerateNonce_ShouldProduceCorrectLength()
         {
             // Act
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Assert
             Assert.IsNotNull(nonce, "Nonce should not be null");
@@ -355,7 +371,7 @@ namespace LibEmiddle.Tests.Unit
             // Act
             for (int i = 0; i < nonceCount; i++)
             {
-                byte[] nonce = NonceGenerator.GenerateNonce();
+                byte[] nonce = _cryptoProvider.GenerateNonce();
                 string nonceStr = Convert.ToBase64String(nonce);
                 nonceSet.Add(nonceStr);
             }
@@ -380,7 +396,7 @@ namespace LibEmiddle.Tests.Unit
                 var task = System.Threading.Tasks.Task.Run(() => {
                     for (int i = 0; i < noncesPerThread; i++)
                     {
-                        byte[] nonce = NonceGenerator.GenerateNonce();
+                        byte[] nonce = _cryptoProvider.GenerateNonce();
                         allNonces.Add(nonce);
                     }
                 });
@@ -422,7 +438,7 @@ namespace LibEmiddle.Tests.Unit
             // Act - Generate many nonces
             for (int i = 0; i < nonceCount; i++)
             {
-                nonces[i] = NonceGenerator.GenerateNonce();
+                nonces[i] = _cryptoProvider.GenerateNonce();
             }
 
             // Count byte frequencies to test randomness

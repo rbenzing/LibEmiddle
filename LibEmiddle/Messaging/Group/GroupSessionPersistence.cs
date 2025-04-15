@@ -1,9 +1,8 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Collections.Immutable;
 using LibEmiddle.Core;
-using LibEmiddle.Models;
-using LibEmiddle.KeyExchange;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 
@@ -33,8 +32,8 @@ namespace LibEmiddle.Messaging.Group
             {
                 if (_groupSessions.TryGetValue(groupId, out var session))
                 {
-                    // Return a deep copy to prevent external modification
-                    return session.Clone();
+                    // Sessions are immutable so we don't need to clone
+                    return session;
                 }
 
                 return null;
@@ -52,8 +51,8 @@ namespace LibEmiddle.Messaging.Group
 
             lock (_sessionsLock)
             {
-                // Store a deep copy to prevent external modification
-                _groupSessions[session.GroupId] = session.Clone();
+                // Store the session directly (it's already immutable)
+                _groupSessions[session.GroupId] = session;
             }
         }
 
@@ -70,9 +69,7 @@ namespace LibEmiddle.Messaging.Group
             {
                 if (_groupSessions.TryGetValue(groupId, out var session))
                 {
-                    // Securely clear sensitive data
-                    SecureMemory.SecureClear(session.SenderKey);
-
+                    // Sessions are immutable, so no need to clear data
                     return _groupSessions.Remove(groupId);
                 }
 
@@ -88,8 +85,8 @@ namespace LibEmiddle.Messaging.Group
         {
             lock (_sessionsLock)
             {
-                // Return deep copies of all sessions
-                return _groupSessions.Values.Select(s => s.Clone()).ToList();
+                // Return direct references since sessions are immutable
+                return _groupSessions.Values.ToList();
             }
         }
 
@@ -101,18 +98,21 @@ namespace LibEmiddle.Messaging.Group
         public void SaveToFile(string filePath, string? password = null)
         {
             // Create a serializable representation of sessions
-            List<GroupSession> sessionDtos;
+            List<GroupSessionDto> sessionDtos;
 
             lock (_sessionsLock)
             {
-                sessionDtos = _groupSessions.Values.Select(s => new GroupSession
+                sessionDtos = _groupSessions.Values.Select(s => new GroupSessionDto
                 {
                     GroupId = s.GroupId,
-                    SenderKeyBase64 = Convert.ToBase64String(s.SenderKey),
+                    ChainKeyBase64 = Convert.ToBase64String(s.ChainKey),
+                    Iteration = s.Iteration,
                     CreatorIdentityKeyBase64 = Convert.ToBase64String(s.CreatorIdentityKey),
                     CreationTimestamp = s.CreationTimestamp,
-                    LastKeyRotation = s.LastKeyRotation,
-                    Metadata = s.Metadata
+                    KeyEstablishmentTimestamp = s.KeyEstablishmentTimestamp,
+                    MetadataJson = s.Metadata.Count > 0 ?
+                        JsonSerializer.Serialize(s.Metadata) :
+                        null
                 }).ToList();
             }
 
@@ -129,8 +129,6 @@ namespace LibEmiddle.Messaging.Group
             {
                 // Generate salt and nonce
                 byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
-                RandomNumberGenerator.Fill(salt);
-
                 byte[] nonce = NonceGenerator.GenerateNonce();
 
                 // Derive key from password
@@ -152,6 +150,9 @@ namespace LibEmiddle.Messaging.Group
                 ms.Write(encryptedData, 0, encryptedData.Length);
 
                 data = ms.ToArray();
+
+                // Clean up sensitive data
+                SecureMemory.SecureClear(key);
             }
 
             // Write to file
@@ -177,8 +178,8 @@ namespace LibEmiddle.Messaging.Group
             if (!string.IsNullOrEmpty(password))
             {
                 // Generate buffers with appropriate sizes
-                byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
-                byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
+                byte[] salt = new byte[Constants.DEFAULT_SALT_SIZE];
+                byte[] nonce = new byte[Constants.NONCE_SIZE];
 
                 // Use Span<T> to copy data without Buffer.BlockCopy
                 fileData.AsSpan(0, salt.Length).CopyTo(salt.AsSpan());
@@ -186,9 +187,9 @@ namespace LibEmiddle.Messaging.Group
 
                 // Extract encrypted data
                 int encryptedDataOffset = salt.Length + nonce.Length;
-                byte[] encryptedData = Sodium.GenerateRandomBytes(fileData.Length - encryptedDataOffset);
+                byte[] encryptedData = new byte[fileData.Length - encryptedDataOffset];
                 fileData.AsSpan(encryptedDataOffset, encryptedData.Length).CopyTo(encryptedData.AsSpan());
-                
+
                 // Derive key from password
                 using var deriveBytes = new Rfc2898DeriveBytes(
                     password,
@@ -199,7 +200,17 @@ namespace LibEmiddle.Messaging.Group
                 byte[] key = deriveBytes.GetBytes(Constants.AES_KEY_SIZE);
 
                 // Decrypt data
-                jsonData = AES.AESDecrypt(encryptedData, key, nonce);
+                try
+                {
+                    jsonData = AES.AESDecrypt(encryptedData, key, nonce);
+
+                    // Clean up sensitive data
+                    SecureMemory.SecureClear(key);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidDataException("Failed to decrypt group sessions file", ex);
+                }
             }
             else
             {
@@ -208,7 +219,7 @@ namespace LibEmiddle.Messaging.Group
 
             // Deserialize JSON
             string json = Encoding.UTF8.GetString(jsonData);
-            var sessionDtos = JsonSerializer.Deserialize<List<GroupSession>>(json);
+            var sessionDtos = JsonSerializer.Deserialize<List<GroupSessionDto>>(json);
 
             if (sessionDtos == null)
             {
@@ -222,34 +233,41 @@ namespace LibEmiddle.Messaging.Group
             {
                 try
                 {
-                    var session = new GroupSession
+                    // Parse metadata dictionary if present
+                    ImmutableDictionary<string, string>? metadata = null;
+                    if (!string.IsNullOrEmpty(dto.MetadataJson))
                     {
-                        GroupId = dto.GroupId,
-                        SenderKey = Convert.FromBase64String(dto.SenderKeyBase64),
-                        CreatorIdentityKey = Convert.FromBase64String(dto.CreatorIdentityKeyBase64),
-                        CreationTimestamp = dto.CreationTimestamp,
-                        LastKeyRotation = dto.LastKeyRotation,
-                        Metadata = dto.Metadata
-                    };
+                        var metadataDict = JsonSerializer.Deserialize<Dictionary<string, string>>(dto.MetadataJson);
+                        if (metadataDict != null)
+                        {
+                            metadata = metadataDict.ToImmutableDictionary();
+                        }
+                    }
+
+                    // Use the constructor pattern to create immutable sessions
+                    var session = new GroupSession(
+                        groupId: dto.GroupId,
+                        chainKey: Convert.FromBase64String(dto.ChainKeyBase64),
+                        iteration: dto.Iteration,
+                        creatorIdentityKey: Convert.FromBase64String(dto.CreatorIdentityKeyBase64),
+                        creationTimestamp: dto.CreationTimestamp,
+                        keyEstablishmentTimestamp: dto.KeyEstablishmentTimestamp,
+                        metadata: metadata ?? ImmutableDictionary<string, string>.Empty
+                    );
 
                     loadedSessions[dto.GroupId] = session;
                 }
                 catch (Exception ex)
                 {
                     // Log the error but continue processing other sessions
-                    LoggingManager.LogError(nameof(GroupSessionPersistence), $"Error loading session for group {dto.GroupId}: {ex.Message}");
+                    LoggingManager.LogError(nameof(GroupSessionPersistence),
+                        $"Error loading session for group {dto.GroupId}: {ex.Message}");
                 }
             }
 
             // Update sessions dictionary
             lock (_sessionsLock)
             {
-                // First, clear any sensitive data in existing sessions
-                foreach (var session in _groupSessions.Values)
-                {
-                    SecureMemory.SecureClear(session.SenderKey);
-                }
-
                 _groupSessions.Clear();
 
                 // Add loaded sessions
@@ -266,7 +284,7 @@ namespace LibEmiddle.Messaging.Group
         /// <param name="groupId">Group identifier</param>
         /// <param name="updateAction">Action to perform on the session</param>
         /// <returns>True if the session was updated</returns>
-        public bool UpdateGroupSession(string groupId, Action<GroupSession> updateAction)
+        public bool UpdateGroupSession(string groupId, Func<GroupSession, GroupSession> updateAction)
         {
             ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
             ArgumentNullException.ThrowIfNull(updateAction, nameof(updateAction));
@@ -275,7 +293,11 @@ namespace LibEmiddle.Messaging.Group
             {
                 if (_groupSessions.TryGetValue(groupId, out var session))
                 {
-                    updateAction(session);
+                    // Apply the update function to get a new session instance
+                    var updatedSession = updateAction(session);
+
+                    // Store the updated session
+                    _groupSessions[groupId] = updatedSession;
                     return true;
                 }
 
@@ -298,14 +320,16 @@ namespace LibEmiddle.Messaging.Group
             }
 
             // Create DTO
-            var sessionDto = new GroupSession
+            var sessionDto = new GroupSessionDto
             {
                 GroupId = session.GroupId,
-                SenderKeyBase64 = Convert.ToBase64String(session.SenderKey),
+                ChainKeyBase64 = Convert.ToBase64String(session.ChainKey),
+                Iteration = session.Iteration,
                 CreatorIdentityKeyBase64 = Convert.ToBase64String(session.CreatorIdentityKey),
                 CreationTimestamp = session.CreationTimestamp,
-                LastKeyRotation = session.LastKeyRotation,
-                Metadata = session.Metadata
+                KeyEstablishmentTimestamp = session.KeyEstablishmentTimestamp,
+                MetadataJson = session.Metadata.Count > 0 ?
+                    JsonSerializer.Serialize(session.Metadata) : null
             };
 
             // Serialize to JSON
@@ -319,7 +343,7 @@ namespace LibEmiddle.Messaging.Group
                 byte[] encryptedData = AES.AESEncrypt(data, encryptionKey, nonce);
 
                 // Combine nonce and encrypted data
-                byte[] result = Sodium.GenerateRandomBytes(nonce.Length + encryptedData.Length);
+                byte[] result = new byte[nonce.Length + encryptedData.Length];
                 nonce.AsSpan().CopyTo(result.AsSpan(0, nonce.Length));
                 encryptedData.AsSpan().CopyTo(result.AsSpan(nonce.Length, encryptedData.Length));
 
@@ -343,8 +367,8 @@ namespace LibEmiddle.Messaging.Group
             if (decryptionKey != null && decryptionKey.Length == Constants.AES_KEY_SIZE)
             {
                 // Extract nonce and encrypted data
-                byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
-                byte[] encryptedData = Sodium.GenerateRandomBytes(serializedData.Length - Constants.NONCE_SIZE);
+                byte[] nonce = new byte[Constants.NONCE_SIZE];
+                byte[] encryptedData = new byte[serializedData.Length - Constants.NONCE_SIZE];
 
                 serializedData.AsSpan(0, nonce.Length).CopyTo(nonce.AsSpan());
                 serializedData.AsSpan(nonce.Length).CopyTo(encryptedData.AsSpan());
@@ -358,122 +382,39 @@ namespace LibEmiddle.Messaging.Group
 
             // Deserialize
             string json = Encoding.UTF8.GetString(jsonData);
-            var dto = JsonSerializer.Deserialize<GroupSession>(json);
+            var dto = JsonSerializer.Deserialize<GroupSessionDto>(json);
 
             if (dto == null)
             {
                 throw new InvalidDataException("Failed to deserialize group session");
             }
 
-            // Convert to session object
-            var session = new GroupSession
+            // Parse metadata if present
+            ImmutableDictionary<string, string>? metadata = null;
+            if (!string.IsNullOrEmpty(dto.MetadataJson))
             {
-                GroupId = dto.GroupId,
-                SenderKey = Convert.FromBase64String(dto.SenderKeyBase64),
-                CreatorIdentityKey = Convert.FromBase64String(dto.CreatorIdentityKeyBase64),
-                CreationTimestamp = dto.CreationTimestamp,
-                LastKeyRotation = dto.LastKeyRotation,
-                Metadata = dto.Metadata
-            };
+                var metadataDict = JsonSerializer.Deserialize<Dictionary<string, string>>(dto.MetadataJson);
+                if (metadataDict != null)
+                {
+                    metadata = metadataDict.ToImmutableDictionary();
+                }
+            }
+
+            // Create new session from the DTO
+            var session = new GroupSession(
+                groupId: dto.GroupId,
+                chainKey: Convert.FromBase64String(dto.ChainKeyBase64),
+                iteration: dto.Iteration,
+                creatorIdentityKey: Convert.FromBase64String(dto.CreatorIdentityKeyBase64),
+                creationTimestamp: dto.CreationTimestamp,
+                keyEstablishmentTimestamp: dto.KeyEstablishmentTimestamp,
+                metadata: metadata ?? ImmutableDictionary<string, string>.Empty
+            );
 
             // Store the session
             StoreGroupSession(session);
 
             return session;
-        }
-
-        /// <summary>
-        /// Leverages the existing SessionPersistence class for more advanced serialization
-        /// and secure storage of group sessions
-        /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="filePath">File path to save to</param>
-        /// <param name="encryptionKey">Optional encryption key</param>
-        public void SaveGroupSessionAdvanced(string groupId, string filePath, byte[]? encryptionKey = null)
-        {
-            // Get the group session
-            GroupSession? session = GetGroupSession(groupId);
-            if (session == null)
-            {
-                throw new ArgumentException($"Group {groupId} not found", nameof(groupId));
-            }
-
-            // Convert to a DoubleRatchetSession for storage
-            // This is a way to leverage existing SessionPersistence functionality
-            // We're using the DoubleRatchetSession as a container for our group session data
-
-            // Create a minimal DH key pair for the session
-            var dummyKeyPair = (_identityKeyToSessionKey(session.CreatorIdentityKey), session.SenderKey);
-
-            // Create a session with our group data
-            var doubleRatchetSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: dummyKeyPair,
-                remoteDHRatchetKey: _identityKeyToSessionKey(session.CreatorIdentityKey), // Use creator key
-                rootKey: session.SenderKey, // Store sender key as root key
-                sendingChainKey: session.SenderKey, // Reuse sender key
-                receivingChainKey: session.SenderKey, // Reuse sender key
-                messageNumber: 0,
-                sessionId: session.GroupId // Use group ID as session ID
-            );
-
-            // Use SessionPersistence to save
-            SessionPersistence.SaveSessionToFile(doubleRatchetSession, filePath, encryptionKey);
-        }
-
-        /// <summary>
-        /// Loads a group session using the advanced serialization from SessionPersistence
-        /// </summary>
-        /// <param name="filePath">File path to load from</param>
-        /// <param name="decryptionKey">Optional decryption key</param>
-        /// <returns>The loaded group session</returns>
-        public GroupSession LoadGroupSessionAdvanced(string filePath, byte[]? decryptionKey = null)
-        {
-            // Load using SessionPersistence
-            var doubleRatchetSession = SessionPersistence.LoadSessionFromFile(filePath, decryptionKey);
-
-            // Convert back to GroupSession
-            var groupSession = new GroupSession
-            {
-                GroupId = doubleRatchetSession.SessionId,
-                SenderKey = doubleRatchetSession.RootKey, // Stored in root key
-                CreatorIdentityKey = _sessionKeyToIdentityKey(doubleRatchetSession.RemoteDHRatchetKey),
-                CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), // Not stored, using current time
-                LastKeyRotation = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() // Not stored, using current time
-            };
-
-            // Store in memory
-            StoreGroupSession(groupSession);
-
-            return groupSession;
-        }
-
-        /// <summary>
-        /// Helper method to convert identity key to session key format
-        /// </summary>
-        private byte[] _identityKeyToSessionKey(byte[] identityKey)
-        {
-            // If key is already the right size, return a copy
-            if (identityKey.Length == Constants.X25519_KEY_SIZE)
-            {
-                byte[] copy = Sodium.GenerateRandomBytes(identityKey.Length);
-                identityKey.AsSpan().CopyTo(copy);
-                return copy;
-            }
-
-            // Otherwise hash it down to the right size
-            using var sha256 = SHA256.Create();
-            return sha256.ComputeHash(identityKey);
-        }
-
-        /// <summary>
-        /// Helper method to convert session key to identity key format
-        /// </summary>
-        private byte[] _sessionKeyToIdentityKey(byte[] sessionKey)
-        {
-            // Just return a copy since we can't recover the original identity key
-            byte[] copy = Sodium.GenerateRandomBytes(sessionKey.Length);
-            sessionKey.AsSpan().CopyTo(copy);
-            return copy;
         }
     }
 }

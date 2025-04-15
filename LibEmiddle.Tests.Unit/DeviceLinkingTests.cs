@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.MultiDevice;
+using LibEmiddle.Abstractions;
 using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
@@ -13,36 +14,44 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class DeviceLinkingTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void CreateDeviceLinkMessage_MultipleKeyTypes_ShouldWork()
         {
             // Test scenarios: valid key pairs should succeed; invalid ones should throw.
-            var testScenarios = new (Func<(byte[] publicKey, byte[] privateKey)> keyPairFunc, bool shouldSucceed, string description)[]
+            var testScenarios = new (Func<KeyPair> keyPairFunc, bool shouldSucceed, string description)[]
             {
-        // Scenario 1: Standard Ed25519 Key Pair (should succeed)
-        ( () => KeyGenerator.GenerateEd25519KeyPair(), true, "Standard Ed25519 Key Pair" ),
+                // Scenario 1: Standard Ed25519 Key Pair (should succeed)
+                ( () => _cryptoProvider.GenerateKeyPair(KeyType.Ed25519), true, "Standard Ed25519 Key Pair" ),
         
-        // Scenario 2: X25519 Key Pair (should fail, because signing requires Ed25519)
-        ( () => KeyGenerator.GenerateX25519KeyPair(), false, "X25519 Key Pair" ),
+                // Scenario 2: X25519 Key Pair (should fail, because signing requires Ed25519)
+                ( () => _cryptoProvider.GenerateKeyPair(KeyType.X25519), false, "X25519 Key Pair" ),
         
-        // Scenario 3: Ed25519 public key with X25519 private key (should fail)
-        ( () => {
-            var ed25519Pair = KeyGenerator.GenerateEd25519KeyPair();
-            return (ed25519Pair.publicKey, KeyConversion.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.privateKey));
-        }, false, "Ed25519 to X25519 Hybrid Key Pair" )
+                // Scenario 3: Ed25519 public key with X25519 private key (should fail)
+                ( () => {
+                    var ed25519Pair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+                    return new KeyPair(ed25519Pair.PublicKey, _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.PrivateKey));
+                }, false, "Ed25519 to X25519 Hybrid Key Pair" )
             };
 
             foreach (var (keyPairFunc, shouldSucceed, description) in testScenarios)
             {
                 var mainDeviceKeyPair = keyPairFunc();
-                var newDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+                var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
                 if (shouldSucceed)
                 {
                     // Expect successful creation.
                     var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
                         mainDeviceKeyPair,
-                        newDeviceKeyPair.publicKey
+                        newDeviceKeyPair.PublicKey
                     );
 
                     Assert.IsNotNull(encryptedMessage, $"Device link message should be created for {description}");
@@ -54,7 +63,7 @@ namespace LibEmiddle.Tests.Unit
                     // Expect an exception due to invalid main device key pair format.
                     Assert.ThrowsException<ArgumentException>(() =>
                     {
-                        DeviceLinking.CreateDeviceLinkMessage(mainDeviceKeyPair, newDeviceKeyPair.publicKey);
+                        DeviceLinking.CreateDeviceLinkMessage(mainDeviceKeyPair, newDeviceKeyPair.PublicKey);
                     }, $"Scenario {description} should throw an exception due to invalid main device key pair format.");
                 }
             }
@@ -76,13 +85,13 @@ namespace LibEmiddle.Tests.Unit
                 }
 
                 // Generate a new device key pair (Ed25519).
-                var newDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+                var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
                 // Convert the Ed25519 public key to its X25519 representation.
-                var x25519NewDeviceKey = KeyConversion.ConvertEd25519PublicKeyToX25519(newDeviceKeyPair.publicKey);
+                var x25519NewDeviceKey = _cryptoProvider.ConvertEd25519PublicKeyToX25519(newDeviceKeyPair.PublicKey);
 
                 // Derive the shared key using the Ed25519 public key overload.
-                byte[] keyFromEd25519 = DeviceLinking.DeriveSharedKeyForNewDevice(existingSharedKey, newDeviceKeyPair.publicKey);
+                byte[] keyFromEd25519 = DeviceLinking.DeriveSharedKeyForNewDevice(existingSharedKey, newDeviceKeyPair.PublicKey);
 
                 // Derive the shared key using the X25519 public key overload.
                 byte[] keyFromX25519 = DeviceLinking.DeriveSharedKeyForNewDeviceX25519(existingSharedKey, x25519NewDeviceKey);
@@ -103,37 +112,35 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public void ProcessDeviceLinkMessage_EdgeCaseScenarios()
         {
-            var scenarios = new List<(
-                Func<(byte[] publicKey, byte[] privateKey)> mainDeviceKeyPairFunc,
-                string scenarioDescription)>
+            var scenarios = new List<(Func<KeyPair> mainDeviceKeyPairFunc, string scenarioDescription)>
             {
                 // Scenario 1: Standard Ed25519 Key Generation
-                (() => KeyGenerator.GenerateEd25519KeyPair(), "Standard Ed25519 Key Generation"),
+                (() => _cryptoProvider.GenerateKeyPair(KeyType.Ed25519), "Standard Ed25519 Key Generation"),
 
                 // Scenario 2: Ed25519 to X25519 Conversion
                 // (This returns a key pair that is already converted and should be rejected.)
                 (() => {
-                    var ed25519Pair = KeyGenerator.GenerateEd25519KeyPair();
-                    var x25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.privateKey);
+                    KeyPair ed25519Pair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+                    var x25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.PrivateKey);
                     var x25519Public = Sodium.ScalarMultBase(x25519Private);
-                    return (x25519Public, x25519Private);
+                    return new KeyPair(x25519Public, x25519Private);
                 }, "Ed25519 to X25519 Conversion"),
 
                 // Scenario 3: Minimal Entropy Keys – valid key pair derived from an all-zero seed.
                 (() => {
                     var seed = new byte[32]; // 32 zero bytes
-                    return KeyGenerator.GenerateEd25519KeyPairFromSeed(seed);
+                    return _cryptoProvider.GenerateEd25519KeyPairFromSeed(seed);
                 }, "Minimal Entropy Keys"),
 
                 // Scenario 4: Maximum Entropy Keys – valid key pair derived from a fixed high-entropy seed.
                 (() => {
                     var seed = Enumerable.Range(0, 32).Select(i => (byte)(i * 17)).ToArray();
-                    return KeyGenerator.GenerateEd25519KeyPairFromSeed(seed);
+                    return _cryptoProvider.GenerateEd25519KeyPairFromSeed(seed);
                 }, "Maximum Entropy Keys"),
 
                 // Scenario 5: X25519 Key Pair
                 // (This scenario uses a pure X25519 key pair and should be rejected.)
-                (() => KeyGenerator.GenerateX25519KeyPair(), "X25519 Key Pair")
+                (() => _cryptoProvider.GenerateKeyPair(KeyType.X25519), "X25519 Key Pair")
             };
 
             foreach (var (mainDeviceKeyPairFunc, scenarioDescription) in scenarios)
@@ -142,7 +149,7 @@ namespace LibEmiddle.Tests.Unit
                 var mainDeviceKeyPair = mainDeviceKeyPairFunc();
 
                 // Generate a new device key pair (always standard Ed25519).
-                var newDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+                var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
                 if (scenarioDescription == "Ed25519 to X25519 Conversion" ||
                     scenarioDescription == "X25519 Key Pair")
@@ -150,7 +157,7 @@ namespace LibEmiddle.Tests.Unit
                     // For these scenarios, we expect an exception when creating the device link message.
                     Assert.ThrowsException<ArgumentException>(() =>
                     {
-                        DeviceLinking.CreateDeviceLinkMessage(mainDeviceKeyPair, newDeviceKeyPair.publicKey);
+                        DeviceLinking.CreateDeviceLinkMessage(mainDeviceKeyPair, newDeviceKeyPair.PublicKey);
                     }, $"Scenario {scenarioDescription} should throw an exception due to invalid main device key pair format.");
                 }
                 else
@@ -161,14 +168,14 @@ namespace LibEmiddle.Tests.Unit
                         // Create device link message.
                         var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
                             mainDeviceKeyPair,
-                            newDeviceKeyPair.publicKey
+                            newDeviceKeyPair.PublicKey
                         );
 
                         // Process the message.
                         var result = DeviceLinking.ProcessDeviceLinkMessage(
                             encryptedMessage,
                             newDeviceKeyPair,
-                            mainDeviceKeyPair.publicKey
+                            mainDeviceKeyPair.PublicKey
                         );
 
                         // Validation.
@@ -182,9 +189,9 @@ namespace LibEmiddle.Tests.Unit
                         // Detailed failure reporting.
                         Assert.Fail(
                             $"Unexpected exception in scenario {scenarioDescription}: {ex.Message}\n" +
-                            $"Main Device Key Length: {mainDeviceKeyPair.publicKey.Length}\n" +
-                            $"Main Device Private Key Length: {mainDeviceKeyPair.privateKey.Length}\n" +
-                            $"New Device Key Length: {newDeviceKeyPair.publicKey.Length}"
+                            $"Main Device Key Length: {mainDeviceKeyPair.PublicKey.Length}\n" +
+                            $"Main Device Private Key Length: {mainDeviceKeyPair.PrivateKey.Length}\n" +
+                            $"New Device Key Length: {newDeviceKeyPair.PublicKey.Length}"
                         );
                     }
                 }
@@ -194,13 +201,13 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public void DeviceLinkMessage_WithMaliciousPayload_ShouldFail()
         {
-            var mainDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var newDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create a valid device link message
             var originalMessage = DeviceLinking.CreateDeviceLinkMessage(
                 mainDeviceKeyPair,
-                newDeviceKeyPair.publicKey
+                newDeviceKeyPair.PublicKey
             );
 
             // Create malicious variations
@@ -244,7 +251,7 @@ namespace LibEmiddle.Tests.Unit
                 var result = DeviceLinking.ProcessDeviceLinkMessage(
                     maliciousMessage,
                     newDeviceKeyPair,
-                    mainDeviceKeyPair.publicKey
+                    mainDeviceKeyPair.PublicKey
                 );
 
                 Assert.IsNull(result, "Malicious message should not be processed");
@@ -288,9 +295,9 @@ namespace LibEmiddle.Tests.Unit
             foreach (var keyFunc in keyVarietyScenarios)
             {
                 byte[] sharedKey = keyFunc();
-                var newDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+                var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
-                var derivedKey = DeviceLinking.DeriveSharedKeyForNewDevice(sharedKey, newDeviceKeyPair.publicKey);
+                var derivedKey = DeviceLinking.DeriveSharedKeyForNewDevice(sharedKey, newDeviceKeyPair.PublicKey);
 
                 // Validate derived key properties
                 Assert.IsNotNull(derivedKey, "Derived key should not be null");

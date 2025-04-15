@@ -21,14 +21,18 @@ namespace LibEmiddle.Tests.Unit
     public class MailboxManagerTests
     {
         private Mock<IMailboxTransport> _mockTransport;
-        private (byte[] publicKey, byte[] privateKey) _testIdentityKeyPair;
+        private KeyPair _testIdentityKeyPair;
         private List<MailboxMessage> _testMessages;
+
+        private CryptoProvider _cryptoProvider;
 
         [TestInitialize]
         public void Setup()
         {
+            _cryptoProvider = new CryptoProvider();
+
             // Create test identity key pair
-            _testIdentityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            _testIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Setup mock transport
             _mockTransport = new Mock<IMailboxTransport>();
@@ -39,8 +43,8 @@ namespace LibEmiddle.Tests.Unit
                 new MailboxMessage
                 {
                     MessageId = Guid.NewGuid().ToString(),
-                    RecipientKey = _testIdentityKeyPair.publicKey,
-                    SenderKey = KeyGenerator.GenerateEd25519KeyPair().publicKey,
+                    RecipientKey = _testIdentityKeyPair.PublicKey,
+                    SenderKey = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey,
                     IsRead = false,
                     Type = Enums.MessageType.Chat,
                     EncryptedPayload = new EncryptedMessage
@@ -57,8 +61,8 @@ namespace LibEmiddle.Tests.Unit
                 new MailboxMessage
                 {
                     MessageId = Guid.NewGuid().ToString(),
-                    RecipientKey = _testIdentityKeyPair.publicKey,
-                    SenderKey = KeyGenerator.GenerateEd25519KeyPair().publicKey,
+                    RecipientKey = _testIdentityKeyPair.PublicKey,
+                    SenderKey = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey,
                     IsRead = true,
                     Type = Enums.MessageType.DeviceSync,
                     EncryptedPayload = new EncryptedMessage
@@ -80,7 +84,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             _mockTransport
-                .Setup(t => t.FetchMessagesAsync(_testIdentityKeyPair.publicKey, It.IsAny<CancellationToken>()))
+                .Setup(t => t.FetchMessagesAsync(_testIdentityKeyPair.PublicKey, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(_testMessages);
 
             // Create event tracking variables
@@ -107,7 +111,7 @@ namespace LibEmiddle.Tests.Unit
                 Assert.IsNotNull(lastReceivedMessage, "Should have received at least one message");
 
                 // Verify that the transport was called properly
-                _mockTransport.Verify(t => t.FetchMessagesAsync(_testIdentityKeyPair.publicKey, It.IsAny<CancellationToken>()), Times.Once);
+                _mockTransport.Verify(t => t.FetchMessagesAsync(_testIdentityKeyPair.PublicKey, It.IsAny<CancellationToken>()), Times.Once);
             }
             finally
             {
@@ -132,7 +136,7 @@ namespace LibEmiddle.Tests.Unit
                 })
                 .ReturnsAsync(true);
 
-            var recipientKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create testable mailbox manager
             var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object);
@@ -141,7 +145,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 // Act
                 string messageId = mailboxManager.SendMessage(
-                    recipientKeyPair.publicKey,
+                    recipientKeyPair.PublicKey,
                     "Test message content",
                     Enums.MessageType.Chat);
 
@@ -167,7 +171,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             _mockTransport
-                .Setup(t => t.FetchMessagesAsync(_testIdentityKeyPair.publicKey, It.IsAny<CancellationToken>()))
+                .Setup(t => t.FetchMessagesAsync(_testIdentityKeyPair.PublicKey, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(_testMessages);
 
             _mockTransport
@@ -219,7 +223,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             _mockTransport
-                .Setup(t => t.FetchMessagesAsync(_testIdentityKeyPair.publicKey, It.IsAny<CancellationToken>()))
+                .Setup(t => t.FetchMessagesAsync(_testIdentityKeyPair.PublicKey, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(_testMessages);
 
             _mockTransport
@@ -323,11 +327,11 @@ namespace LibEmiddle.Tests.Unit
                 }
 
                 // Send a few messages to populate outgoing queue
-                var recipientKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+                var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
                 for (int i = 0; i < 3; i++)
                 {
                     mailboxManager.SendMessage(
-                        recipientKeyPair.publicKey,
+                        recipientKeyPair.PublicKey,
                         $"Test message {i}",
                         Enums.MessageType.Chat);
                 }
@@ -370,13 +374,13 @@ namespace LibEmiddle.Tests.Unit
         public void ImportExportSession_ShouldWorkCorrectly()
         {
             // Arrange
-            var recipientKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            string recipientId = Convert.ToBase64String(recipientKeyPair.publicKey);
+            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
 
             using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
             {
                 // Send a message to create a session
-                mailboxManager.SendMessage(recipientKeyPair.publicKey, "Test message", Enums.MessageType.Chat);
+                mailboxManager.SendMessage(recipientKeyPair.PublicKey, "Test message", Enums.MessageType.Chat);
 
                 // Act
                 byte[] sessionData = mailboxManager.ExportSession(recipientId);
@@ -391,7 +395,7 @@ namespace LibEmiddle.Tests.Unit
                     Assert.IsTrue(result, "Session import should succeed");
 
                     // Verify we can now send messages with the imported session
-                    string messageId = newMailboxManager.SendMessage(recipientKeyPair.publicKey, "Test with imported session", Enums.MessageType.Chat);
+                    string messageId = newMailboxManager.SendMessage(recipientKeyPair.PublicKey, "Test with imported session", Enums.MessageType.Chat);
                     Assert.IsFalse(string.IsNullOrEmpty(messageId), "Should be able to send messages with imported session");
                 }
             }
@@ -401,8 +405,8 @@ namespace LibEmiddle.Tests.Unit
         public void ImportSession_WithInvalidData_ShouldReturnFalse()
         {
             // Arrange
-            var recipientKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            string recipientId = Convert.ToBase64String(recipientKeyPair.publicKey);
+            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
             byte[] invalidSessionData = Encoding.UTF8.GetBytes("This is not valid session data");
 
             using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
@@ -419,8 +423,8 @@ namespace LibEmiddle.Tests.Unit
         public void ImportEncryptedSession_WithWrongKey_ShouldReturnFalse()
         {
             // Arrange
-            var recipientKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            string recipientId = Convert.ToBase64String(recipientKeyPair.publicKey);
+            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
 
             // Generate encryption keys
             byte[] correctKey = Sodium.GenerateRandomBytes(32);
@@ -432,7 +436,7 @@ namespace LibEmiddle.Tests.Unit
             using (var sourceManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
             {
                 // Send a message to create a session
-                sourceManager.SendMessage(recipientKeyPair.publicKey, "Test message", Enums.MessageType.Chat);
+                sourceManager.SendMessage(recipientKeyPair.PublicKey, "Test message", Enums.MessageType.Chat);
 
                 // Export with the correct key
                 byte[] sessionData = sourceManager.ExportSession(recipientId, correctKey);
@@ -473,8 +477,8 @@ namespace LibEmiddle.Tests.Unit
             var normalMessage = new MailboxMessage
             {
                 MessageId = Guid.NewGuid().ToString(),
-                RecipientKey = _testIdentityKeyPair.publicKey,
-                SenderKey = KeyGenerator.GenerateEd25519KeyPair().publicKey,
+                RecipientKey = _testIdentityKeyPair.PublicKey,
+                SenderKey = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey,
                 EncryptedPayload = new EncryptedMessage
                 {
                     Ciphertext = new byte[16], // Must be non-empty 
@@ -492,8 +496,8 @@ namespace LibEmiddle.Tests.Unit
             var expiredMessage = new MailboxMessage
             {
                 MessageId = Guid.NewGuid().ToString(),
-                RecipientKey = _testIdentityKeyPair.publicKey,
-                SenderKey = KeyGenerator.GenerateEd25519KeyPair().publicKey,
+                RecipientKey = _testIdentityKeyPair.PublicKey,
+                SenderKey = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey,
                 EncryptedPayload = new EncryptedMessage
                 {
                     Ciphertext = new byte[16], // Must be non-empty
@@ -541,9 +545,9 @@ namespace LibEmiddle.Tests.Unit
     {
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, MailboxMessage> _incomingMessages;
         private readonly IMailboxTransport _testTransport;
-        private readonly (byte[] publicKey, byte[] privateKey) _testIdentityKeyPair;
+        private readonly KeyPair _testIdentityKeyPair;
 
-        public TestableMailboxManager((byte[] publicKey, byte[] privateKey) identityKeyPair, IMailboxTransport transport)
+        public TestableMailboxManager(KeyPair identityKeyPair, IMailboxTransport transport)
             : base(identityKeyPair, transport)
         {
             // Store these for our test methods
@@ -570,7 +574,7 @@ namespace LibEmiddle.Tests.Unit
             try
             {
                 // Fetch messages directly from the transport
-                var messages = await _testTransport.FetchMessagesAsync(_testIdentityKeyPair.publicKey, cancellationToken);
+                var messages = await _testTransport.FetchMessagesAsync(_testIdentityKeyPair.PublicKey, cancellationToken);
 
                 if (messages != null)
                 {

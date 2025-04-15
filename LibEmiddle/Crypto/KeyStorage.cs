@@ -2,14 +2,13 @@
 using System.Text;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
-using LibEmiddle.Models;
 
 namespace LibEmiddle.Crypto
 {
     /// <summary>
     /// Provides functionality for securely storing and retrieving cryptographic keys
     /// </summary>
-    public static class KeyStorage
+    internal static class KeyStorage
     {
         /// <summary>
         /// Securely stores a key to a file with optional password protection and salt rotation

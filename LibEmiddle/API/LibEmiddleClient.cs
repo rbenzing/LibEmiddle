@@ -20,7 +20,7 @@ namespace LibEmiddle.API
         private readonly GroupChatManager _groupChatManager;
         private readonly DeviceManager _deviceManager;
         private readonly ChatSessionManager _chatSessionManager;
-        private readonly (byte[] publicKey, byte[] privateKey) _identityKeyPair;
+        private readonly KeyPair _identityKeyPair;
         private bool _disposed;
 
         /// <summary>
@@ -39,7 +39,7 @@ namespace LibEmiddle.API
         /// Creates a new E2EE client with an existing identity key pair
         /// </summary>
         /// <param name="identityKeyPair">Identity key pair to use</param>
-        public LibEmiddleClient((byte[] publicKey, byte[] privateKey) identityKeyPair)
+        public LibEmiddleClient(KeyPair identityKeyPair)
         {
             _identityKeyPair = identityKeyPair;
             _groupChatManager = new GroupChatManager(_identityKeyPair);
@@ -53,16 +53,16 @@ namespace LibEmiddle.API
         /// Generates an AES-GCM 32-bit sender key
         /// </summary>
         /// <returns>Random sender key suitable for group encryption</returns>
-        public static byte[] GenerateSenderKey()
+        public static byte[] GenerateInitialChainKey()
         {
-            return KeyGenerator.GenerateSenderKey();
+            return KeyGenerator.GenerateInitialChainKey();
         }
 
         /// <summary>
         /// Generates an Ed25519 key pair for digital signatures
         /// </summary>
         /// <returns>Tuple containing (publicKey, privateKey)</returns>
-        public static (byte[] publicKey, byte[] privateKey) GenerateSignatureKeyPair()
+        public static KeyPair GenerateSignatureKeyPair()
         {
             return KeyGenerator.GenerateEd25519KeyPair();
         }
@@ -71,7 +71,7 @@ namespace LibEmiddle.API
         /// Generates an X25519 key pair for secure key exchange
         /// </summary>
         /// <returns>Tuple containing (publicKey, privateKey)</returns>
-        public static (byte[] publicKey, byte[] privateKey) GenerateKeyExchangeKeyPair()
+        public static KeyPair GenerateKeyExchangeKeyPair()
         {
             return KeyGenerator.GenerateX25519KeyPair();
         }
@@ -132,7 +132,7 @@ namespace LibEmiddle.API
         /// Signs a message using the specified private key
         /// </summary>
         /// <param name="message">Message to sign</param>
-        /// <param name="privateKey">Private key for signing</param>
+        /// <param name="privateKey">Private key for signing (64 bytes Ed25519)</param>
         /// <returns>Signature as a byte array</returns>
         public static byte[] SignMessage(byte[] message, byte[] privateKey)
         {
@@ -182,7 +182,7 @@ namespace LibEmiddle.API
         public byte[] SignWithIdentityKey(byte[] message)
         {
             ThrowIfDisposed();
-            return MessageSigning.SignMessage(message, _identityKeyPair.privateKey);
+            return MessageSigning.SignMessage(message, _identityKeyPair.PrivateKey);
         }
 
         /// <summary>
@@ -193,7 +193,7 @@ namespace LibEmiddle.API
         public string SignTextWithIdentityKey(string message)
         {
             ThrowIfDisposed();
-            return MessageSigning.SignTextMessage(message, _identityKeyPair.privateKey);
+            return MessageSigning.SignTextMessage(message, _identityKeyPair.PrivateKey);
         }
 
         #endregion
@@ -207,7 +207,7 @@ namespace LibEmiddle.API
         /// <param name="recipientBundle">Optional recipient's key bundle, required for new sessions</param>
         /// <returns>Chat session</returns>
         /// <exception cref="ArgumentNullException">Thrown when recipientPublicKey is null</exception>
-        public ChatSession GetOrCreateChatSession(
+        public (ChatSession session, InitialMessageData? initialMessageData) GetOrCreateChatSession(
             byte[] recipientPublicKey,
             X3DHPublicBundle? recipientBundle = null)
         {
@@ -274,10 +274,10 @@ namespace LibEmiddle.API
         /// Gets the identity key pair for this client
         /// </summary>
         /// <returns>Identity key pair (publicKey, privateKey)</returns>
-        public (byte[] publicKey, byte[] privateKey) GetIdentityKeyPair()
+        public KeyPair GetIdentityKeyPair()
         {
             ThrowIfDisposed();
-            return (_identityKeyPair.publicKey, _identityKeyPair.privateKey);
+            return new KeyPair(_identityKeyPair.PublicKey, _identityKeyPair.PrivateKey);
         }
 
         /// <summary>
@@ -289,7 +289,7 @@ namespace LibEmiddle.API
             ThrowIfDisposed();
 
             var bundle = X3DHExchange.CreateX3DHKeyBundle(
-                (_identityKeyPair.publicKey, _identityKeyPair.privateKey)
+                _identityKeyPair
             );
 
             return bundle.ToPublicBundle();
@@ -301,8 +301,7 @@ namespace LibEmiddle.API
         /// <param name="recipientBundle">Recipient's key bundle</param>
         /// <param name="senderIdentityKeyPair">Sender's identity key pair</param>
         /// <returns>Initial session for secure communication</returns>
-        public static X3DHSession InitiateSession(X3DHPublicBundle recipientBundle,
-                                          (byte[] publicKey, byte[] privateKey) senderIdentityKeyPair)
+        public static X3DHSession InitiateSession(X3DHPublicBundle recipientBundle, KeyPair senderIdentityKeyPair)
         {
             return X3DHExchange.InitiateX3DHSession(recipientBundle, senderIdentityKeyPair, out var usedOneTimePreKeyId);
         }
@@ -490,7 +489,7 @@ namespace LibEmiddle.API
         /// <param name="mainDeviceKeyPair">Tuple of public and private keys</param>
         /// <param name="newDevicePublicKey">New device's public key</param>
         /// <returns>Encrypted link message</returns>
-        public static EncryptedMessage CreateDeviceLinkMessage((byte[] publicKey, byte[] privateKey) mainDeviceKeyPair, byte[] newDevicePublicKey)
+        public static EncryptedMessage CreateDeviceLinkMessage(KeyPair mainDeviceKeyPair, byte[] newDevicePublicKey)
         {
             return DeviceLinking.CreateDeviceLinkMessage(mainDeviceKeyPair, newDevicePublicKey);
         }
@@ -575,7 +574,7 @@ namespace LibEmiddle.API
         /// <param name="revokedDeviceKey">Public key of the device to revoke</param>
         /// <param name="authorityKeyPair">Key pair with authority to revoke devices</param>
         /// <returns>A signed revocation message that can be distributed to other devices</returns>
-        public static DeviceRevocationMessage CreateDeviceRevocationMessage(byte[] revokedDeviceKey, (byte[] publicKey, byte[] privateKey) authorityKeyPair)
+        public static DeviceRevocationMessage CreateDeviceRevocationMessage(byte[] revokedDeviceKey, KeyPair authorityKeyPair)
         {
             long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
@@ -587,7 +586,7 @@ namespace LibEmiddle.API
             timestampBytes.AsSpan().CopyTo(dataToSign.AsSpan(revokedDeviceKey.Length));
 
             // Sign the combined data
-            byte[] signature = MessageSigning.SignMessage(dataToSign, authorityKeyPair.privateKey);
+            byte[] signature = MessageSigning.SignMessage(dataToSign, authorityKeyPair.PrivateKey);
 
             // Create and return the revocation message
             return new DeviceRevocationMessage
@@ -630,7 +629,7 @@ namespace LibEmiddle.API
         /// <param name="identityKeyPair">The user's identity key pair</param>
         /// <param name="transport">The transport implementation to use</param>
         /// <returns>A configured mailbox manager</returns>
-        public static MailboxManager CreateMailboxManager((byte[] publicKey, byte[] privateKey) identityKeyPair, IMailboxTransport transport)
+        public static MailboxManager CreateMailboxManager(KeyPair identityKeyPair, IMailboxTransport transport)
         {
             return new MailboxManager(identityKeyPair, transport);
         }

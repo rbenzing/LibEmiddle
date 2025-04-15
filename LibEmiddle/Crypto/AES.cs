@@ -9,7 +9,7 @@ namespace LibEmiddle.Crypto
     /// Provides AES-GCM encryption and decryption functionality using libsodium
     /// with state precomputation for improved performance.
     /// </summary>
-    public class AES
+    internal static class AES
     {
         // Size of the AES-GCM state for precomputation
         private const int StateSize = 512; // Must be aligned to 16 bytes

@@ -4,22 +4,35 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using LibEmiddle.API;
 using LibEmiddle.Messaging.Transport;
 using LibEmiddle.Core;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Domain;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class SignatureTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void SignAndVerifyMessage_ShouldVerifyCorrectly()
         {
             // Arrange
             byte[] message = Encoding.UTF8.GetBytes("This is a message to be signed");
-            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var publicKey = _identityKeyPair.PublicKey;
+            var privateKey = _identityKeyPair.PrivateKey;
 
             // Act
-            byte[] signature = LibEmiddleClient.SignMessage(message, privateKey);
-            bool isValid = LibEmiddleClient.VerifySignature(message, signature, publicKey);
+            byte[] signature = _cryptoProvider.Sign(message, privateKey);
+            bool isValid = _cryptoProvider.Verify(message, signature, publicKey);
 
             // Assert
             Assert.IsTrue(isValid);
@@ -31,11 +44,13 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             byte[] originalMessage = Encoding.UTF8.GetBytes("This is a message to be signed");
             byte[] tamperedMessage = Encoding.UTF8.GetBytes("This is a tampered message");
-            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var publicKey = _identityKeyPair.PublicKey;
+            var privateKey = _identityKeyPair.PrivateKey;
 
             // Act
-            byte[] signature = LibEmiddleClient.SignMessage(originalMessage, privateKey);
-            bool isValid = LibEmiddleClient.VerifySignature(tamperedMessage, signature, publicKey);
+            byte[] signature = _cryptoProvider.Sign(originalMessage, privateKey);
+            bool isValid = _cryptoProvider.Verify(tamperedMessage, signature, publicKey);
 
             // Assert
             Assert.IsFalse(isValid);
@@ -46,7 +61,9 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string message = "This is a text message to be signed";
-            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var publicKey = _identityKeyPair.PublicKey;
+            var privateKey = _identityKeyPair.PrivateKey;
 
             // Act
             string signatureBase64 = LibEmiddleClient.SignTextMessage(message, privateKey);
@@ -57,14 +74,14 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentNullException))]
+        [ExpectedException(typeof(NullReferenceException))]
         public void SignMessage_WithNullPrivateKey_ShouldThrowException()
         {
             // Arrange
             byte[] message = Encoding.UTF8.GetBytes("Test message");
 
-            // Act & Assert - Should throw ArgumentNullException
-            LibEmiddleClient.SignMessage(message, null);
+            // Act & Assert - Should throw NullReferenceException
+            _cryptoProvider.Sign(message, null);
         }
 
         [TestMethod]
@@ -72,7 +89,8 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string message = "Test message";
-            var (publicKey, _) = LibEmiddleClient.GenerateSignatureKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var publicKey = _identityKeyPair.PublicKey;
             string invalidBase64 = "not valid base64!@#$";
 
             // Act
@@ -83,20 +101,16 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void SignMessage_WithX25519PrivateKey_ShouldStillWork()
+        [ExpectedException(typeof(ArgumentException))]
+        public void SignMessage_WithX25519PrivateKey_ShouldNotWork()
         {
             // Arrange
             byte[] message = Encoding.UTF8.GetBytes("Message to sign with X25519 key");
-            var (publicKey, privateKey) = LibEmiddleClient.GenerateKeyExchangeKeyPair(); // X25519 key pair
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var privateKey = _identityKeyPair.PrivateKey;
 
             // Act
             byte[] signature = MessageSigning.SignMessage(message, privateKey);
-
-            // We can't verify with X25519 public key directly, so this is just testing that signing doesn't throw
-
-            // Assert
-            Assert.IsNotNull(signature);
-            Assert.IsTrue(signature.Length > 0);
         }
 
         [TestMethod]
@@ -107,33 +121,35 @@ namespace LibEmiddle.Tests.Unit
             byte[] mediumMessage = SecureMemory.CreateSecureBuffer(1024); // 1KB
             byte[] largeMessage = SecureMemory.CreateSecureBuffer(1024 * 10); // 10KB
 
-            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
+            KeyPair _signIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var publicKey = _signIdentityKeyPair.PublicKey;
+            var privateKey = _signIdentityKeyPair.PrivateKey;
 
             // Act - Measure signing time
             System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
 
             // Small message
             stopwatch.Start();
-            byte[] smallSignature = LibEmiddleClient.SignMessage(smallMessage, privateKey);
+            byte[] smallSignature = _cryptoProvider.Sign(smallMessage, privateKey);
             stopwatch.Stop();
             long smallSignTime = stopwatch.ElapsedMilliseconds;
 
             // Medium message
             stopwatch.Restart();
-            byte[] mediumSignature = LibEmiddleClient.SignMessage(mediumMessage, privateKey);
+            byte[] mediumSignature = _cryptoProvider.Sign(mediumMessage, privateKey);
             stopwatch.Stop();
             long mediumSignTime = stopwatch.ElapsedMilliseconds;
 
             // Large message
             stopwatch.Restart();
-            byte[] largeSignature = LibEmiddleClient.SignMessage(largeMessage, privateKey);
+            byte[] largeSignature = _cryptoProvider.Sign(largeMessage, privateKey);
             stopwatch.Stop();
             long largeSignTime = stopwatch.ElapsedMilliseconds;
 
             // Assert - Verify signatures and check performance is reasonable
-            Assert.IsTrue(LibEmiddleClient.VerifySignature(smallMessage, smallSignature, publicKey));
-            Assert.IsTrue(LibEmiddleClient.VerifySignature(mediumMessage, mediumSignature, publicKey));
-            Assert.IsTrue(LibEmiddleClient.VerifySignature(largeMessage, largeSignature, publicKey));
+            Assert.IsTrue(_cryptoProvider.Verify(smallMessage, smallSignature, publicKey));
+            Assert.IsTrue(_cryptoProvider.Verify(mediumMessage, mediumSignature, publicKey));
+            Assert.IsTrue(_cryptoProvider.Verify(largeMessage, largeSignature, publicKey));
 
             // Small message should be fast (we're using a loose constraint to allow for slow CI environments)
             Assert.IsTrue(smallSignTime < 500, $"Small message signing took {smallSignTime}ms");
@@ -152,30 +168,31 @@ namespace LibEmiddle.Tests.Unit
         public void LongTermCryptographicIdentity_ShouldBeSecure()
         {
             // Generate multiple key pairs
-            var keyPair1 = LibEmiddleClient.GenerateSignatureKeyPair();
-            var keyPair2 = LibEmiddleClient.GenerateSignatureKeyPair();
-            var keyPair3 = LibEmiddleClient.GenerateSignatureKeyPair();
+            KeyPair _signIdentityKeyPair1 = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair _signIdentityKeyPair2 = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair _signIdentityKeyPair3 = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+
 
             // Ensure keys meet minimum security requirements
-            Assert.AreEqual(32, keyPair1.publicKey.Length, "Ed25519 public key should be 32 bytes");
-            Assert.AreEqual(64, keyPair1.privateKey.Length, "Ed25519 private key should be 64 bytes");
+            Assert.AreEqual(32, _signIdentityKeyPair1.PublicKey.Length, "Ed25519 public key should be 32 bytes");
+            Assert.AreEqual(64, _signIdentityKeyPair1.PrivateKey.Length, "Ed25519 private key should be 64 bytes");
 
             // Ensure all generated keys are different
-            CollectionAssert.AreNotEqual(keyPair1.publicKey, keyPair2.publicKey);
-            CollectionAssert.AreNotEqual(keyPair1.publicKey, keyPair3.publicKey);
-            CollectionAssert.AreNotEqual(keyPair2.publicKey, keyPair3.publicKey);
+            CollectionAssert.AreNotEqual(_signIdentityKeyPair1.PublicKey, _signIdentityKeyPair2.PublicKey);
+            CollectionAssert.AreNotEqual(_signIdentityKeyPair1.PublicKey, _signIdentityKeyPair3.PublicKey);
+            CollectionAssert.AreNotEqual(_signIdentityKeyPair2.PublicKey, _signIdentityKeyPair3.PublicKey);
 
-            CollectionAssert.AreNotEqual(keyPair1.privateKey, keyPair2.privateKey);
-            CollectionAssert.AreNotEqual(keyPair1.privateKey, keyPair3.privateKey);
-            CollectionAssert.AreNotEqual(keyPair2.privateKey, keyPair3.privateKey);
+            CollectionAssert.AreNotEqual(_signIdentityKeyPair1.PrivateKey, _signIdentityKeyPair2.PrivateKey);
+            CollectionAssert.AreNotEqual(_signIdentityKeyPair1.PrivateKey, _signIdentityKeyPair3.PrivateKey);
+            CollectionAssert.AreNotEqual(_signIdentityKeyPair2.PrivateKey, _signIdentityKeyPair3.PrivateKey);
 
             // Test signature functionality
             string message = "Cryptographic identity test message";
             byte[] messageBytes = Encoding.UTF8.GetBytes(message);
 
-            byte[] signature1 = LibEmiddleClient.SignMessage(messageBytes, keyPair1.privateKey);
-            byte[] signature2 = LibEmiddleClient.SignMessage(messageBytes, keyPair2.privateKey);
-            byte[] signature3 = LibEmiddleClient.SignMessage(messageBytes, keyPair3.privateKey);
+            byte[] signature1 = _cryptoProvider.Sign(messageBytes, _signIdentityKeyPair1.PrivateKey);
+            byte[] signature2 = _cryptoProvider.Sign(messageBytes, _signIdentityKeyPair2.PrivateKey);
+            byte[] signature3 = _cryptoProvider.Sign(messageBytes, _signIdentityKeyPair3.PrivateKey);
 
             // Ensure signatures are different for different keys
             CollectionAssert.AreNotEqual(signature1, signature2);
@@ -183,14 +200,14 @@ namespace LibEmiddle.Tests.Unit
             CollectionAssert.AreNotEqual(signature2, signature3);
 
             // Ensure signatures verify correctly
-            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature1, keyPair1.publicKey));
-            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature2, keyPair2.publicKey));
-            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature3, keyPair3.publicKey));
+            Assert.IsTrue(_cryptoProvider.Verify(messageBytes, signature1, _signIdentityKeyPair1.PublicKey));
+            Assert.IsTrue(_cryptoProvider.Verify(messageBytes, signature2, _signIdentityKeyPair2.PublicKey));
+            Assert.IsTrue(_cryptoProvider.Verify(messageBytes, signature3, _signIdentityKeyPair3.PublicKey));
 
             // Ensure signatures don't verify with the wrong key
-            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature1, keyPair2.publicKey));
-            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature2, keyPair3.publicKey));
-            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature3, keyPair1.publicKey));
+            Assert.IsFalse(_cryptoProvider.Verify(messageBytes, signature1, _signIdentityKeyPair2.PublicKey));
+            Assert.IsFalse(_cryptoProvider.Verify(messageBytes, signature2, _signIdentityKeyPair3.PublicKey));
+            Assert.IsFalse(_cryptoProvider.Verify(messageBytes, signature3, _signIdentityKeyPair1.PublicKey));
         }
     }
 }

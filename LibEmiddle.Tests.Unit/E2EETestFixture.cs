@@ -1,9 +1,11 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.IO;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-using LibEmiddle.Core;
 using System.Diagnostics;
+using LibEmiddle.Abstractions;
 using LibEmiddle.API;
+using LibEmiddle.Core;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -13,24 +15,29 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class E2EETestFixture
     {
+        public readonly ICryptoProvider _cryptoProvider;
+
         /// <summary>
         /// Assemblies require initialization before tests can run
         /// </summary>
         [AssemblyInitialize]
         public static void AssemblyInit(TestContext context)
         {
-            Trace.TraceWarning("E2EE Test Suite Initialization Started");
+            Trace.TraceInformation("E2EE Test Suite Initialization Started");
 
             try
             {
                 // First ensure the Sodium library is initialized from our Core class
                 Sodium.Initialize();
 
+                // initialize crypto
+                var _cryptoProvider = new CryptoProvider();
+
                 // Then verify key generation works via E2EEClient
-                var keyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-                if (keyPair.publicKey != null && keyPair.privateKey != null)
+                var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+                if (keyPair.PublicKey != null && keyPair.PrivateKey != null)
                 {
-                    Trace.TraceWarning($"Sodium library initialized successfully. Generated key sizes: Public={keyPair.publicKey.Length}, Private={keyPair.privateKey.Length}");
+                    Trace.TraceInformation($"Sodium library initialized successfully. Generated key sizes: Public={keyPair.PublicKey.Length}, Private={keyPair.PrivateKey.Length}");
                 }
                 else
                 {
@@ -39,15 +46,15 @@ namespace LibEmiddle.Tests.Unit
             }
             catch (PlatformNotSupportedException ex)
             {
-                Trace.TraceWarning($"Sodium library not available on this platform: {ex.Message}");
-                Trace.TraceWarning("You may need to install libsodium for your platform.");
+                Trace.TraceError($"Sodium library not available on this platform: {ex.Message}");
+                Trace.TraceError("You may need to install libsodium for your platform.");
 
                 string runtimeDir = Path.GetDirectoryName(typeof(LibEmiddleClient).Assembly.Location) ?? "";
-                Trace.TraceWarning($"Runtime directory: {runtimeDir}");
-                Trace.TraceWarning("Available files:");
+                Trace.TraceError($"Runtime directory: {runtimeDir}");
+                Trace.TraceError("Available files:");
                 foreach (var file in Directory.GetFiles(runtimeDir, "*.dll"))
                 {
-                    Trace.TraceWarning($"  {Path.GetFileName(file)}");
+                    Trace.TraceError($"  {Path.GetFileName(file)}");
                 }
 
                 throw;
@@ -67,20 +74,20 @@ namespace LibEmiddle.Tests.Unit
             }
             catch (Exception ex)
             {
-                Trace.TraceWarning($"Failed to initialize Sodium library: {ex.Message}");
-                Trace.TraceWarning($"Exception type: {ex.GetType().FullName}");
-                Trace.TraceWarning($"Stack trace: {ex.StackTrace}");
+                Trace.TraceError($"Failed to initialize Sodium library: {ex.Message}");
+                Trace.TraceError($"Exception type: {ex.GetType().FullName}");
+                Trace.TraceError($"Stack trace: {ex.StackTrace}");
 
                 if (ex.InnerException != null)
                 {
-                    Trace.TraceWarning($"Inner exception: {ex.InnerException.Message}");
-                    Trace.TraceWarning($"Inner exception type: {ex.InnerException.GetType().FullName}");
+                    Trace.TraceError($"Inner exception: {ex.InnerException.Message}");
+                    Trace.TraceError($"Inner exception type: {ex.InnerException.GetType().FullName}");
                 }
 
                 throw;
             }
 
-            Trace.TraceWarning("E2EE Test Suite Initialization Completed");
+            Trace.TraceInformation("E2EE Test Suite Initialization Completed");
         }
 
         /// <summary>
@@ -90,7 +97,7 @@ namespace LibEmiddle.Tests.Unit
         public static void AssemblyCleanup()
         {
             // Perform any global cleanup
-            Trace.TraceWarning("E2EE Test Suite Cleanup Completed");
+            Trace.TraceInformation("E2EE Test Suite Cleanup Completed");
         }
     }
 }

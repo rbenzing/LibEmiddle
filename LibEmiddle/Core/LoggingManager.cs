@@ -88,6 +88,23 @@ namespace LibEmiddle.Core
         }
 
         /// <summary>
+        /// Logs a debug message
+        /// </summary>
+        /// <param name="category">The category name for the log</param>
+        /// <param name="message">The message to log</param>
+        public static void LogDebug(string category, string message)
+        {
+            // Log to default logger if available
+            if (_defaultLogger != NullLogger.Instance)
+            {
+                _defaultLogger.LogDebug(message);
+            }
+
+            // Always fall back to Trace
+            Trace.TraceInformation($"[{category}] {message}");
+        }
+
+        /// <summary>
         /// Logs a security-related message with increased visibility
         /// </summary>
         /// <param name="category">The category name for the log</param>

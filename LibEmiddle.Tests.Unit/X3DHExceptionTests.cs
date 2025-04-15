@@ -1,12 +1,12 @@
-﻿using System;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-using System.Security.Cryptography;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Collections.Generic;
 using LibEmiddle.Models;
 using LibEmiddle.KeyExchange;
 using LibEmiddle.Core;
 using LibEmiddle.API;
-using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Domain;
 using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
@@ -14,15 +14,24 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class X3DHExceptionTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         [ExpectedException(typeof(ArgumentNullException))]
         public void X3DHKeyExchange_NullRecipientKey_ShouldThrowException()
         {
             // Arrange
-            var (_, senderPrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var senderPrivate = _identityKeyPair.PrivateKey;
 
             // Act - should throw ArgumentNullException
-            X3DHExchange.X3DHKeyExchange(null, senderPrivate);
+            X3DHExchange.PerformX25519DH(null, senderPrivate);
         }
 
         [TestMethod]
@@ -30,10 +39,11 @@ namespace LibEmiddle.Tests.Unit
         public void X3DHKeyExchange_NullSenderKey_ShouldThrowException()
         {
             // Arrange
-            var (recipientPublic, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var recipientPublic = _identityKeyPair.PublicKey;
 
             // Act - should throw ArgumentNullException
-            X3DHExchange.X3DHKeyExchange(recipientPublic, null);
+            X3DHExchange.PerformX25519DH(recipientPublic, null);
         }
 
         [TestMethod]
@@ -41,11 +51,12 @@ namespace LibEmiddle.Tests.Unit
         public void X3DHKeyExchange_InvalidRecipientKeyLength_ShouldThrowException()
         {
             // Arrange
-            var (_, senderPrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var senderPrivate = _identityKeyPair.PrivateKey;
             byte[] invalidLengthKey = new byte[16]; // Invalid length (should be 32)
 
             // Act - should throw ArgumentException
-            X3DHExchange.X3DHKeyExchange(invalidLengthKey, senderPrivate);
+            X3DHExchange.PerformX25519DH(invalidLengthKey, senderPrivate);
         }
 
         [TestMethod]
@@ -53,11 +64,12 @@ namespace LibEmiddle.Tests.Unit
         public void X3DHKeyExchange_InvalidSenderKeyLength_ShouldThrowException()
         {
             // Arrange
-            var (recipientPublic, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var recipientPublic = _identityKeyPair.PublicKey;
             byte[] invalidLengthKey = new byte[16]; // Invalid length (should be 32)
 
             // Act - should throw ArgumentException
-            X3DHExchange.X3DHKeyExchange(recipientPublic, invalidLengthKey);
+            X3DHExchange.PerformX25519DH(recipientPublic, invalidLengthKey);
         }
 
         [TestMethod]
@@ -66,7 +78,9 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var alicePublic = _aliceIdentityKeyPair.PublicKey;
+            var alicePrivate = _aliceIdentityKeyPair.PrivateKey;
 
             // Create a bundle with invalid signature
             var invalidBundle = new X3DHPublicBundle
@@ -78,7 +92,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act - should throw ArgumentException
-            X3DHExchange.InitiateX3DHSession(invalidBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
+            X3DHExchange.InitiateX3DHSession(invalidBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
         }
 
         [TestMethod]
@@ -87,7 +101,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Create a bundle with invalid public key
             var invalidBundle = new X3DHPublicBundle
@@ -99,7 +113,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act - should throw ArgumentException
-            X3DHExchange.InitiateX3DHSession(invalidBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
+            X3DHExchange.InitiateX3DHSession(invalidBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
         }
 
         [TestMethod]
@@ -107,7 +121,7 @@ namespace LibEmiddle.Tests.Unit
         public void InitiateX3DHSession_MissingRequiredKeys_ShouldThrowException()
         {
             // Arrange
-            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Create a bundle with missing keys
             var invalidBundle = new X3DHPublicBundle
@@ -119,16 +133,17 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act - should throw ArgumentException
-            X3DHExchange.InitiateX3DHSession(invalidBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
+            X3DHExchange.InitiateX3DHSession(invalidBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
         }
 
         [TestMethod]
         public void InitiateX3DHSession_InvalidOneTimePreKeys_ShouldSkipInvalidKeys()
         {
-            // Arrange
-            var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _bobSignKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
+            // Arrange
+            var bobBundle = X3DHExchange.CreateX3DHKeyBundle(_bobSignKeyPair);
+            
             // Create a bundle with both valid and invalid one-time pre-keys
             List<byte[]> mixedPreKeys = new List<byte[]>();
 
@@ -155,7 +170,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act - Should not throw exception, but should skip invalid keys
-            var session = X3DHExchange.InitiateX3DHSession(mixedBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
+            var session = X3DHExchange.InitiateX3DHSession(mixedBundle, _bobSignKeyPair, out var usedOneTimePreKeyId);
 
             // Assert
             Assert.IsNotNull(session, "Session should be created despite invalid pre-keys");
@@ -180,7 +195,7 @@ namespace LibEmiddle.Tests.Unit
                     OneTimePreKeys = bobBundle.OneTimePreKeys
                 },
                 aliceKeyPair,
-                out var usedOneTimePreKeyId
+                out uint? usedOneTimePreKeyId
             );
 
             // Initialize Double Ratchet root key and chain key
@@ -205,8 +220,8 @@ namespace LibEmiddle.Tests.Unit
                 // Periodically perform DH ratchet step
                 if (i % 2 == 1)
                 {
-                    var ephemeralKeyPair = KeyGenerator.GenerateX25519KeyPair();
-                    var dh = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, ephemeralKeyPair.privateKey);
+                    var ephemeralKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+                    var dh = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, ephemeralKeyPair.PrivateKey);
                     var (newRootKey, nextChainKey) = DoubleRatchetExchange.DHRatchetStep(currentRootKey, dh);
 
                     currentRootKey = newRootKey;
@@ -233,10 +248,16 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public void CreateX3DHKeyBundle_CreatesValidBundle()
         {
-            // Act
-            var bundle = X3DHExchange.CreateX3DHKeyBundle();
+            // Ensure the crypto provider is initialized.
+            _cryptoProvider.Initialize();
 
-            // Assert
+            // Generate an Ed25519 key pair for the identity (used for signing).
+            KeyPair identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+
+            // Act: Create the X3DH bundle.
+            var bundle = X3DHExchange.CreateX3DHKeyBundle(identityKeyPair);
+
+            // Assert that the basic bundle fields are present.
             Assert.IsNotNull(bundle, "Bundle should not be null");
             Assert.IsNotNull(bundle.IdentityKey, "Identity key should not be null");
             Assert.IsNotNull(bundle.SignedPreKey, "Signed pre-key should not be null");
@@ -244,18 +265,22 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(bundle.OneTimePreKeys, "One-time pre-keys should not be null");
             Assert.IsTrue(bundle.OneTimePreKeys.Count > 0, "Bundle should contain at least one pre-key");
 
+            // Assert that private keys are accessible.
             Assert.IsNotNull(bundle.GetIdentityKeyPrivate(), "Private identity key should be accessible");
             Assert.IsNotNull(bundle.GetSignedPreKeyPrivate(), "Private signed pre-key should be accessible");
 
-            // Test signature verification
-            bool validSignature = MessageSigning.VerifySignature(
-                bundle.SignedPreKey,
-                bundle.SignedPreKeySignature,
-                bundle.IdentityKey);
+            // --- Signature Verification ---
+            // Verify the signature on the signed pre-key using the identity (Ed25519) public key.
+            int verifyResult = Sodium.crypto_sign_ed25519_verify_detached(
+                 bundle.SignedPreKeySignature,
+                 bundle.SignedPreKey,
+                 (ulong)bundle.SignedPreKey.Length,
+                 bundle.IdentityKey);
 
+            bool validSignature = (verifyResult == 0);
             Assert.IsTrue(validSignature, "Signature should be valid");
 
-            // Test that clear private keys works properly
+            // Test that clearing private keys works.
             bundle.ClearPrivateKeys();
             Assert.IsNull(bundle.GetIdentityKeyPrivate(), "Private identity key should be cleared");
             Assert.IsNull(bundle.GetSignedPreKeyPrivate(), "Private signed pre-key should be cleared");

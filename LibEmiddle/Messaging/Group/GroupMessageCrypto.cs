@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.Models;
 
 namespace LibEmiddle.Messaging.Group
 {
@@ -28,19 +27,20 @@ namespace LibEmiddle.Messaging.Group
             new ConcurrentDictionary<string, object>();
 
         /// <summary>
-        /// Encrypts a message for a group using the provided sender key
+        /// Encrypts a message for a group using the provided message key
         /// </summary>
         /// <param name="groupId">Group identifier</param>
         /// <param name="message">Message to encrypt</param>
-        /// <param name="senderKey">Sender key for this group</param>
+        /// <param name="messageKey">Message key for this specific message (from ratchet)</param>
         /// <param name="identityKeyPair">Sender's identity key pair for signing</param>
         /// <returns>Encrypted group message</returns>
-        public EncryptedGroupMessage EncryptMessage(string groupId, string message, byte[] senderKey,
-            (byte[] publicKey, byte[] privateKey) identityKeyPair)
+        public EncryptedGroupMessage EncryptMessage(string groupId, string message, byte[] messageKey,
+            KeyPair identityKeyPair)
         {
             ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
             ArgumentNullException.ThrowIfNull(message, nameof(message));
-            ArgumentNullException.ThrowIfNull(senderKey, nameof(senderKey));
+            ArgumentNullException.ThrowIfNull(messageKey, nameof(messageKey));
+            ArgumentNullException.ThrowIfNull(identityKeyPair.PublicKey, nameof(identityKeyPair.PublicKey));
 
             // Get current message counter for the group, or initialize to 0
             // We need a lock here because we're doing a read-increment-write operation
@@ -54,27 +54,35 @@ namespace LibEmiddle.Messaging.Group
                 _messageCounters[groupId] = counter;
             }
 
-            // Generate a random nonce (thread-safe)
+            // Generate a random nonce
             byte[] nonce = NonceGenerator.GenerateNonce();
 
-            // Convert message to bytes (thread-safe)
+            // Convert message to bytes
             byte[] plaintext = System.Text.Encoding.UTF8.GetBytes(message);
 
-            // Encrypt the message (thread-safe)
-            byte[] ciphertext = AES.AESEncrypt(plaintext, senderKey, nonce);
-
-            // Create the encrypted message (thread-safe)
-            var encryptedMessage = new EncryptedGroupMessage
+            try
             {
-                GroupId = groupId,
-                SenderIdentityKey = identityKeyPair.publicKey,
-                Ciphertext = ciphertext,
-                Nonce = nonce,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                MessageId = Guid.NewGuid().ToString()
-            };
+                // Encrypt the message with authenticated encryption
+                byte[] ciphertext = AES.AESEncrypt(plaintext, messageKey, nonce);
 
-            return encryptedMessage;
+                // Create the encrypted message
+                var encryptedMessage = new EncryptedGroupMessage
+                {
+                    GroupId = groupId,
+                    SenderIdentityKey = identityKeyPair.PublicKey,
+                    Ciphertext = ciphertext,
+                    Nonce = nonce,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    MessageId = Guid.NewGuid().ToString()
+                };
+
+                return encryptedMessage;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(GroupMessageCrypto), $"Encryption failed: {ex.Message}");
+                throw;
+            }
         }
 
         /// <summary>
@@ -87,23 +95,25 @@ namespace LibEmiddle.Messaging.Group
         }
 
         /// <summary>
-        /// Decrypts a group message using the provided sender key
+        /// Decrypts a group message using the provided message key
         /// </summary>
         /// <param name="encryptedMessage">Message to decrypt</param>
-        /// <param name="senderKey">Sender key for the group</param>
+        /// <param name="messageKey">Message key for this specific message (from ratchet)</param>
         /// <returns>Decrypted message text, or null if decryption fails</returns>
-        public string? DecryptMessage(EncryptedGroupMessage encryptedMessage, byte[] senderKey)
+        public string? DecryptMessage(EncryptedGroupMessage encryptedMessage, byte[] messageKey)
         {
             ArgumentNullException.ThrowIfNull(encryptedMessage, nameof(encryptedMessage));
             ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, nameof(encryptedMessage.Ciphertext));
             ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce, nameof(encryptedMessage.Nonce));
-            ArgumentNullException.ThrowIfNull(senderKey, nameof(senderKey));
+            ArgumentNullException.ThrowIfNull(messageKey, nameof(messageKey));
 
             try
             {
                 // Check for message replay
                 if (IsReplayedMessage(encryptedMessage))
                 {
+                    LoggingManager.LogWarning(nameof(GroupMessageCrypto),
+                        $"Rejecting replayed message with ID {encryptedMessage.MessageId}");
                     return null;
                 }
 
@@ -114,20 +124,30 @@ namespace LibEmiddle.Messaging.Group
                     // If message was sent before we joined the group, reject it
                     if (encryptedMessage.Timestamp < joinTimestamp)
                     {
-                        LoggingManager.LogWarning(nameof(GroupMessageCrypto), $"Rejecting message sent before joining group: message timestamp {encryptedMessage.Timestamp}, joined at {joinTimestamp}");
+                        LoggingManager.LogWarning(nameof(GroupMessageCrypto),
+                            $"Rejecting message sent before joining group: message timestamp {encryptedMessage.Timestamp}, joined at {joinTimestamp}");
                         return null;
                     }
                 }
 
-                // Decrypt the message
-                byte[] plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, senderKey, encryptedMessage.Nonce);
+                // Decrypt the message with authenticated decryption
+                byte[] plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, messageKey, encryptedMessage.Nonce);
 
                 // Convert to string
                 return System.Text.Encoding.UTF8.GetString(plaintext);
             }
-            catch (CryptographicException)
+            catch (CryptographicException ex)
             {
-                // Decryption failed
+                // Decryption failed - likely due to authentication failure or wrong key
+                LoggingManager.LogWarning(nameof(GroupMessageCrypto),
+                    $"Decryption failed: {ex.Message}");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                // Other unexpected errors
+                LoggingManager.LogError(nameof(GroupMessageCrypto),
+                    $"Unexpected error during decryption: {ex.Message}");
                 return null;
             }
         }
@@ -139,8 +159,12 @@ namespace LibEmiddle.Messaging.Group
         /// <returns>True if the message appears to be a replay</returns>
         private bool IsReplayedMessage(EncryptedGroupMessage message)
         {
-            ArgumentNullException.ThrowIfNull(message.MessageId, nameof(message.MessageId));
-            ArgumentNullException.ThrowIfNull(message.GroupId, nameof(message.GroupId));
+            if (string.IsNullOrEmpty(message.MessageId) || string.IsNullOrEmpty(message.GroupId))
+            {
+                LoggingManager.LogWarning(nameof(GroupMessageCrypto),
+                    "Message rejected - missing ID or group ID");
+                return true; // Reject messages without proper ID
+            }
 
             // Get or create a concurrent set of processed IDs for this group
             var processedIds = _processedMessageIds.GetOrAdd(message.GroupId, _ => new ConcurrentHashSet<string>());
@@ -152,8 +176,6 @@ namespace LibEmiddle.Messaging.Group
             if (isNewMessage)
             {
                 // Periodically trim the set to prevent unbounded growth
-                // We don't need to lock this because it's not critical that it happens
-                // exactly when the count exceeds the threshold
                 if (processedIds.Count > Constants.MAX_TRACKED_MESSAGE_IDS)
                 {
                     TrimMessageIds(message.GroupId, processedIds);
@@ -203,6 +225,27 @@ namespace LibEmiddle.Messaging.Group
                 }
             }
             // If we couldn't get the lock, another thread is already doing the trimming or it will happen later
+        }
+
+        /// <summary>
+        /// Extracts iteration information from a message ID if encoded in the format "iter:{iteration}:{originalId}"
+        /// </summary>
+        /// <param name="messageId">Message ID to parse</param>
+        /// <returns>Extracted iteration number or 0 if not found</returns>
+        public uint ExtractIterationFromMessageId(string? messageId)
+        {
+            if (string.IsNullOrEmpty(messageId) || !messageId.StartsWith("iter:"))
+            {
+                return 0;
+            }
+
+            string[] parts = messageId.Split(':', 3);
+            if (parts.Length >= 2 && uint.TryParse(parts[1], out uint parsedIteration))
+            {
+                return parsedIteration;
+            }
+
+            return 0;
         }
     }
 

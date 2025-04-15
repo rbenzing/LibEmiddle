@@ -7,7 +7,7 @@ namespace LibEmiddle.Crypto
     /// Provides functionality for generating secure nonces for cryptographic operations
     /// using libsodium's high-quality random number generation.
     /// </summary>
-    public static class NonceGenerator
+    internal static class NonceGenerator
     {
         private static readonly object _nonceLock = new object();
         private static long _nonceCounter = 0;

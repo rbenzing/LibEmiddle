@@ -4,27 +4,35 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using LibEmiddle.KeyExchange;
-using LibEmiddle.Models;
 using LibEmiddle.API;
-using LibEmiddle.Crypto;
+using LibEmiddle.Abstractions;
 using LibEmiddle.Domain;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class SecurityTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         #region Forward Secrecy Tests
 
         [TestMethod]
         public void ForwardSecrecy_CompromisedKeyDoesNotAffectPastMessages()
         {
             // Arrange
-            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             // Create a session ID to be used consistently
@@ -33,21 +41,23 @@ namespace LibEmiddle.Tests.Unit
             // Setup sessions for both parties
             var aliceSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
             var bobSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: bobKeyPair,
-                remoteDHRatchetKey: aliceKeyPair.publicKey,
+                remoteDHRatchetKey: aliceKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
@@ -57,24 +67,24 @@ namespace LibEmiddle.Tests.Unit
             string message3 = "Message 3";
 
             // Alice sends message 1
-            var (aliceSession1, encryptedMessage1) = DoubleRatchet.DoubleRatchetEncrypt(aliceSession, message1);
+            var (aliceSession1, encryptedMessage1) = _cryptoProvider.DoubleRatchetEncrypt(aliceSession, message1);
 
             // Add security fields for message 1
             encryptedMessage1.MessageId = Guid.NewGuid();
             encryptedMessage1.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             encryptedMessage1.SessionId = sessionId;
 
-            var (bobSession1, decryptedMessage1) = DoubleRatchet.DoubleRatchetDecrypt(bobSession, encryptedMessage1);
+            var (bobSession1, decryptedMessage1) = _cryptoProvider.DoubleRatchetDecrypt(bobSession, encryptedMessage1);
 
             // Bob sends message 2
-            var (bobSession2, encryptedMessage2) = DoubleRatchet.DoubleRatchetEncrypt(bobSession1, message2);
+            var (bobSession2, encryptedMessage2) = _cryptoProvider.DoubleRatchetEncrypt(bobSession1, message2);
 
             // Add security fields for message 2
             encryptedMessage2.MessageId = Guid.NewGuid();
             encryptedMessage2.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             encryptedMessage2.SessionId = sessionId;
 
-            var (aliceSession2, decryptedMessage2) = DoubleRatchet.DoubleRatchetDecrypt(aliceSession1, encryptedMessage2);
+            var (aliceSession2, decryptedMessage2) = _cryptoProvider.DoubleRatchetDecrypt(aliceSession1, encryptedMessage2);
 
             // Save the first two encrypted messages to try to decrypt later
             // Create copies with new message IDs to avoid replay detection
@@ -101,14 +111,14 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Continue the conversation
-            var (aliceSession3, encryptedMessage3) = DoubleRatchet.DoubleRatchetEncrypt(aliceSession2, message3);
+            var (aliceSession3, encryptedMessage3) = _cryptoProvider.DoubleRatchetEncrypt(aliceSession2, message3);
 
             // Add security fields for message 3
             encryptedMessage3.MessageId = Guid.NewGuid();
             encryptedMessage3.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             encryptedMessage3.SessionId = sessionId;
 
-            var (bobSession3, decryptedMessage3) = DoubleRatchet.DoubleRatchetDecrypt(bobSession2, encryptedMessage3);
+            var (bobSession3, decryptedMessage3) = _cryptoProvider.DoubleRatchetDecrypt(bobSession2, encryptedMessage3);
 
             // Simulate compromise of the latest keys - create a new compromised session with the latest keys
             // but without the message history
@@ -118,7 +128,8 @@ namespace LibEmiddle.Tests.Unit
                 rootKey: bobSession3.RootKey,
                 sendingChainKey: bobSession3.SendingChainKey,
                 receivingChainKey: bobSession3.ReceivingChainKey,
-                messageNumber: bobSession3.MessageNumber,
+                messageNumberReceiving: bobSession3.MessageNumberReceiving,
+                messageNumberSending: bobSession3.MessageNumberSending,
                 sessionId: sessionId
             // Deliberately not copying message history - an attacker wouldn't have it
             );
@@ -128,10 +139,10 @@ namespace LibEmiddle.Tests.Unit
             bool canDecryptMessage2 = true;
 
             // With our immutable implementation, the method returns null values for failed decryption
-            var (resultSession1, resultMessage1) = DoubleRatchet.DoubleRatchetDecrypt(compromisedBobSession, savedEncryptedMessage1);
+            var (resultSession1, resultMessage1) = _cryptoProvider.DoubleRatchetDecrypt(compromisedBobSession, savedEncryptedMessage1);
             canDecryptMessage1 = resultSession1 != null && resultMessage1 != null;
 
-            var (resultSession2, resultMessage2) = DoubleRatchet.DoubleRatchetDecrypt(compromisedBobSession, savedEncryptedMessage2);
+            var (resultSession2, resultMessage2) = _cryptoProvider.DoubleRatchetDecrypt(compromisedBobSession, savedEncryptedMessage2);
             canDecryptMessage2 = resultSession2 != null && resultMessage2 != null;
 
             // Assert
@@ -202,11 +213,11 @@ namespace LibEmiddle.Tests.Unit
         public void DoubleRatchet_ShouldDetectTamperedMessage()
         {
             // Arrange
-            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             // Create a session ID
@@ -214,27 +225,29 @@ namespace LibEmiddle.Tests.Unit
 
             var aliceSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
             var bobSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: bobKeyPair,
-                remoteDHRatchetKey: aliceKeyPair.publicKey,
+                remoteDHRatchetKey: aliceKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
             // Alice encrypts a message
             string message = "Secret message that should be tamper-proof";
-            var (_, encryptedMessage) = DoubleRatchet.DoubleRatchetEncrypt(aliceSession, message);
+            var (_, encryptedMessage) = _cryptoProvider.DoubleRatchetEncrypt(aliceSession, message);
 
             // Add security fields
             encryptedMessage.MessageId = Guid.NewGuid();
@@ -271,12 +284,13 @@ namespace LibEmiddle.Tests.Unit
                 rootKey: bobSession.RootKey,
                 sendingChainKey: bobSession.SendingChainKey,
                 receivingChainKey: bobSession.ReceivingChainKey,
-                messageNumber: bobSession.MessageNumber,
+                messageNumberReceiving: bobSession.MessageNumberReceiving,
+                messageNumberSending: bobSession.MessageNumberSending,
                 sessionId: bobSession.SessionId
             );
 
             // Act - Attempt to decrypt the tampered message
-            var (resultSession, resultMessage) = DoubleRatchet.DoubleRatchetDecrypt(bobSessionForTampered, tamperedMessage);
+            var (resultSession, resultMessage) = _cryptoProvider.DoubleRatchetDecrypt(bobSessionForTampered, tamperedMessage);
 
             // Assert - Check that tampering was detected by verifying null returns
             Assert.IsNull(resultSession, "Tampered message should result in null session");
@@ -284,7 +298,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Additional verification - make sure the original message still decrypts properly
             // Use the original untouched session
-            var (validSession, validMessage) = DoubleRatchet.DoubleRatchetDecrypt(bobSession, encryptedMessage);
+            var (validSession, validMessage) = _cryptoProvider.DoubleRatchetDecrypt(bobSession, encryptedMessage);
 
             Assert.IsNotNull(validSession, "Original message should decrypt successfully");
             Assert.IsNotNull(validMessage, "Original message should decrypt successfully");
@@ -304,7 +318,7 @@ namespace LibEmiddle.Tests.Unit
 
             for (int i = 0; i < numNonces; i++)
             {
-                nonces.Add(NonceGenerator.GenerateNonce());
+                nonces.Add(_cryptoProvider.GenerateNonce());
             }
 
             // Assert
@@ -354,25 +368,25 @@ namespace LibEmiddle.Tests.Unit
             var keyPair3 = LibEmiddleClient.GenerateSignatureKeyPair();
 
             // Ensure keys meet minimum security requirements
-            Assert.AreEqual(32, keyPair1.publicKey.Length, "Ed25519 public key should be 32 bytes");
-            Assert.AreEqual(64, keyPair1.privateKey.Length, "Ed25519 private key should be 64 bytes");
+            Assert.AreEqual(32, keyPair1.PublicKey.Length, "Ed25519 public key should be 32 bytes");
+            Assert.AreEqual(64, keyPair1.PrivateKey.Length, "Ed25519 private key should be 64 bytes");
 
             // Ensure all generated keys are different
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.publicKey, keyPair2.publicKey));
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.publicKey, keyPair3.publicKey));
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair2.publicKey, keyPair3.publicKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.PublicKey, keyPair2.PublicKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.PublicKey, keyPair3.PublicKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair2.PublicKey, keyPair3.PublicKey));
 
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.privateKey, keyPair2.privateKey));
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.privateKey, keyPair3.privateKey));
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair2.privateKey, keyPair3.privateKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.PrivateKey, keyPair2.PrivateKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair1.PrivateKey, keyPair3.PrivateKey));
+            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(keyPair2.PrivateKey, keyPair3.PrivateKey));
 
             // Test signature functionality
             string message = "Cryptographic identity test message";
             byte[] messageBytes = Encoding.UTF8.GetBytes(message);
 
-            byte[] signature1 = LibEmiddleClient.SignMessage(messageBytes, keyPair1.privateKey);
-            byte[] signature2 = LibEmiddleClient.SignMessage(messageBytes, keyPair2.privateKey);
-            byte[] signature3 = LibEmiddleClient.SignMessage(messageBytes, keyPair3.privateKey);
+            byte[] signature1 = _cryptoProvider.Sign(messageBytes, keyPair1.PrivateKey);
+            byte[] signature2 = _cryptoProvider.Sign(messageBytes, keyPair2.PrivateKey);
+            byte[] signature3 = _cryptoProvider.Sign(messageBytes, keyPair3.PrivateKey);
 
             // Ensure signatures are different for different keys
             Assert.IsFalse(TestsHelpers.AreByteArraysEqual(signature1, signature2));
@@ -380,14 +394,14 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsFalse(TestsHelpers.AreByteArraysEqual(signature2, signature3));
 
             // Ensure signatures verify correctly
-            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature1, keyPair1.publicKey));
-            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature2, keyPair2.publicKey));
-            Assert.IsTrue(LibEmiddleClient.VerifySignature(messageBytes, signature3, keyPair3.publicKey));
+            Assert.IsTrue(_cryptoProvider.Verify(messageBytes, signature1, keyPair1.PublicKey));
+            Assert.IsTrue(_cryptoProvider.Verify(messageBytes, signature2, keyPair2.PublicKey));
+            Assert.IsTrue(_cryptoProvider.Verify(messageBytes, signature3, keyPair3.PublicKey));
 
             // Ensure signatures don't verify with the wrong key
-            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature1, keyPair2.publicKey));
-            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature2, keyPair3.publicKey));
-            Assert.IsFalse(LibEmiddleClient.VerifySignature(messageBytes, signature3, keyPair1.publicKey));
+            Assert.IsFalse(_cryptoProvider.Verify(messageBytes, signature1, keyPair2.PublicKey));
+            Assert.IsFalse(_cryptoProvider.Verify(messageBytes, signature2, keyPair3.PublicKey));
+            Assert.IsFalse(_cryptoProvider.Verify(messageBytes, signature3, keyPair1.PublicKey));
         }
 
         #endregion
@@ -455,7 +469,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] shortKey = new byte[16]; // Too short
             byte[] longKey = new byte[64];  // Too long for AES but valid for Ed25519
             byte[] messageBytes = Encoding.UTF8.GetBytes("Test message");
-            byte[] validNonce = NonceGenerator.GenerateNonce();
+            byte[] validNonce = _cryptoProvider.GenerateNonce();
             byte[] shortNonce = new byte[8]; // Too short
 
             // Valid key for comparison
@@ -467,62 +481,64 @@ namespace LibEmiddle.Tests.Unit
             // Test AES with invalid key lengths
             Assert.ThrowsException<ArgumentException>(() =>
             {
-                AES.AESEncrypt(messageBytes, shortKey, validNonce);
+                _cryptoProvider.Encrypt(messageBytes, shortKey, validNonce);
             }, "Should throw for key that's too short");
 
             Assert.ThrowsException<ArgumentException>(() =>
             {
-                AES.AESEncrypt(messageBytes, longKey, validNonce);
+                _cryptoProvider.Encrypt(messageBytes, longKey, validNonce);
             }, "Should throw for key that's too long for AES");
 
             // Test with invalid nonce
             Assert.ThrowsException<ArgumentException>(() =>
             {
-                AES.AESEncrypt(messageBytes, validKey, shortNonce);
+                _cryptoProvider.Encrypt(messageBytes, validKey, shortNonce);
             }, "Should throw for nonce that's too short");
 
             // Test with null inputs
             Assert.ThrowsException<ArgumentNullException>(() =>
             {
-                AES.AESEncrypt(null, validKey, validNonce);
+                _cryptoProvider.Encrypt(null, validKey, validNonce);
             }, "Should throw for null plaintext");
 
             Assert.ThrowsException<ArgumentNullException>(() =>
             {
-                AES.AESEncrypt(messageBytes, null, validNonce);
+                _cryptoProvider.Encrypt(messageBytes, null, validNonce);
             }, "Should throw for null key");
 
             Assert.ThrowsException<ArgumentNullException>(() =>
             {
-                AES.AESEncrypt(messageBytes, validKey, null);
+                _cryptoProvider.Encrypt(messageBytes, validKey, null);
             }, "Should throw for null nonce");
 
             // Test input validation for signature methods
-            var (publicKey, privateKey) = LibEmiddleClient.GenerateSignatureKeyPair();
+            KeyPair _signIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var publicKey = _signIdentityKeyPair.PublicKey;
+            var privateKey = _signIdentityKeyPair.PrivateKey;
 
             Assert.ThrowsException<ArgumentNullException>(() =>
             {
-                LibEmiddleClient.SignMessage(null, privateKey);
+                _cryptoProvider.Sign(null, privateKey);
             }, "Should throw for null message in SignMessage");
 
-            Assert.ThrowsException<ArgumentNullException>(() =>
+            Assert.ThrowsException<NullReferenceException>(() =>
             {
-                LibEmiddleClient.SignMessage(messageBytes, null);
+                _cryptoProvider.Sign(messageBytes, null);
             }, "Should throw for null private key in SignMessage");
 
             Assert.ThrowsException<ArgumentNullException>(() =>
             {
-                LibEmiddleClient.VerifySignature(null, new byte[64], publicKey);
+                _cryptoProvider.Verify(null, new byte[64], publicKey);
             }, "Should throw for null message in VerifySignature");
 
-            Assert.ThrowsException<ArgumentNullException>(() =>
+            Assert.ThrowsException<NullReferenceException>(() =>
             {
-                LibEmiddleClient.VerifySignature(messageBytes, null, publicKey);
+                _cryptoProvider.Verify(messageBytes, null, publicKey);
             }, "Should throw for null signature in VerifySignature");
 
-            Assert.ThrowsException<ArgumentNullException>(() =>
+            Assert.ThrowsException<NullReferenceException>(() =>
             {
-                LibEmiddleClient.VerifySignature(messageBytes, new byte[64], null);
+                _cryptoProvider.Verify(messageBytes, new byte[64], null);
             }, "Should throw for null public key in VerifySignature");
         }
 
@@ -534,7 +550,7 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             byte[] key = new byte[32];
             RandomNumberGenerator.Fill(key);
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             string message1 = "First message";
             string message2 = "Second message - should use different nonce";
@@ -543,11 +559,11 @@ namespace LibEmiddle.Tests.Unit
             byte[] plaintext2 = Encoding.UTF8.GetBytes(message2);
 
             // Act
-            byte[] ciphertext1 = AES.AESEncrypt(plaintext1, key, nonce);
+            byte[] ciphertext1 = _cryptoProvider.Encrypt(plaintext1, key, nonce);
 
             // Attempt to use the same nonce again - in a secure implementation, nonces should never be reused
             // This would typically throw an exception or be prevented by the library's design
-            byte[] ciphertext2 = AES.AESEncrypt(plaintext2, key, nonce);
+            byte[] ciphertext2 = _cryptoProvider.Encrypt(plaintext2, key, nonce);
 
             // Now that we have both ciphertexts, show why nonce reuse is dangerous
             // If your library allows nonce reuse, this test demonstrates the vulnerability
@@ -563,8 +579,8 @@ namespace LibEmiddle.Tests.Unit
             // that prevents reuse. This test simply demonstrates the danger.
 
             // Check that two calls to GenerateNonce() always produce different values
-            byte[] newNonce1 = NonceGenerator.GenerateNonce();
-            byte[] newNonce2 = NonceGenerator.GenerateNonce();
+            byte[] newNonce1 = _cryptoProvider.GenerateNonce();
+            byte[] newNonce2 = _cryptoProvider.GenerateNonce();
 
             Assert.IsFalse(TestsHelpers.AreByteArraysEqual(newNonce1, newNonce2), "Generated nonces should be unique");
 

@@ -352,17 +352,16 @@ namespace LibEmiddle.Core
         /// Computes HMAC-SHA256 on the input data
         /// </summary>
         /// <param name="output"></param>
-        /// <param name="outputLength"></param>
-        /// <param name="info"></param>
-        /// <param name="infoLength"></param>
+        /// <param name="message"></param>
+        /// <param name="messageLength"></param>
         /// <param name="prk"></param>
         /// <returns></returns>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
         public static extern int crypto_auth_hmacsha256(
-            byte[] output, UIntPtr outputLength,
-            byte[] info, UIntPtr infoLength,
+            byte[] output, 
+            byte[] message, 
+            UIntPtr messageLength,
             byte[] prk);
-
 
         /// <summary>
         /// Creates a master key (prk) given an optional salt salt (which can be NULL, or 

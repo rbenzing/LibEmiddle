@@ -9,7 +9,7 @@ using LibEmiddle.Domain;
 using LibEmiddle.KeyExchange;
 using LibEmiddle.MultiDevice;
 using LibEmiddle.Messaging.Group;
-using LibEmiddle.Models;
+using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 
 namespace LibEmiddle.Tests.Unit
@@ -17,11 +17,19 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class KeyRotationTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void GroupKey_ShouldRotate_AfterConfiguredPeriod()
         {
             // Arrange
-            var identityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var groupChatManager = new GroupChatManager(identityKeyPair);
             var groupId = "testGroup" + Guid.NewGuid().ToString("N").Substring(0, 8);
 
@@ -55,32 +63,32 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(groupSession);
             Assert.AreNotEqual(
                 Convert.ToBase64String(originalKey),
-                Convert.ToBase64String(groupSession.SenderKey));
+                Convert.ToBase64String(groupSession.ChainKey));
         }
 
         [TestMethod]
         public void KeyRotation_ShouldHappen_AfterMemberRemoval()
         {
             // Arrange
-            var identityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var memberKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var groupChatManager = new GroupChatManager(identityKeyPair);
             var groupId = "testGroup" + Guid.NewGuid().ToString("N").Substring(0, 8);
 
             // Act - Create group and add member
             byte[] originalKey = groupChatManager.CreateGroup(groupId);
-            groupChatManager.AddGroupMember(groupId, memberKeyPair.publicKey);
+            groupChatManager.AddGroupMember(groupId, memberKeyPair.PublicKey);
 
             // Get group key before removal
             var sessionBefore = GetGroupSession(groupChatManager, groupId);
-            byte[] keyBeforeRemoval = sessionBefore.SenderKey;
+            byte[] keyBeforeRemoval = sessionBefore.ChainKey;
 
             // Remove member
-            groupChatManager.RemoveGroupMember(groupId, memberKeyPair.publicKey);
+            groupChatManager.RemoveGroupMember(groupId, memberKeyPair.PublicKey);
 
             // Get group key after removal
             var sessionAfter = GetGroupSession(groupChatManager, groupId);
-            byte[] keyAfterRemoval = sessionAfter.SenderKey;
+            byte[] keyAfterRemoval = sessionAfter.ChainKey;
 
             // Assert - Keys should be different
             Assert.AreNotEqual(
@@ -93,11 +101,11 @@ namespace LibEmiddle.Tests.Unit
         public void AutomaticKeyRotation_ShouldRotateKeys_BasedOnMessageCount()
         {
             // Arrange
-            var identityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var bobKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create a shared secret (simulating X3DH)
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, identityKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, identityKeyPair.PrivateKey);
 
             // Initialize Double Ratchet
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
@@ -106,11 +114,12 @@ namespace LibEmiddle.Tests.Unit
             string sessionId = Guid.NewGuid().ToString();
             var aliceSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: identityKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberSending: 0,
+                messageNumberReceiving: 0,
                 sessionId: sessionId
             );
 
@@ -129,7 +138,7 @@ namespace LibEmiddle.Tests.Unit
             // Send 25 messages to trigger rotation
             for (int i = 0; i < 25; i++)
             {
-                var (updatedSession, _) = DoubleRatchet.DoubleRatchetEncrypt(
+                var (updatedSession, _) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentSession,
                     $"Test message {i}",
                     rotationStrategy
@@ -165,7 +174,7 @@ namespace LibEmiddle.Tests.Unit
             );
 
             // Additional check: Verify message numbers are tracked to prevent replay attacks
-            Assert.IsTrue(currentSession.MessageNumber > 0,
+            Assert.IsTrue(currentSession.MessageNumberSending > 0,
                 "Session should increment message number");
         }
 
@@ -173,12 +182,12 @@ namespace LibEmiddle.Tests.Unit
         public void DHRatchetStep_ShouldProduceNewKeys_WhenRemoteDHKeyChanges()
         {
             // Arrange
-            var aliceKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            var bobKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            var charlieKeyPair = KeyGenerator.GenerateX25519KeyPair(); // Third key pair to simulate rotation
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var charlieKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519); // Third key pair to simulate rotation
 
             // Create a shared secret
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
 
             // Initialize Double Ratchet
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
@@ -192,7 +201,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Then, perform another step with a different DH output
             // to simulate a key rotation with a new device or key
-            byte[] newSharedSecret = X3DHExchange.X3DHKeyExchange(charlieKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] newSharedSecret = X3DHExchange.PerformX25519DH(charlieKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (newRootKey2, newChainKey2) = DoubleRatchetExchange.DHRatchetStep(
                 newRootKey1,
                 newSharedSecret
@@ -228,14 +237,14 @@ namespace LibEmiddle.Tests.Unit
         public void GroupKey_ManualRotation_ShouldGenerateNewDistributionMessages()
         {
             // Arrange
-            var adminKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var memberKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var groupChatManager = new GroupChatManager(adminKeyPair);
             var groupId = "testGroup" + Guid.NewGuid().ToString("N").Substring(0, 8);
 
             // Create group and add member
             groupChatManager.CreateGroup(groupId);
-            groupChatManager.AddGroupMember(groupId, memberKeyPair.publicKey);
+            groupChatManager.AddGroupMember(groupId, memberKeyPair.PublicKey);
 
             // Get initial distribution message
             var initialDistribution = groupChatManager.CreateDistributionMessage(groupId);
@@ -247,12 +256,12 @@ namespace LibEmiddle.Tests.Unit
             var newDistribution = groupChatManager.CreateDistributionMessage(groupId);
 
             // Assert
-            Assert.IsNotNull(initialDistribution.SenderKey);
-            Assert.IsNotNull(newDistribution.SenderKey);
+            Assert.IsNotNull(initialDistribution.ChainKey);
+            Assert.IsNotNull(newDistribution.ChainKey);
 
             Assert.AreNotEqual(
-                Convert.ToBase64String(initialDistribution.SenderKey),
-                Convert.ToBase64String(newDistribution.SenderKey),
+                Convert.ToBase64String(initialDistribution.ChainKey),
+                Convert.ToBase64String(newDistribution.ChainKey),
                 "New distribution message should contain a different sender key"
             );
 
@@ -265,7 +274,7 @@ namespace LibEmiddle.Tests.Unit
         public void GroupChatManager_TimeBasedRotation_ShouldRespectConfiguredInterval()
         {
             // Arrange
-            var identityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var groupChatManager = new GroupChatManager(identityKeyPair);
             var groupId = "testGroup" + Guid.NewGuid().ToString("N")[..8];
 
@@ -293,7 +302,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Get the initial key for comparison
             var session = GetGroupSession(groupChatManager, groupId);
-            byte[] initialKey = session.SenderKey;
+            byte[] initialKey = session.ChainKey;
 
             // Force the timestamp to be old enough to trigger rotation
             timestamps[groupId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 1000;
@@ -311,7 +320,7 @@ namespace LibEmiddle.Tests.Unit
             // Assert
             Assert.AreNotEqual(
                 Convert.ToBase64String(initialKey),
-                Convert.ToBase64String(session.SenderKey),
+                Convert.ToBase64String(session.ChainKey),
                 "Group key should be rotated after forcing timestamp to be old"
             );
         }
@@ -320,11 +329,11 @@ namespace LibEmiddle.Tests.Unit
         public void ConcurrentDeviceRotation_ShouldMaintainMessageIntegrity()
         {
             // Arrange
-            var aliceKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            var bobKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Create initial shared secret
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             string sessionId = Guid.NewGuid().ToString();
@@ -332,22 +341,24 @@ namespace LibEmiddle.Tests.Unit
             // Create Alice's session
             var aliceSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberSending: 0,
+                messageNumberReceiving: 0,
                 sessionId: sessionId
             );
 
             // Create Bob's session
             var bobSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: bobKeyPair,
-                remoteDHRatchetKey: aliceKeyPair.publicKey,
+                remoteDHRatchetKey: aliceKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberSending: 0,
+                messageNumberReceiving: 0,
                 sessionId: sessionId
             );
 
@@ -360,7 +371,7 @@ namespace LibEmiddle.Tests.Unit
             for (int i = 0; i < 15; i++)
             {
                 string original = $"Message {i + 1}";
-                var (updatedSession, encrypted) = DoubleRatchet.DoubleRatchetEncrypt(
+                var (updatedSession, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentAliceSession,
                     original,
                     Enums.KeyRotationStrategy.Standard
@@ -371,10 +382,10 @@ namespace LibEmiddle.Tests.Unit
             }
 
             // 2. Generate a new key pair for Alice (simulating device change)
-            var aliceNewKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            var aliceNewKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Exchange new DH key and update
-            byte[] newSharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceNewKeyPair.privateKey);
+            byte[] newSharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceNewKeyPair.PrivateKey);
             var (newRootKey, newChainKey) = DoubleRatchetExchange.DHRatchetStep(currentAliceSession.RootKey, newSharedSecret);
 
             // 3. Create a new session with the new key pair but preserve session state
@@ -384,16 +395,16 @@ namespace LibEmiddle.Tests.Unit
                 rootKey: newRootKey, // Use the new root key
                 sendingChainKey: newChainKey, // Use the new chain key
                 receivingChainKey: newChainKey, // Use the new chain key
-                messageNumber: currentAliceSession.MessageNumber,
+                messageNumberSending: currentAliceSession.MessageNumberSending,
+                messageNumberReceiving: currentAliceSession.MessageNumberReceiving,
                 sessionId: currentAliceSession.SessionId,
-                recentlyProcessedIds: currentAliceSession.RecentlyProcessedIds,
-                processedMessageNumbers: currentAliceSession.ProcessedMessageNumbers
+                recentlyProcessedIds: currentAliceSession.RecentlyProcessedIds
             );
 
             for (int i = 15; i < 25; i++)
             {
                 string original = $"Message {i + 1}";
-                var (updatedSession, encrypted) = DoubleRatchet.DoubleRatchetEncrypt(
+                var (updatedSession, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentAliceSession,
                     original,
                     Enums.KeyRotationStrategy.Standard
@@ -409,7 +420,7 @@ namespace LibEmiddle.Tests.Unit
 
             foreach (var (original, encrypted) in messages)
             {
-                var (updatedSession, decrypted) = DoubleRatchet.DoubleRatchetDecrypt(
+                var (updatedSession, decrypted) = _cryptoProvider.DoubleRatchetDecrypt(
                     currentBobSession,
                     encrypted
                 );
@@ -441,11 +452,11 @@ namespace LibEmiddle.Tests.Unit
         public void KeyRotation_ShouldProvideForwardSecrecy_AfterCompromise()
         {
             // Arrange
-            var aliceKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            var bobKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Create initial shared secret
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             string sessionId = Guid.NewGuid().ToString();
@@ -453,22 +464,24 @@ namespace LibEmiddle.Tests.Unit
             // Create Alice's session
             var aliceSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
             // Create Bob's session
             var bobSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: bobKeyPair,
-                remoteDHRatchetKey: aliceKeyPair.publicKey,
+                remoteDHRatchetKey: aliceKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
@@ -483,7 +496,7 @@ namespace LibEmiddle.Tests.Unit
 
             for (int i = 0; i < 5; i++)
             {
-                var (updatedSession, encrypted) = DoubleRatchet.DoubleRatchetEncrypt(
+                var (updatedSession, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentAliceSession,
                     $"Pre-compromise message {i + 1}"
                 );
@@ -498,36 +511,36 @@ namespace LibEmiddle.Tests.Unit
             var compromisedBobSession = CreateSessionCopy(currentBobSession);
 
             // Phase 3: Key rotation occurs - both parties generate new key pairs and perform a DH ratchet step
-            var aliceNewKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            var bobNewKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            var aliceNewKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobNewKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Generate new shared secret with new keys
-            byte[] newSharedSecret = X3DHExchange.X3DHKeyExchange(bobNewKeyPair.publicKey, aliceNewKeyPair.privateKey);
+            byte[] newSharedSecret = X3DHExchange.PerformX25519DH(bobNewKeyPair.PublicKey, aliceNewKeyPair.PrivateKey);
 
             // Alice updates her session with the new key pair
             currentAliceSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceNewKeyPair,
-                remoteDHRatchetKey: bobNewKeyPair.publicKey, // This is the key update - now uses Bob's new key
+                remoteDHRatchetKey: bobNewKeyPair.PublicKey, // This is the key update - now uses Bob's new key
                 rootKey: currentAliceSession.RootKey,
                 sendingChainKey: currentAliceSession.SendingChainKey,
                 receivingChainKey: currentAliceSession.ReceivingChainKey,
-                messageNumber: currentAliceSession.MessageNumber,
+                messageNumberReceiving: currentAliceSession.MessageNumberReceiving,
+                messageNumberSending: currentAliceSession.MessageNumberSending,
                 sessionId: currentAliceSession.SessionId,
-                recentlyProcessedIds: currentAliceSession.RecentlyProcessedIds,
-                processedMessageNumbers: currentAliceSession.ProcessedMessageNumbers
+                recentlyProcessedIds: currentAliceSession.RecentlyProcessedIds
             );
 
             // Bob updates his session with the new key pair
             currentBobSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: bobNewKeyPair,
-                remoteDHRatchetKey: aliceNewKeyPair.publicKey, // This is the key update - now uses Alice's new key
+                remoteDHRatchetKey: aliceNewKeyPair.PublicKey, // This is the key update - now uses Alice's new key
                 rootKey: currentBobSession.RootKey,
                 sendingChainKey: currentBobSession.SendingChainKey,
                 receivingChainKey: currentBobSession.ReceivingChainKey,
-                messageNumber: currentBobSession.MessageNumber,
+                messageNumberReceiving: currentBobSession.MessageNumberReceiving,
+                messageNumberSending: currentBobSession.MessageNumberSending,
                 sessionId: currentBobSession.SessionId,
-                recentlyProcessedIds: currentBobSession.RecentlyProcessedIds,
-                processedMessageNumbers: currentBobSession.ProcessedMessageNumbers
+                recentlyProcessedIds: currentBobSession.RecentlyProcessedIds
             );
 
             // Perform a DH ratchet step to upgrade the keys
@@ -554,7 +567,7 @@ namespace LibEmiddle.Tests.Unit
 
             for (int i = 0; i < 5; i++)
             {
-                var (updatedSession, encrypted) = DoubleRatchet.DoubleRatchetEncrypt(
+                var (updatedSession, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentAliceSession,
                     $"Post-rotation message {i + 1}"
                 );
@@ -568,7 +581,7 @@ namespace LibEmiddle.Tests.Unit
 
             foreach (var message in postRotationMessages)
             {
-                var (_, decrypted) = DoubleRatchet.DoubleRatchetDecrypt(
+                var (_, decrypted) = _cryptoProvider.DoubleRatchetDecrypt(
                     compromisedBobSession,
                     message
                 );
@@ -584,7 +597,7 @@ namespace LibEmiddle.Tests.Unit
             // 1. Legitimate sessions should still work properly
             foreach (var message in postRotationMessages)
             {
-                var (updatedSession, decrypted) = DoubleRatchet.DoubleRatchetDecrypt(
+                var (updatedSession, decrypted) = _cryptoProvider.DoubleRatchetDecrypt(
                     currentBobSession,
                     message
                 );
@@ -609,8 +622,8 @@ namespace LibEmiddle.Tests.Unit
             // due to possible implementation issues in the library
 
             // Arrange
-            var mainDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var secondDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create test data
             byte[] sensitiveData = SecureMemory.CreateSecureBuffer(32);
@@ -621,8 +634,8 @@ namespace LibEmiddle.Tests.Unit
             var secondDeviceManager = new DeviceManager(secondDeviceKeyPair);
 
             // Link the devices
-            mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.publicKey);
-            secondDeviceManager.AddLinkedDevice(mainDeviceKeyPair.publicKey);
+            mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);
+            secondDeviceManager.AddLinkedDevice(mainDeviceKeyPair.PublicKey);
 
             // Act & Assert
             // 1. Check that sync messages are created
@@ -630,9 +643,9 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsTrue(syncMessages.Count > 0, "Should create at least one sync message");
 
             // 2. Check that device is linked
-            Assert.IsTrue(mainDeviceManager.IsDeviceLinked(secondDeviceKeyPair.publicKey),
+            Assert.IsTrue(mainDeviceManager.IsDeviceLinked(secondDeviceKeyPair.PublicKey),
                 "Second device should be linked to main device");
-            Assert.IsTrue(secondDeviceManager.IsDeviceLinked(mainDeviceKeyPair.publicKey),
+            Assert.IsTrue(secondDeviceManager.IsDeviceLinked(mainDeviceKeyPair.PublicKey),
                 "Main device should be linked to second device");
 
             // 3. Check linked device count
@@ -653,41 +666,44 @@ namespace LibEmiddle.Tests.Unit
         public void DHRatchet_WithDifferentRotationStrategies_ShouldBehaveDifferently()
         {
             // Arrange
-            var aliceKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            var bobKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Create shared secret and initialize Double Ratchet
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             // Create three sessions with different session IDs for testing different strategies
             var standardSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: "standard-" + Guid.NewGuid().ToString()
             );
 
             var hourlySession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: "hourly-" + Guid.NewGuid().ToString()
             );
 
             var dailySession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: "daily-" + Guid.NewGuid().ToString()
             );
 
@@ -705,21 +721,21 @@ namespace LibEmiddle.Tests.Unit
             for (int i = 0; i < 100; i++)
             {
                 // Standard session (rotate every 20 messages)
-                var (updatedStandardSession, _) = DoubleRatchet.DoubleRatchetEncrypt(
+                var (updatedStandardSession, _) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentStandardSession,
                     $"Standard message {i + 1}",
                     Enums.KeyRotationStrategy.Standard
                 );
 
                 // Hourly session
-                var (updatedHourlySession, _) = DoubleRatchet.DoubleRatchetEncrypt(
+                var (updatedHourlySession, _) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentHourlySession,
                     $"Hourly message {i + 1}",
                     Enums.KeyRotationStrategy.Hourly
                 );
 
                 // Daily session
-                var (updatedDailySession, _) = DoubleRatchet.DoubleRatchetEncrypt(
+                var (updatedDailySession, _) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentDailySession,
                     $"Daily message {i + 1}",
                     Enums.KeyRotationStrategy.Daily
@@ -777,10 +793,10 @@ namespace LibEmiddle.Tests.Unit
                 rootKey: original.RootKey,
                 sendingChainKey: original.SendingChainKey,
                 receivingChainKey: original.ReceivingChainKey,
-                messageNumber: original.MessageNumber,
+                messageNumberReceiving: original.MessageNumberReceiving,
+                messageNumberSending: original.MessageNumberSending,
                 sessionId: original.SessionId,
-                recentlyProcessedIds: original.RecentlyProcessedIds,
-                processedMessageNumbers: original.ProcessedMessageNumbers
+                recentlyProcessedIds: original.RecentlyProcessedIds
             );
         }
 

@@ -1,4 +1,4 @@
-﻿namespace LibEmiddle.Models
+﻿namespace LibEmiddle.Domain
 {
     /// <summary>
     /// Metadata class for key files to support salt rotation

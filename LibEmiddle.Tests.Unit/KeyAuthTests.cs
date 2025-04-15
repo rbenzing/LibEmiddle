@@ -1,28 +1,38 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-using LibEmiddle.Crypto;
 using LibEmiddle.Core;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Domain;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class KeyAuthLoadTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void GenerateKeyPair_UnderHighLoad_ShouldStillGenerateValidPairs()
         {
             const int ITERATIONS = 1000;
-            var keyPairs = new List<KeyAuth.KeyPair>();
+            var keyPairs = new List<KeyPair>();
 
             object lockObject = new object();
 
             Parallel.For(0, ITERATIONS, _ =>
             {
-                var keyPair = KeyAuth.GenerateKeyPair();
+                var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
                 lock (lockObject)
                 {
                     keyPairs.Add(keyPair);
@@ -50,14 +60,14 @@ namespace LibEmiddle.Tests.Unit
         public void SignAndVerify_WithLargeMessage_ShouldWorkCorrectly()
         {
             // Arrange
-            var keyPair = KeyAuth.GenerateKeyPair();
+            var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var largeMessage = SecureMemory.CreateSecureBuffer(1024 * 1024); // 1MB message
 
             // Act
-            byte[] signature = KeyAuth.SignDetached(largeMessage, keyPair.PrivateKey);
+            byte[] signature = _cryptoProvider.Sign(largeMessage, keyPair.PrivateKey);
 
             // Assert
-            bool verified = KeyAuth.VerifyDetached(signature, largeMessage, keyPair.PublicKey);
+            bool verified = _cryptoProvider.Verify(largeMessage, signature, keyPair.PublicKey);
             Assert.IsTrue(verified, "Large message signature should verify correctly");
         }
 
@@ -70,22 +80,22 @@ namespace LibEmiddle.Tests.Unit
             var invalidPrivateKey = new byte[32]; // Wrong length
 
             // Act & Assert
-            KeyAuth.SignDetached(message, invalidPrivateKey);
+            _cryptoProvider.Sign(message, invalidPrivateKey);
         }
 
         [TestMethod]
         public void VerifyDetached_TamperedSignature_ShouldReturnFalse()
         {
             // Arrange
-            var keyPair = KeyAuth.GenerateKeyPair();
+            var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var message = Encoding.UTF8.GetBytes("Test message");
-            var signature = KeyAuth.SignDetached(message, keyPair.PrivateKey);
+            var signature = _cryptoProvider.Sign(message, keyPair.PrivateKey);
 
             // Tamper with signature
             signature[0] ^= 0xFF;
 
             // Act
-            bool verified = KeyAuth.VerifyDetached(signature, message, keyPair.PublicKey);
+            bool verified = _cryptoProvider.Verify(message, signature, keyPair.PublicKey);
 
             // Assert
             Assert.IsFalse(verified, "Tampered signature should not verify");

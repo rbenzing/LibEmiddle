@@ -6,22 +6,38 @@ using LibEmiddle.API;
 using LibEmiddle.KeyExchange;
 using LibEmiddle.Models;
 using LibEmiddle.Domain;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Crypto;
+using LibEmiddle.Messaging.Transport;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class KeyExchangeTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void X3DHKeyExchange_ShouldProduceSameKeyForBothParties()
         {
             // Arrange
-            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-            var (bobPublic, bobPrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var alicePublic = _aliceIdentityKeyPair.PublicKey;
+            var alicePrivate = _aliceIdentityKeyPair.PrivateKey;
+
+            KeyPair _bobIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobPublic = _bobIdentityKeyPair.PublicKey;
+            var bobPrivate = _bobIdentityKeyPair.PrivateKey;
 
             // Act
-            byte[] aliceSharedSecret = X3DHExchange.X3DHKeyExchange(bobPublic, alicePrivate);
-            byte[] bobSharedSecret = X3DHExchange.X3DHKeyExchange(alicePublic, bobPrivate);
+            byte[] aliceSharedSecret = X3DHExchange.PerformX25519DH(bobPublic, alicePrivate);
+            byte[] bobSharedSecret = X3DHExchange.PerformX25519DH(alicePublic, bobPrivate);
 
             // Assert
             CollectionAssert.AreEqual(aliceSharedSecret, bobSharedSecret);
@@ -43,8 +59,14 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(bundle.GetSignedPreKeyPrivate());
             Assert.IsTrue(bundle.OneTimePreKeys.Count > 0);
 
-            // Verify signature
-            bool validSignature = LibEmiddleClient.VerifySignature(bundle.SignedPreKey, bundle.SignedPreKeySignature, bundle.IdentityKey);
+            // The issue is in the parameter order - the first parameter should be the message (SignedPreKey in this case)
+            // In the KeyAuth class and MessageSigning class, the order is:
+            // (message, signature, publicKey) not (signature, message, publicKey)
+            bool validSignature = _cryptoProvider.Verify(
+                bundle.SignedPreKey,  // This is the message that was signed
+                bundle.SignedPreKeySignature,  // This is the signature
+                bundle.IdentityKey    // This is the public key used to verify
+            );
 
             Assert.IsTrue(validSignature);
 
@@ -57,7 +79,9 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var alicePublic = _aliceIdentityKeyPair.PublicKey;
+            var alicePrivate = _aliceIdentityKeyPair.PrivateKey;
 
             var bobPublicBundle = new X3DHPublicBundle
             {
@@ -68,7 +92,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act
-            var session = X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
+            var session = X3DHExchange.InitiateX3DHSession(bobPublicBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
 
             // Assert
             Assert.IsNotNull(session);
@@ -83,10 +107,10 @@ namespace LibEmiddle.Tests.Unit
         public void InitiateX3DHSession_WithNullBundle_ShouldThrowException()
         {
             // Arrange
-            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-
+            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            
             // Act & Assert - Should throw ArgumentNullException
-            X3DHExchange.InitiateX3DHSession(null, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
+            X3DHExchange.InitiateX3DHSession(null, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
         }
 
         [TestMethod]
@@ -94,7 +118,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             var bobPublicBundle = new X3DHPublicBundle
             {
@@ -105,7 +129,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act
-            var session = X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
+            var session = X3DHExchange.InitiateX3DHSession(bobPublicBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
 
             // Assert
             Assert.IsNotNull(session);
@@ -120,7 +144,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Create a bundle with invalid signed pre-key (all zeros)
             var bobPublicBundle = new X3DHPublicBundle
@@ -132,7 +156,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act & Assert - Should throw ArgumentException
-            X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
+            X3DHExchange.InitiateX3DHSession(bobPublicBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
         }
 
         [TestMethod]
@@ -141,7 +165,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            var (alicePublic, alicePrivate) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Tamper with the signature
             byte[] tamperedSignature = new byte[bobBundle.SignedPreKeySignature.Length];
@@ -158,7 +182,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act & Assert - Should throw ArgumentException
-            X3DHExchange.InitiateX3DHSession(bobPublicBundle, (alicePublic, alicePrivate), out var usedOneTimePreKeyId);
+            X3DHExchange.InitiateX3DHSession(bobPublicBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
         }
 
         [TestMethod]

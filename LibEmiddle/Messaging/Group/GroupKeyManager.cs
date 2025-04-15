@@ -1,146 +1,226 @@
-﻿using System.Security.Cryptography;
-using System.Text;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text; // Likely needed for DeriveSubkey info
 using LibEmiddle.Core;
-using LibEmiddle.Crypto;
-using LibEmiddle.Domain;
+using LibEmiddle.Crypto; // For CryptoHMAC, KeyConversion, SecureMemory
+using LibEmiddle.Domain; // For Constants
 
 namespace LibEmiddle.Messaging.Group
 {
     /// <summary>
-    /// Manages cryptographic keys for group chats, including generation, rotation, and derivation.
+    /// Manages the Sender Key state (Chain Key and Iteration) for groups
+    /// where the local user is the sender. Generates initial keys and performs
+    /// the symmetric key ratchet to derive message keys.
     /// </summary>
-    public class GroupKeyManager
+    public class GroupKeyManager : IDisposable // Implement IDisposable if clearing keys on disposal is desired
     {
-        // Default key size for group keys
-        private const int GROUP_KEY_SIZE = Constants.AES_KEY_SIZE;
+        // Internal state record for Sender Keys
+        private sealed record SenderKeyState
+        {
+            public byte[] ChainKey { get; init; } = Array.Empty<byte>();
+            public uint Iteration { get; init; }
 
-        // Default number of days before triggering a key rotation
-        private const int DEFAULT_ROTATION_DAYS = 30;
+            // Method to securely dispose of the chain key if needed
+            public void Clear() => SecureMemory.SecureClear(ChainKey);
+        }
 
-        // Store a map of group chain keys
-        private readonly Dictionary<string, byte[]> _chainKeys = new Dictionary<string, byte[]>();
+        // Stores the current SenderKeyState for each group this client sends to
+        // Key: groupId (string)
+        // Value: SenderKeyState (containing ChainKey and Iteration)
+        private readonly ConcurrentDictionary<string, SenderKeyState> _senderState = new();
+
+        // Constants from Double Ratchet KDF_CK (ensure these are accessible)
+        private const byte MESSAGE_KEY_SEED_BYTE = 0x01;
+        private const byte CHAIN_KEY_SEED_BYTE = 0x02;
 
         /// <summary>
-        /// Generates a new cryptographically secure key for group encryption
+        /// Generates a new cryptographically secure initial Chain Key (32 bytes).
         /// </summary>
-        /// <returns>New random key suitable for group encryption</returns>
-        public byte[] GenerateGroupKey()
+        /// <returns>A new 32-byte random key suitable as an initial Chain Key.</returns>
+        public byte[] GenerateInitialChainKey()
         {
-            byte[] key = Sodium.GenerateRandomBytes(GROUP_KEY_SIZE);
-            RandomNumberGenerator.Fill(key);
-            return key;
+            // Use preferred method for generating secure random bytes
+            return RandomNumberGenerator.GetBytes(Constants.AES_KEY_SIZE);
         }
 
         /// <summary>
-        /// Derives a chain key for message encryption from a sender key
+        /// Initializes the sender state for a group with the given initial chain key.
+        /// Typically called when creating a group or rotating the key.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="senderKey">Base sender key</param>
-        /// <returns>Chain key for message encryption</returns>
-        public byte[] DeriveChainKey(string groupId, byte[] senderKey)
+        /// <param name="groupId">Group identifier.</param>
+        /// <param name="initialChainKey">The initial chain key.</param>
+        public void InitializeSenderState(string groupId, byte[] initialChainKey)
         {
-            // If we already have a chain key for this group, return it
-            if (_chainKeys.TryGetValue(groupId, out byte[]? existingChainKey))
+            ArgumentException.ThrowIfNullOrEmpty(groupId, nameof(groupId));
+            ArgumentNullException.ThrowIfNull(initialChainKey, nameof(initialChainKey));
+            if (initialChainKey.Length != Constants.AES_KEY_SIZE)
+                throw new ArgumentException($"Initial Chain Key must be {Constants.AES_KEY_SIZE} bytes.", nameof(initialChainKey));
+
+            // Store a copy
+            byte[] chainKeyCopy = (byte[])initialChainKey.Clone();
+
+            var initialState = new SenderKeyState
             {
-                return existingChainKey;
+                ChainKey = chainKeyCopy,
+                Iteration = 0 // Start iteration at 0
+            };
+
+            // AddOrUpdate ensures thread-safety and handles potential existing state clearing
+            _senderState.AddOrUpdate(groupId, initialState, (key, existingState) => {
+                existingState.Clear(); // Clear old key if replacing
+                return initialState;
+            });
+        }
+
+        /// <summary>
+        /// Performs the symmetric ratchet step for the sender's chain.
+        /// Derives the next message key and advances the chain state.
+        /// </summary>
+        /// <param name="groupId">Group identifier.</param>
+        /// <returns>A tuple containing the MessageKey (byte[32]) to use for encryption
+        /// and the Iteration (uint) associated with that key.</returns>
+        /// <exception cref="InvalidOperationException">If sender state is not initialized for the group.</exception>
+        /// <exception cref="CryptographicException">If HMAC operation fails.</exception>
+        public (byte[] MessageKey, uint Iteration) GetSenderMessageKey(string groupId)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(groupId, nameof(groupId));
+
+            SenderKeyState currentState;
+            SenderKeyState nextState;
+            byte[] messageKey;
+            byte[] nextChainKey; // Declare here
+
+            // Atomically get current state and update to next state
+            do
+            {
+                if (!_senderState.TryGetValue(groupId, out currentState!))
+                {
+                    throw new InvalidOperationException($"Sender state not initialized for group {groupId}. Call InitializeSenderState first.");
+                }
+
+                // --- Perform KDF_CK using KeyGenerator.GenerateHmacSha256 ---
+                byte[] currentChainKey = currentState.ChainKey;
+                uint currentIteration = currentState.Iteration;
+
+                // Derive keys using the existing HMAC function
+                messageKey = KeyGenerator.GenerateHmacSha256(currentChainKey, new byte[] { MESSAGE_KEY_SEED_BYTE });
+                nextChainKey = KeyGenerator.GenerateHmacSha256(currentChainKey, new byte[] { CHAIN_KEY_SEED_BYTE });
+
+                // Validation of output length happens inside GenerateHmacSha256 now (or should)
+                // If not, add checks here:
+                if (messageKey == null || messageKey.Length != Constants.AES_KEY_SIZE || nextChainKey == null || nextChainKey.Length != Constants.AES_KEY_SIZE)
+                    throw new CryptographicException("KDF_CK (HMAC) failed or produced incorrect output length.");
+
+                // Prepare the next state object (with incremented iteration)
+                nextState = new SenderKeyState
+                {
+                    ChainKey = nextChainKey, // Store the newly derived chain key
+                    Iteration = currentIteration + 1
+                };
+
+                // Attempt to update the state in the dictionary using optimistic concurrency
+            } while (!_senderState.TryUpdate(groupId, nextState, currentState)); // Compare-and-swap
+
+            // IMPORTANT: Return the message key derived from the *current* state,
+            // along with the *current* iteration number (before it was incremented).
+            return (messageKey, currentState.Iteration);
+        }
+
+        /// <summary>
+        /// Checks if a key should be rotated based on the rotation strategy and establishment time
+        /// </summary>
+        /// <param name="keyEstablishmentTimeMs">Time when key was established (milliseconds since epoch).</param>
+        /// <param name="rotationStrategy">Rotation strategy to apply.</param>
+        /// <returns>True if key rotation is recommended.</returns>
+        public bool ShouldRotateKey(long keyEstablishmentTimeMs, Enums.KeyRotationStrategy rotationStrategy)
+        {
+            if (keyEstablishmentTimeMs <= 0) return true; // Rotate if timestamp invalid or unset
+
+            // For Standard strategy, always rotate
+            if (rotationStrategy == Enums.KeyRotationStrategy.Standard)
+            {
+                return true;
             }
 
-            return KeyConversion.HkdfDerive(
-                senderKey,
-                info: Encoding.UTF8.GetBytes($"GroupChainKey-{groupId}")
-            );
-        }
+            long currentTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            TimeSpan elapsed = TimeSpan.FromMilliseconds(currentTimeMs - keyEstablishmentTimeMs);
 
-        /// <summary>
-        /// Updates the chain key for a group by performing a ratchet step
-        /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <returns>New message key for encryption</returns>
-        public byte[] RatchetChainKey(string groupId)
-        {
-            if (!_chainKeys.TryGetValue(groupId, out byte[]? currentChainKey))
+            // Check based on strategy
+            return rotationStrategy switch
             {
-                throw new InvalidOperationException($"No chain key exists for group {groupId}");
-            }
-
-            // Perform a ratchet step to derive a new chain key and message key
-            byte[] nextChainKey = KeyConversion.HkdfDerive(
-                currentChainKey,
-                info: Encoding.UTF8.GetBytes($"NextChainKey-{groupId}"),
-                outputLength: Constants.AES_KEY_SIZE
-            );
-
-            // Reset HMAC with the same key but new message
-            byte[] messageKey = KeyConversion.HkdfDerive(
-                currentChainKey,
-                info: Encoding.UTF8.GetBytes($"MessageKey-{groupId}"),
-                outputLength: Constants.AES_KEY_SIZE
-            );
-
-            // Update the stored chain key
-            _chainKeys[groupId] = nextChainKey;
-
-            return messageKey;
+                Enums.KeyRotationStrategy.Hourly => elapsed >= TimeSpan.FromHours(1),
+                Enums.KeyRotationStrategy.Daily => elapsed >= TimeSpan.FromDays(1),
+                _ => false // Unknown strategy, don't rotate automatically
+            };
         }
 
         /// <summary>
-        /// Checks if a key should be rotated based on creation time
+        /// Derives a subkey for a specific purpose from a base key using HKDF.
         /// </summary>
-        /// <param name="keyCreationTime">Time when key was created (milliseconds since epoch)</param>
-        /// <param name="rotationDays">Days after which to rotate (defaults to 30)</param>
-        /// <returns>True if key rotation is recommended</returns>
-        public bool ShouldRotateKey(long keyCreationTime, int rotationDays = DEFAULT_ROTATION_DAYS)
+        /// <param name="baseKey">Base key (e.g., Chain Key).</param>
+        /// <param name="purpose">Purpose string for the 'info' parameter of HKDF.</param>
+        /// <returns>Derived key (32 bytes).</returns>
+        public byte[] DeriveSubkey(byte[] baseKey, string purpose)
         {
-            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            long rotationInterval = rotationDays * 24 * 60 * 60 * 1000L; // Convert days to milliseconds
-
-            return currentTime - keyCreationTime > rotationInterval;
-        }
-
-        /// <summary>
-        /// Derives a subkey for a specific purpose from the main group key
-        /// </summary>
-        /// <param name="groupKey">Base group key</param>
-        /// <param name="purpose">Purpose of the derived key (e.g., "Encryption", "Authentication")</param>
-        /// <returns>Derived key for specific purpose</returns>
-        public byte[] DeriveSubkey(byte[] groupKey, string purpose)
-        {
-            ArgumentNullException.ThrowIfNull(groupKey, nameof(groupKey));
+            ArgumentNullException.ThrowIfNull(baseKey, nameof(baseKey));
             ArgumentException.ThrowIfNullOrEmpty(purpose, nameof(purpose));
 
+            // Assuming KeyConversion.HkdfDerive uses a zero salt by default if not provided
             return KeyConversion.HkdfDerive(
-                groupKey,
-                info: Encoding.UTF8.GetBytes($"SubkeyDerivation-{purpose}"),
-                outputLength: Constants.AES_KEY_SIZE
+                inputKeyMaterial: baseKey,
+                salt: null, // Or provide explicit zero salt if required by implementation
+                info: Encoding.UTF8.GetBytes($"SubkeyDerivation-{purpose}"), // Use purpose in info
+                outputLength: Constants.AES_KEY_SIZE // Typically 32 bytes
             );
         }
 
         /// <summary>
-        /// Clears all chain keys for security (e.g., when app is closing)
+        /// Securely clears the stored Chain Key and Iteration state for a specific group.
         /// </summary>
-        public void ClearAllChainKeys()
+        /// <param name="groupId">Group identifier.</param>
+        /// <returns>True if state for the group was found and cleared.</returns>
+        public bool ClearSenderState(string groupId)
         {
-            foreach (var key in _chainKeys.Values)
+            ArgumentException.ThrowIfNullOrEmpty(groupId, nameof(groupId));
+            if (_senderState.TryRemove(groupId, out SenderKeyState? removedState))
             {
-                // Securely clear the key data
-                SecureMemory.SecureClear(key);
+                removedState?.Clear(); // Securely clear the chain key within the state object
+                return true;
             }
-
-            _chainKeys.Clear();
+            return false;
         }
 
         /// <summary>
-        /// Clears chain key for a specific group
+        /// Securely clears all stored Sender Key states.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        public void ClearChainKey(string groupId)
+        public void ClearAllSenderStates()
         {
-            if (_chainKeys.TryGetValue(groupId, out byte[]? chainKey))
+            // Get all keys first to avoid issues with modifying dict while iterating
+            var allKeys = _senderState.Keys.ToList();
+            foreach (var groupId in allKeys)
             {
-                // Securely clear the key data
-                SecureMemory.SecureClear(chainKey);
-                _chainKeys.Remove(groupId);
+                if (_senderState.TryRemove(groupId, out SenderKeyState? removedState))
+                {
+                    removedState?.Clear();
+                }
             }
+            // Double check if clear is needed - TryRemove might have race conditions if key re-added
+            _senderState.Clear(); // Final clear just in case
         }
-    }
-}
+
+        /// <summary>
+        /// Implements IDisposable to ensure all stored keys are cleared.
+        /// </summary>
+        public void Dispose()
+        {
+            ClearAllSenderStates();
+            GC.SuppressFinalize(this);
+        }
+
+        // Optional Finalizer as safety net
+        ~GroupKeyManager() => ClearAllSenderStates();
+
+    } // End Class
+} // End Namespace

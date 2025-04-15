@@ -10,16 +10,24 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Diagnostics;
-using LibEmiddle.API;
+using LibEmiddle.Abstractions;
 using LibEmiddle.Messaging.Transport;
-using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class MultiDeviceTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         #region Device Linking Tests
 
         [TestMethod]
@@ -32,14 +40,14 @@ namespace LibEmiddle.Tests.Unit
                 rng.GetBytes(existingSharedKey);
             }
 
-            var newDeviceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Act
             byte[] derivedKey1 = DeviceLinking.DeriveSharedKeyForNewDevice(
-                existingSharedKey, newDeviceKeyPair.publicKey);
+                existingSharedKey, newDeviceKeyPair.PublicKey);
 
             byte[] derivedKey2 = DeviceLinking.DeriveSharedKeyForNewDevice(
-                existingSharedKey, newDeviceKeyPair.publicKey);
+                existingSharedKey, newDeviceKeyPair.PublicKey);
 
             // Assert
             Assert.IsTrue(TestsHelpers.AreByteArraysEqual(derivedKey1, derivedKey2));
@@ -49,12 +57,12 @@ namespace LibEmiddle.Tests.Unit
         public void CreateDeviceLinkMessage_ShouldCreateValidMessage()
         {
             // Arrange
-            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var newDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Act
-            var encryptedMessage = LibEmiddleClient.CreateDeviceLinkMessage(
-                mainDeviceKeyPair, newDeviceKeyPair.publicKey);
+            var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
+                mainDeviceKeyPair, newDeviceKeyPair.PublicKey);
 
             // Assert
             Assert.IsNotNull(encryptedMessage);
@@ -67,23 +75,23 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             // Generate key pairs for main device and new device
-            var mainDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var newDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create a device link message from the main device to the new device
             var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
                 mainDeviceKeyPair,
-                newDeviceKeyPair.publicKey);
+                newDeviceKeyPair.PublicKey);
 
             // Act
             byte[] result = DeviceLinking.ProcessDeviceLinkMessage(
                 encryptedMessage,
                 newDeviceKeyPair,
-                mainDeviceKeyPair.publicKey);
+                mainDeviceKeyPair.PublicKey);
 
             // Assert: With our updated implementation, a valid message returns the main device's Ed25519 public key.
             Assert.IsNotNull(result, "Valid device link message should be processed successfully.");
-            Assert.IsTrue(TestsHelpers.AreByteArraysEqual(result, mainDeviceKeyPair.publicKey),
+            Assert.IsTrue(TestsHelpers.AreByteArraysEqual(result, mainDeviceKeyPair.PublicKey),
                 "The returned main device public key should match the original.");
         }
 
@@ -92,14 +100,14 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             // Generate key pairs for main device and new device
-            var mainDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var newDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var unrelatedKeyPair = KeyGenerator.GenerateEd25519KeyPair(); // For tampering
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var unrelatedKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519); // For tampering
 
             // Create a device link message from the main device to the new device
             var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
                 mainDeviceKeyPair,
-                newDeviceKeyPair.publicKey);
+                newDeviceKeyPair.PublicKey);
 
             // Tamper with the message to simulate an invalid message
             // Create a copy of the encrypted message with corrupted ciphertext
@@ -118,7 +126,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] result = DeviceLinking.ProcessDeviceLinkMessage(
                 tamperedMessage,  // Use the tampered message
                 newDeviceKeyPair,
-                unrelatedKeyPair.publicKey);  // Use unrelated key to simulate wrong device
+                unrelatedKeyPair.PublicKey);  // Use unrelated key to simulate wrong device
 
             // Assert
             Assert.IsNull(result, "Result should be null for an invalid message");
@@ -128,12 +136,12 @@ namespace LibEmiddle.Tests.Unit
         public void ProcessDeviceLinkMessage_WithNullMessage_ShouldThrowException()
         {
             // Arrange
-            var newDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var mainDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Act & Assert - Should throw ArgumentNullException
             Assert.ThrowsException<ArgumentNullException>(() => {
-                DeviceLinking.ProcessDeviceLinkMessage(null, newDeviceKeyPair, mainDeviceKeyPair.publicKey);
+                DeviceLinking.ProcessDeviceLinkMessage(null, newDeviceKeyPair, mainDeviceKeyPair.PublicKey);
             });
         }
 
@@ -145,15 +153,15 @@ namespace LibEmiddle.Tests.Unit
         public void MultiDeviceManager_ShouldCreateValidSyncMessages()
         {
             // Arrange
-            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Derive X25519 keys for the second device
-            byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
+            byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
 
             // Validate the derived X25519 public key
-            bool isValid = KeyValidation.ValidateX25519PublicKey(secondDeviceX25519Public);
+            bool isValid = _cryptoProvider.ValidateX25519PublicKey(secondDeviceX25519Public);
             Assert.IsTrue(isValid, "The X25519 public key should be valid");
 
             // Create manager
@@ -183,7 +191,7 @@ namespace LibEmiddle.Tests.Unit
         public void MultiDeviceManager_AddLinkedDevice_WithNull_ShouldThrowException()
         {
             // Arrange
-            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var manager = new DeviceManager(mainDeviceKeyPair);
 
             // Act & Assert - Should throw ArgumentNullException
@@ -195,33 +203,35 @@ namespace LibEmiddle.Tests.Unit
         {
             Trace.TraceWarning("Starting test setup");
 
-            // 1. Generate X25519 keypairs directly to avoid conversion issues
-            var mainDeviceKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            var secondDeviceKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            Trace.TraceWarning($"Generated X25519 key pairs - Main device pub key length: {mainDeviceKeyPair.publicKey.Length}, Second device pub key length: {secondDeviceKeyPair.publicKey.Length}");
+            // 1. Generate key pairs: main device uses an Ed25519 key pair for signing;
+            // second device can use X25519 for key agreement.
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
-            string mainDeviceKeyBase64 = Convert.ToBase64String(mainDeviceKeyPair.publicKey);
-            string secondDeviceKeyBase64 = Convert.ToBase64String(secondDeviceKeyPair.publicKey);
-            Trace.TraceWarning($"Main device key (Base64): {mainDeviceKeyBase64}");
-            Trace.TraceWarning($"Second device key (Base64): {secondDeviceKeyBase64}");
+            Trace.TraceWarning($"Generated keys - Main device pub key length: {mainDeviceKeyPair.PublicKey.Length}, Second device pub key length: {secondDeviceKeyPair.PublicKey.Length}");
+
+            string mainDeviceKeyBase64 = Convert.ToBase64String(mainDeviceKeyPair.PublicKey);
+            string secondDeviceKeyBase64 = Convert.ToBase64String(secondDeviceKeyPair.PublicKey);
+            Trace.TraceWarning($"Main device key (Base64) length: {mainDeviceKeyBase64.Length}");
+            Trace.TraceWarning($"Second device key (Base64) length: {secondDeviceKeyBase64.Length}");
 
             // 2. Create our test sync data
             byte[] originalSyncData = Encoding.UTF8.GetBytes("Test sync data for multi-device processing");
             Trace.TraceWarning($"Created test sync data, length: {originalSyncData.Length}");
 
-            // 3. Let's manually create and process the sync message using direct methods instead of DeviceManager
+            // 3. Manually create and process the sync message with signing
             Trace.TraceWarning("Creating sync message manually for better debugging...");
 
             try
             {
-                // Implement manual signing, encryption, and decryption for the sync message
-                byte[] signature = MessageSigning.SignMessage(originalSyncData, mainDeviceKeyPair.privateKey);
+                // Sign the sync data using the main device's private signing key (Ed25519)
+                byte[] signature = MessageSigning.SignMessage(originalSyncData, mainDeviceKeyPair.PrivateKey);
                 Trace.TraceWarning($"Created signature, length: {signature.Length}");
 
                 // Create the sync message JSON manually
                 var syncMessage = new
                 {
-                    senderPublicKey = Convert.ToBase64String(mainDeviceKeyPair.publicKey),
+                    senderPublicKey = Convert.ToBase64String(mainDeviceKeyPair.PublicKey),
                     data = Convert.ToBase64String(originalSyncData),
                     signature = Convert.ToBase64String(signature),
                     timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
@@ -231,18 +241,22 @@ namespace LibEmiddle.Tests.Unit
                 // Serialize to JSON string
                 string jsonMessage = JsonSerializer.Serialize(syncMessage);
                 Trace.TraceWarning($"Serialized JSON message, length: {jsonMessage.Length}");
-                Trace.TraceWarning($"JSON content: {jsonMessage}");
 
-                // Now we'll manually perform X3DH key exchange
-                byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(
-                    secondDeviceKeyPair.publicKey,
-                    mainDeviceKeyPair.privateKey);
+                // Convert to X25519 keys
+                byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
+                byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
+                byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(_cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
+
+                // Now manually perform X3DH key exchange for encryption between devices
+                byte[] sharedSecret = X3DHExchange.PerformX25519DH(
+                    secondDeviceX25519Public,
+                    mainDeviceX25519Public);
                 Trace.TraceWarning($"Performed X3DH key exchange, shared secret length: {sharedSecret.Length}");
 
                 // Encrypt the message with AES using the shared secret
-                byte[] nonce = NonceGenerator.GenerateNonce();
+                byte[] nonce = _cryptoProvider.GenerateNonce();
                 byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
-                byte[] ciphertext = AES.AESEncrypt(messageBytes, sharedSecret, nonce);
+                byte[] ciphertext = _cryptoProvider.Encrypt(messageBytes, sharedSecret, nonce);
                 Trace.TraceWarning($"Encrypted message, ciphertext length: {ciphertext.Length}");
 
                 // Create the encrypted message
@@ -250,27 +264,22 @@ namespace LibEmiddle.Tests.Unit
                 {
                     Ciphertext = ciphertext,
                     Nonce = nonce,
-                    SenderDHKey = mainDeviceKeyPair.publicKey,
+                    SenderDHKey = mainDeviceKeyPair.PublicKey,
                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     MessageId = Guid.NewGuid()
                 };
 
                 // Verify we can decrypt it manually
                 Trace.TraceWarning("Verifying manual decryption works...");
-
-                // First, let's try manual decryption - this should work if everything is set up correctly
-                byte[] sharedSecret2 = X3DHExchange.X3DHKeyExchange(
-                    mainDeviceKeyPair.publicKey,
-                    secondDeviceKeyPair.privateKey);
-
-                byte[] decryptedBytes = AES.AESDecrypt(encryptedMessage.Ciphertext, sharedSecret2, encryptedMessage.Nonce);
+                byte[] sharedSecret2 = X3DHExchange.PerformX25519DH(
+                    mainDeviceKeyPair.PublicKey,
+                    secondDeviceKeyPair.PrivateKey);
+                byte[] decryptedBytes = _cryptoProvider.Decrypt(encryptedMessage.Ciphertext, sharedSecret2, encryptedMessage.Nonce);
                 string decryptedJson = Encoding.UTF8.GetString(decryptedBytes);
-                Trace.TraceWarning($"Decrypted JSON successfully: {decryptedJson}");
+                Trace.TraceWarning($"Decrypted JSON successfully.");
 
-                // Parse the decrypted JSON
+                // Parse the decrypted JSON and verify fields, signature, etc.
                 var parsedMessage = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(decryptedJson);
-
-                // Extract and verify the fields
                 string senderKeyBase64 = parsedMessage["senderPublicKey"].GetString();
                 string dataBase64 = parsedMessage["data"].GetString();
                 string sigBase64 = parsedMessage["signature"].GetString();
@@ -278,30 +287,20 @@ namespace LibEmiddle.Tests.Unit
                 byte[] extractedSenderKey = Convert.FromBase64String(senderKeyBase64);
                 byte[] extractedData = Convert.FromBase64String(dataBase64);
                 byte[] extractedSignature = Convert.FromBase64String(sigBase64);
-
-                // Verify the signature
                 bool signatureValid = MessageSigning.VerifySignature(extractedData, extractedSignature, extractedSenderKey);
                 Trace.TraceWarning($"Signature verification result: {signatureValid}");
-
-                // Verify the extracted data matches the original
                 bool dataMatches = originalSyncData.SequenceEqual(extractedData);
                 Trace.TraceWarning($"Extracted data matches original: {dataMatches}");
 
-                // Now let's try with the device manager
+                // Now test with the DeviceManager
                 Trace.TraceWarning("\nNow testing with DeviceManager...");
-
-                // Create device managers
-                var mainDeviceManager = new DeviceManager((mainDeviceKeyPair.publicKey, mainDeviceKeyPair.privateKey));
-                var secondDeviceManager = new DeviceManager((secondDeviceKeyPair.publicKey, secondDeviceKeyPair.privateKey));
-
-                // Add linked devices in both directions
-                mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.publicKey);
-                secondDeviceManager.AddLinkedDevice(mainDeviceKeyPair.publicKey);
-
+                var mainDeviceManager = new DeviceManager(new KeyPair(mainDeviceKeyPair.PublicKey, mainDeviceKeyPair.PrivateKey));
+                var secondDeviceManager = new DeviceManager(new KeyPair(secondDeviceKeyPair.PublicKey, secondDeviceKeyPair.PrivateKey));
+                mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);
+                secondDeviceManager.AddLinkedDevice(mainDeviceKeyPair.PublicKey);
                 Trace.TraceWarning($"Second device linked device count: {secondDeviceManager.GetLinkedDeviceCount()}");
 
-                // Now try to process with the second device manager
-                byte[] receivedData = secondDeviceManager.ProcessSyncMessage(encryptedMessage, mainDeviceKeyPair.publicKey);
+                byte[] receivedData = secondDeviceManager.ProcessSyncMessage(encryptedMessage, mainDeviceKeyPair.PublicKey);
 
                 if (receivedData != null)
                 {
@@ -310,41 +309,13 @@ namespace LibEmiddle.Tests.Unit
                 else
                 {
                     Trace.TraceWarning("DeviceManager.ProcessSyncMessage returned null");
-
-                    // Let's add a temporary method to the DeviceManager class for debugging:
-                    /*
-                    // Add this method to DeviceManager.cs:
-                    public bool TestDecryption(EncryptedMessage message, byte[] senderPublicKey, byte[] recipientPrivateKey)
-                    {
-                        try {
-                            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(senderPublicKey, recipientPrivateKey);
-                            byte[] decrypted = AES.AESDecrypt(message.Ciphertext, sharedSecret, message.Nonce);
-                            string json = Encoding.UTF8.GetString(decrypted);
-                            Trace.TraceWarning($"Test decryption succeeded, JSON: {json}");
-                            return true;
-                        }
-                        catch (Exception ex) {
-                            Trace.TraceWarning($"Test decryption failed: {ex.Message}");
-                            return false;
-                        }
-                    }
-                    */
-
-                    // Use the debug method if you add it
-                    //bool decryptionWorked = secondDeviceManager.TestDecryption(
-                    //    encryptedMessage, 
-                    //    mainDeviceKeyPair.publicKey, 
-                    //    secondDeviceKeyPair.privateKey);
-                    //Trace.TraceWarning($"Debug decryption test result: {decryptionWorked}");
                 }
 
-                // Continue with the standard assertions
                 Assert.IsNotNull(receivedData, "The received sync data should not be null");
                 Assert.AreEqual(originalSyncData.Length, receivedData.Length,
                     $"Received data length should match original sync data length");
                 CollectionAssert.AreEqual(originalSyncData, receivedData,
                     "The received data should match the original");
-
             }
             catch (Exception ex)
             {
@@ -358,13 +329,13 @@ namespace LibEmiddle.Tests.Unit
         public void MultiDeviceManager_ProcessSyncMessage_WithTamperedMessage_ShouldReturnNull()
         {
             // Arrange
-            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Convert to X25519 keys
-            byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
+            byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
-            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
+            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(_cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
 
             // Create managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -403,18 +374,18 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_MultipleLinkedDevices_ShouldCreateMessagesForAll()
         {
             // Arrange - Create a main device and multiple secondary devices
-            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var thirdDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var fourthDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var thirdDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var fourthDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create X25519 keys for each device for linking
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
-                KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey));
+                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey));
             byte[] thirdDeviceX25519Public = Sodium.ScalarMultBase(
-                KeyConversion.DeriveX25519PrivateKeyFromEd25519(thirdDeviceKeyPair.privateKey));
+                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(thirdDeviceKeyPair.PrivateKey));
             byte[] fourthDeviceX25519Public = Sodium.ScalarMultBase(
-                KeyConversion.DeriveX25519PrivateKeyFromEd25519(fourthDeviceKeyPair.privateKey));
+                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(fourthDeviceKeyPair.PrivateKey));
 
             // Create device manager for main device
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -458,15 +429,15 @@ namespace LibEmiddle.Tests.Unit
             // messages wouldn't be created for them
 
             // Arrange - Create devices
-            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var thirdDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var thirdDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create X25519 keys for each device for linking
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
-                KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey));
+                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey));
             byte[] thirdDeviceX25519Public = Sodium.ScalarMultBase(
-                KeyConversion.DeriveX25519PrivateKeyFromEd25519(thirdDeviceKeyPair.privateKey));
+                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(thirdDeviceKeyPair.PrivateKey));
 
             // Create device manager for main device
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -506,13 +477,13 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_ExpiredSyncMessage_ShouldReturnNull()
         {
             // Arrange
-            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Convert to X25519 keys
-            byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
+            byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
-            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
+            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(_cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
 
             // Create managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -528,15 +499,15 @@ namespace LibEmiddle.Tests.Unit
             var messageForSecondDevice = syncMessages[Convert.ToBase64String(secondDeviceX25519Public)];
 
             // Manually create a custom sync message with an old timestamp (more than 5 minutes old)
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(secondDeviceX25519Public,
-                KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey));
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(secondDeviceX25519Public,
+                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
 
             // Create sync message with timestamp that's too old
             var syncMessage = new DeviceSyncMessage
             {
-                SenderPublicKey = mainDeviceKeyPair.publicKey,
+                SenderPublicKey = mainDeviceKeyPair.PublicKey,
                 Data = syncData,
-                Signature = MessageSigning.SignMessage(syncData, mainDeviceKeyPair.privateKey),
+                Signature = MessageSigning.SignMessage(syncData, mainDeviceKeyPair.PrivateKey),
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 6 * 60 * 1000 // 6 minutes old
             };
 
@@ -551,8 +522,8 @@ namespace LibEmiddle.Tests.Unit
 
             // Encrypt
             byte[] plaintext = Encoding.UTF8.GetBytes(json);
-            byte[] nonce = NonceGenerator.GenerateNonce();
-            byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
+            byte[] nonce = _cryptoProvider.GenerateNonce();
+            byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, sharedSecret, nonce);
 
             var expiredMessage = new EncryptedMessage
             {
@@ -571,12 +542,12 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_AddSameDeviceMultipleTimes_ShouldOnlyAddOnce()
         {
             // Arrange
-            var mainDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var secondDeviceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create X25519 keys
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
-                KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey));
+                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey));
 
             // Create device manager
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);

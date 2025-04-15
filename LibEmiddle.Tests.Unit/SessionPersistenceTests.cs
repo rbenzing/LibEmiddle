@@ -9,22 +9,30 @@ using LibEmiddle.KeyExchange;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.Models;
+using LibEmiddle.Abstractions;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class SessionPersistenceTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         // Helper to create a test session
         private DoubleRatchetSession CreateTestSession()
         {
             // Generate key pairs for Alice and Bob
-            var aliceKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            var bobKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Create initial shared secret
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             // Create session ID
@@ -33,14 +41,14 @@ namespace LibEmiddle.Tests.Unit
             // Create a test session
             return new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 5, // Use non-zero to verify persistence
+                messageNumberReceiving: 5, // Use non-zero to verify persistence
+                messageNumberSending: 3, // Use non-zero to verify persistence
                 sessionId: sessionId,
-                recentlyProcessedIds: new[] { Guid.NewGuid(), Guid.NewGuid() },
-                processedMessageNumbers: new[] { 1, 2, 3 }
+                recentlyProcessedIds: [Guid.NewGuid(), Guid.NewGuid()]
             );
         }
 
@@ -57,16 +65,17 @@ namespace LibEmiddle.Tests.Unit
             // Assert
             Assert.IsNotNull(deserializedSession);
             Assert.AreEqual(originalSession.SessionId, deserializedSession.SessionId);
-            Assert.AreEqual(originalSession.MessageNumber, deserializedSession.MessageNumber);
+            Assert.AreEqual(originalSession.MessageNumberReceiving, deserializedSession.MessageNumberReceiving);
+            Assert.AreEqual(originalSession.MessageNumberSending, deserializedSession.MessageNumberSending);
 
             // Compare key materials
             Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.DHRatchetKeyPair.publicKey,
-                deserializedSession.DHRatchetKeyPair.publicKey));
+                originalSession.DHRatchetKeyPair.PublicKey,
+                deserializedSession.DHRatchetKeyPair.PublicKey));
 
             Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.DHRatchetKeyPair.privateKey,
-                deserializedSession.DHRatchetKeyPair.privateKey));
+                originalSession.DHRatchetKeyPair.PrivateKey,
+                deserializedSession.DHRatchetKeyPair.PrivateKey));
 
             Assert.IsTrue(SecureMemory.SecureCompare(
                 originalSession.RemoteDHRatchetKey,
@@ -91,14 +100,6 @@ namespace LibEmiddle.Tests.Unit
             {
                 Assert.IsTrue(deserializedSession.HasProcessedMessageId(id), $"Message ID {id} should be present");
             }
-
-            // Check for message numbers preservation
-            Assert.AreEqual(originalSession.ProcessedMessageNumbers.Count, deserializedSession.ProcessedMessageNumbers.Count);
-
-            foreach (int num in originalSession.ProcessedMessageNumbers)
-            {
-                Assert.IsTrue(deserializedSession.HasProcessedMessageNumber(num), $"Message number {num} should be present");
-            }
         }
 
         [TestMethod]
@@ -119,12 +120,12 @@ namespace LibEmiddle.Tests.Unit
             // Assert
             Assert.IsNotNull(deserializedSession);
             Assert.AreEqual(originalSession.SessionId, deserializedSession.SessionId);
-            Assert.AreEqual(originalSession.MessageNumber, deserializedSession.MessageNumber);
+            Assert.AreEqual(originalSession.MessageNumberReceiving, deserializedSession.MessageNumberReceiving);
 
             // Compare key materials
             Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.DHRatchetKeyPair.publicKey,
-                deserializedSession.DHRatchetKeyPair.publicKey));
+                originalSession.DHRatchetKeyPair.PublicKey,
+                deserializedSession.DHRatchetKeyPair.PublicKey));
         }
 
         [TestMethod]
@@ -152,20 +153,33 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        [ExpectedException(typeof(FormatException))]
+        [ExpectedException(typeof(InvalidDataException))]
         public void DeserializeSession_WithCorruptedData_ShouldThrowException()
         {
             // Arrange
             var originalSession = CreateTestSession();
-            byte[] serialized = SessionPersistence.SerializeSession(originalSession);
+            byte[] serializedBytes = SessionPersistence.SerializeSession(originalSession);
+            string serializedJson = System.Text.Encoding.UTF8.GetString(serializedBytes);
 
-            // Corrupt the data (change bytes in the middle)
-            int middle = serialized.Length / 2;
-            serialized[middle] ^= 0xFF;
-            serialized[middle + 1] ^= 0xFF;
+            // Locate the "DHRatchetPublicKey" field in the JSON
+            string keyIdentifier = "\"DHRatchetPublicKey\":\"";
+            int keyStart = serializedJson.IndexOf(keyIdentifier);
+            if (keyStart < 0)
+                Assert.Fail("Serialized JSON does not contain DHRatchetPublicKey field.");
+            keyStart += keyIdentifier.Length;
+            int keyEnd = serializedJson.IndexOf("\"", keyStart);
+            if (keyEnd < 0)
+                Assert.Fail("Invalid JSON format for DHRatchetPublicKey.");
 
-            // Act & Assert - Should throw FormatException
-            SessionPersistence.DeserializeSession(serialized);
+            // Replace the original Base64-encoded key with an invalid string
+            string corruptedKeyValue = "!!!!!!"; // Characters '!' are not in the Base64 alphabet.
+            string corruptedJson = serializedJson.Substring(0, keyStart)
+                                   + corruptedKeyValue
+                                   + serializedJson.Substring(keyEnd);
+            byte[] corruptedBytes = System.Text.Encoding.UTF8.GetBytes(corruptedJson);
+
+            // Act & Assert - This should now throw an InvalidDataException.
+            SessionPersistence.DeserializeSession(corruptedBytes);
         }
 
         [TestMethod]
@@ -184,7 +198,7 @@ namespace LibEmiddle.Tests.Unit
                 // Assert
                 Assert.IsNotNull(loadedSession);
                 Assert.AreEqual(originalSession.SessionId, loadedSession.SessionId);
-                Assert.AreEqual(originalSession.MessageNumber, loadedSession.MessageNumber);
+                Assert.AreEqual(originalSession.MessageNumberReceiving, loadedSession.MessageNumberReceiving);
             }
             finally
             {
@@ -217,7 +231,7 @@ namespace LibEmiddle.Tests.Unit
                 // Assert
                 Assert.IsNotNull(loadedSession);
                 Assert.AreEqual(originalSession.SessionId, loadedSession.SessionId);
-                Assert.AreEqual(originalSession.MessageNumber, loadedSession.MessageNumber);
+                Assert.AreEqual(originalSession.MessageNumberReceiving, loadedSession.MessageNumberReceiving);
             }
             finally
             {
@@ -282,13 +296,14 @@ namespace LibEmiddle.Tests.Unit
             // Manually build the JSON to simulate a specific format
             var sessionData = new
             {
-                DHRatchetPublicKey = Convert.ToBase64String(originalSession.DHRatchetKeyPair.publicKey),
-                DHRatchetPrivateKey = Convert.ToBase64String(originalSession.DHRatchetKeyPair.privateKey),
+                DHRatchetPublicKey = Convert.ToBase64String(originalSession.DHRatchetKeyPair.PublicKey),
+                DHRatchetPrivateKey = Convert.ToBase64String(originalSession.DHRatchetKeyPair.PrivateKey),
                 RemoteDHRatchetKey = Convert.ToBase64String(originalSession.RemoteDHRatchetKey),
                 RootKey = Convert.ToBase64String(originalSession.RootKey),
                 SendingChainKey = Convert.ToBase64String(originalSession.SendingChainKey),
                 ReceivingChainKey = Convert.ToBase64String(originalSession.ReceivingChainKey),
-                originalSession.MessageNumber,
+                originalSession.MessageNumberReceiving,
+                originalSession.MessageNumberSending,
                 originalSession.SessionId,
                 ProcessedMessageIds = new[] { Guid.NewGuid(), Guid.NewGuid() }
             };
@@ -302,7 +317,8 @@ namespace LibEmiddle.Tests.Unit
             // Assert
             Assert.IsNotNull(deserializedSession);
             Assert.AreEqual(originalSession.SessionId, deserializedSession.SessionId);
-            Assert.AreEqual(originalSession.MessageNumber, deserializedSession.MessageNumber);
+            Assert.AreEqual(originalSession.MessageNumberReceiving, deserializedSession.MessageNumberReceiving);
+            Assert.AreEqual(originalSession.MessageNumberSending, deserializedSession.MessageNumberSending);
         }
     }
 }

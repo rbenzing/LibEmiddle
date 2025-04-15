@@ -1,53 +1,23 @@
 ﻿using LibEmiddle.Core;
+using LibEmiddle.Domain;
 
 namespace LibEmiddle.Crypto
 {
     /// <summary>
     /// Provides Ed25519 public-key authentication functionality.
     /// </summary>
-    public static class KeyAuth
+    internal static class KeyAuth
     {
-        private const int ED25519_PUBLICKEYBYTES = 32;
-        private const int ED25519_SECRETKEYBYTES = 64;
-        private const int ED25519_BYTES = 64;
-
-        /// <summary>
-        /// Represents a key pair for Ed25519 signatures.
-        /// </summary>
-        public class KeyPair
-        {
-            /// <summary>
-            /// The public key (32 bytes).
-            /// </summary>
-            public byte[] PublicKey { get; }
-
-            /// <summary>
-            /// The private key (64 bytes).
-            /// </summary>
-            public byte[] PrivateKey { get; }
-
-            /// <summary>
-            /// Creates a new key pair instance.
-            /// </summary>
-            /// <param name="publicKey">The public key.</param>
-            /// <param name="privateKey">The private key.</param>
-            public KeyPair(byte[] publicKey, byte[] privateKey)
-            {
-                PublicKey = publicKey ?? throw new ArgumentNullException(nameof(publicKey));
-                PrivateKey = privateKey ?? throw new ArgumentNullException(nameof(privateKey));
-            }
-        }
-
         /// <summary>
         /// Generates a new Ed25519 key pair for signing.
         /// </summary>
         /// <returns>A new key pair.</returns>
-        public static KeyPair GenerateKeyPair()
+        public static KeyPair GenerateSigningKeyPair()
         {
             Sodium.Initialize();
 
-            byte[] publicKey = Sodium.GenerateRandomBytes(ED25519_PUBLICKEYBYTES);
-            byte[] privateKey = Sodium.GenerateRandomBytes(ED25519_SECRETKEYBYTES);
+            byte[] publicKey = Sodium.GenerateRandomBytes(Constants.ED25519_PUBLIC_KEY_SIZE);
+            byte[] privateKey = Sodium.GenerateRandomBytes(Constants.ED25519_PRIVATE_KEY_SIZE);
             
             int result = Sodium.crypto_sign_keypair(
                 publicKey,
@@ -57,7 +27,7 @@ namespace LibEmiddle.Crypto
             {
                 throw new InvalidOperationException("Failed to generate Ed25519 key pair.");
             }
- 
+
             return new KeyPair(publicKey, privateKey);
         }
 
@@ -67,18 +37,18 @@ namespace LibEmiddle.Crypto
         /// <param name="message">The message to sign.</param>
         /// <param name="privateKey">The private key (64 bytes).</param>
         /// <returns>The signature (64 bytes).</returns>
-        public static byte[] SignDetached(byte[] message, byte[] privateKey)
+        public static byte[] SignDetached(in byte[] message, in byte[] privateKey)
         {
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
             if (privateKey == null)
                 throw new ArgumentNullException(nameof(privateKey));
-            if (privateKey.Length != ED25519_SECRETKEYBYTES)
-                throw new ArgumentException($"Private key must be {ED25519_SECRETKEYBYTES} bytes.", nameof(privateKey));
+            if (privateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
+                throw new ArgumentException($"Private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes. Length: {privateKey.Length}", nameof(privateKey));
 
             Sodium.Initialize();
 
-            byte[] signature = Sodium.GenerateRandomBytes(ED25519_BYTES);
+            byte[] signature = Sodium.GenerateRandomBytes(Constants.ED25519_PRIVATE_KEY_SIZE);
             
             int result = Sodium.crypto_sign_detached(
                 signature,
@@ -110,10 +80,10 @@ namespace LibEmiddle.Crypto
                 throw new ArgumentNullException(nameof(message));
             if (publicKey == null)
                 throw new ArgumentNullException(nameof(publicKey));
-            if (signature.Length != ED25519_BYTES)
-                throw new ArgumentException($"Signature must be {ED25519_BYTES} bytes.", nameof(signature));
-            if (publicKey.Length != ED25519_PUBLICKEYBYTES)
-                throw new ArgumentException($"Public key must be {ED25519_PUBLICKEYBYTES} bytes.", nameof(publicKey));
+            if (signature.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
+                throw new ArgumentException($"Signature must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(signature));
+            if (publicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+                throw new ArgumentException($"Public key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(publicKey));
 
             Sodium.Initialize();
 

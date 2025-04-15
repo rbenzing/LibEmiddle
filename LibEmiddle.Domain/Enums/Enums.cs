@@ -1,4 +1,6 @@
-﻿namespace LibEmiddle.Domain
+﻿#pragma warning disable IDE0130 // Namespace does not match folder structure
+namespace LibEmiddle.Domain
+#pragma warning restore IDE0130 // Namespace does not match folder structure
 {
     /// <summary>
     /// Enumerations

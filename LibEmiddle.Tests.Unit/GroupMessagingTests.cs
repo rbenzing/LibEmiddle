@@ -1,10 +1,11 @@
-﻿using System;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-using System.Reflection;
-using LibEmiddle.Core;
-using System.Threading;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Diagnostics;
-using LibEmiddle.API;
+using System.Reflection;
+using System.Threading;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Core;
+using LibEmiddle.Crypto;
 using LibEmiddle.Messaging.Group;
 
 namespace LibEmiddle.Tests.Unit
@@ -12,11 +13,19 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class GroupMessagingTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void RotateGroupKey_ShouldGenerateNewKey()
         {
             // Arrange
-            var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var groupManager = new GroupChatManager(keyPair);
             string groupId = $"test-key-{Guid.NewGuid()}";
             byte[] originalKey = groupManager.CreateGroup(groupId);
@@ -30,7 +39,7 @@ namespace LibEmiddle.Tests.Unit
             var sessionPersistence = groupSessionPersistenceField.GetValue(groupManager) as GroupSessionPersistence;
 
             var session = sessionPersistence.GetGroupSession(groupId);
-            byte[] storedKey = session.SenderKey;
+            byte[] storedKey = session.ChainKey;
 
             // Assert
             Assert.IsNotNull(newKey);
@@ -43,21 +52,21 @@ namespace LibEmiddle.Tests.Unit
         public void AddGroupMember_ShouldAddMemberToAuthorizedList()
         {
             // Arrange
-            var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = $"test-authorization-{Guid.NewGuid()}";
             groupManager.CreateGroup(groupId);
 
             // Act
-            bool result = groupManager.AddGroupMember(groupId, memberKeyPair.publicKey);
+            bool result = groupManager.AddGroupMember(groupId, memberKeyPair.PublicKey);
 
             // Get the member manager via reflection
             var memberManagerField = typeof(GroupChatManager).GetField("_memberManager",
                 BindingFlags.NonPublic | BindingFlags.Instance);
             var memberManager = memberManagerField.GetValue(groupManager) as GroupMemberManager;
 
-            bool isMember = memberManager.IsMember(groupId, memberKeyPair.publicKey);
+            bool isMember = memberManager.IsMember(groupId, memberKeyPair.PublicKey);
 
             // Assert
             Assert.IsTrue(result);
@@ -68,12 +77,12 @@ namespace LibEmiddle.Tests.Unit
         public void RemoveGroupMember_ShouldRemoveMemberAndRotateKey()
         {
             // Arrange
-            var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = $"test-revocation-{Guid.NewGuid()}";
             groupManager.CreateGroup(groupId);
-            groupManager.AddGroupMember(groupId, memberKeyPair.publicKey);
+            groupManager.AddGroupMember(groupId, memberKeyPair.PublicKey);
 
             // Get the original key
             var sessionPersistenceField = typeof(GroupChatManager).GetField("_sessionPersistence",
@@ -81,21 +90,21 @@ namespace LibEmiddle.Tests.Unit
             var sessionPersistence = sessionPersistenceField.GetValue(groupManager) as GroupSessionPersistence;
 
             var originalSession = sessionPersistence.GetGroupSession(groupId);
-            byte[] originalKey = originalSession.SenderKey;
+            byte[] originalKey = originalSession.ChainKey;
 
             // Act
-            bool result = groupManager.RemoveGroupMember(groupId, memberKeyPair.publicKey);
+            bool result = groupManager.RemoveGroupMember(groupId, memberKeyPair.PublicKey);
 
             // Get the member manager via reflection
             var memberManagerField = typeof(GroupChatManager).GetField("_memberManager",
                 BindingFlags.NonPublic | BindingFlags.Instance);
             var memberManager = memberManagerField.GetValue(groupManager) as GroupMemberManager;
 
-            bool isMember = memberManager.IsMember(groupId, memberKeyPair.publicKey);
+            bool isMember = memberManager.IsMember(groupId, memberKeyPair.PublicKey);
 
             // Get the updated key
             var updatedSession = sessionPersistence.GetGroupSession(groupId);
-            byte[] newKey = updatedSession.SenderKey;
+            byte[] newKey = updatedSession.ChainKey;
 
             // Assert
             Assert.IsTrue(result);
@@ -107,7 +116,7 @@ namespace LibEmiddle.Tests.Unit
         public void DecryptGroupMessage_ShouldRejectReplayedMessage()
         {
             // Arrange
-            var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var groupManager = new GroupChatManager(keyPair);
             string groupId = $"test-replay-protection-{Guid.NewGuid()}";
             byte[] senderKey = groupManager.CreateGroup(groupId);
@@ -153,8 +162,8 @@ namespace LibEmiddle.Tests.Unit
         public void ForwardSecrecy_RemovedMemberCannotDecryptNewMessages()
         {
             // Arrange
-            var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var adminManager = new GroupChatManager(adminKeyPair);
             var memberManager = new GroupChatManager(memberKeyPair);
 
@@ -165,8 +174,8 @@ namespace LibEmiddle.Tests.Unit
             memberManager.CreateGroup(groupId);
 
             // 2. Admin authorizes member and vice versa
-            adminManager.AddGroupMember(groupId, memberKeyPair.publicKey);
-            memberManager.AddGroupMember(groupId, adminKeyPair.publicKey);
+            adminManager.AddGroupMember(groupId, memberKeyPair.PublicKey);
+            memberManager.AddGroupMember(groupId, adminKeyPair.PublicKey);
 
             // Create and exchange distribution messages
             var adminDistribution = adminManager.CreateDistributionMessage(groupId);
@@ -185,7 +194,7 @@ namespace LibEmiddle.Tests.Unit
             string decrypted1 = memberManager.DecryptGroupMessage(encrypted1);
 
             // Now revoke member
-            adminManager.RemoveGroupMember(groupId, memberKeyPair.publicKey);
+            adminManager.RemoveGroupMember(groupId, memberKeyPair.PublicKey);
 
             // Send a new message after revocation
             string message2 = "Message after revocation";
@@ -204,9 +213,9 @@ namespace LibEmiddle.Tests.Unit
         public void ProcessSenderKeyDistribution_ShouldRejectUntrustedSenders()
         {
             // Arrange
-            var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var untrustedKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var untrustedKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             var adminManager = new GroupChatManager(adminKeyPair);
             var memberManager = new GroupChatManager(memberKeyPair);
@@ -219,8 +228,8 @@ namespace LibEmiddle.Tests.Unit
             untrustedManager.CreateGroup(groupId);
 
             // Add only the trusted member
-            adminManager.AddGroupMember(groupId, memberKeyPair.publicKey);
-            memberManager.AddGroupMember(groupId, adminKeyPair.publicKey);
+            adminManager.AddGroupMember(groupId, memberKeyPair.PublicKey);
+            memberManager.AddGroupMember(groupId, adminKeyPair.PublicKey);
 
             // Exchange distribution messages between admin and trusted member
             var adminDistribution = adminManager.CreateDistributionMessage(groupId);
@@ -243,7 +252,7 @@ namespace LibEmiddle.Tests.Unit
         public void GenerateSenderKey_ShouldReturnValidKey()
         {
             // Act
-            byte[] senderKey = LibEmiddleClient.GenerateSenderKey();
+            byte[] senderKey = _cryptoProvider.GenerateSymmetricKey();
 
             // Assert
             Assert.IsNotNull(senderKey);
@@ -256,10 +265,10 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             string message = "This is a group message";
             string groupId = $"test-group-{Guid.NewGuid()}";
-            byte[] senderKey = LibEmiddleClient.GenerateSenderKey();
+            byte[] senderKey = _cryptoProvider.GenerateSymmetricKey();
 
             // Create identity key pair for signing
-            var identityKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create an instance of GroupMessageCrypto
             var messageCrypto = new GroupMessageCrypto();
@@ -277,7 +286,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string groupId = $"test-group-{Guid.NewGuid()}";
-            var senderKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var senderKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create an instance of GroupChatManager
             var groupChatManager = new GroupChatManager(senderKeyPair);
@@ -298,17 +307,17 @@ namespace LibEmiddle.Tests.Unit
             var sessionPersistence = sessionPersistenceField.GetValue(groupChatManager) as GroupSessionPersistence;
 
             var session = sessionPersistence.GetGroupSession(groupId);
-            byte[] storedKey = session.SenderKey;
+            byte[] storedKey = session.ChainKey;
 
-            Assert.IsTrue(SecureMemory.SecureCompare(storedKey, distributionMessage.SenderKey));
-            Assert.IsTrue(SecureMemory.SecureCompare(senderKeyPair.publicKey, distributionMessage.SenderIdentityKey));
+            Assert.IsTrue(SecureMemory.SecureCompare(storedKey, distributionMessage.ChainKey));
+            Assert.IsTrue(SecureMemory.SecureCompare(senderKeyPair.PublicKey, distributionMessage.SenderIdentityKey));
 
             // Get the distribution manager via reflection to verify signature
             var distributionManagerField = typeof(GroupChatManager).GetField("_distributionManager",
                 BindingFlags.NonPublic | BindingFlags.Instance);
             var distributionManager = distributionManagerField.GetValue(groupChatManager) as SenderKeyDistribution;
 
-            bool isValidDistribution = distributionManager.ValidateDistributionMessage(distributionMessage);
+            bool isValidDistribution = distributionManager.VerifyDistributionSignature(distributionMessage);
             Assert.IsTrue(isValidDistribution, "Distribution message should be valid");
         }
 
@@ -317,8 +326,8 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string groupId = $"test-group-{Guid.NewGuid()}";
-            var senderKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var recipientKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var senderKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create an instance of GroupChatManager
             var groupChatManager = new GroupChatManager(senderKeyPair);
@@ -331,13 +340,13 @@ namespace LibEmiddle.Tests.Unit
 
             // Act
             var encryptedDistribution = SenderKeyDistribution.EncryptSenderKeyDistribution(
-                distributionMessage, recipientKeyPair.publicKey, senderKeyPair.privateKey);
+                distributionMessage, recipientKeyPair.PublicKey, senderKeyPair.PrivateKey);
             var decryptedDistribution = SenderKeyDistribution.DecryptSenderKeyDistribution(
-                encryptedDistribution, recipientKeyPair.privateKey);
+                encryptedDistribution, recipientKeyPair.PrivateKey);
 
             // Assert
             Assert.AreEqual(distributionMessage.GroupId, decryptedDistribution.GroupId);
-            Assert.IsTrue(SecureMemory.SecureCompare(distributionMessage.SenderKey, decryptedDistribution.SenderKey));
+            Assert.IsTrue(SecureMemory.SecureCompare(distributionMessage.ChainKey, decryptedDistribution.ChainKey));
             Assert.IsTrue(SecureMemory.SecureCompare(distributionMessage.SenderIdentityKey, decryptedDistribution.SenderIdentityKey));
             Assert.IsTrue(SecureMemory.SecureCompare(distributionMessage.Signature, decryptedDistribution.Signature));
         }
@@ -346,8 +355,8 @@ namespace LibEmiddle.Tests.Unit
         public void GroupChatManager_ShouldHandleMessageExchange()
         {
             // Arrange
-            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -360,9 +369,9 @@ namespace LibEmiddle.Tests.Unit
             aliceManager.CreateGroup(groupId);
 
             // Alice authorizes Bob and Bob authorizes Alice
-            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
             bobManager.CreateGroup(groupId);
-            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
 
             // Alice creates a distribution message
             var distributionMessage = aliceManager.CreateDistributionMessage(groupId);
@@ -386,7 +395,7 @@ namespace LibEmiddle.Tests.Unit
         public void GroupChatManager_CreateDistribution_WithNonExistentGroup_ShouldThrowException()
         {
             // Arrange
-            var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
             var manager = new GroupChatManager(keyPair);
 
             // Act & Assert - Should throw InvalidOperationException
@@ -397,9 +406,9 @@ namespace LibEmiddle.Tests.Unit
         public void GroupMultiSenderDeduplication_ShouldHandleSimultaneousMessages()
         {
             // Arrange - Create three participants
-            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var charlieKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var charlieKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -413,16 +422,16 @@ namespace LibEmiddle.Tests.Unit
 
             // Add members both ways
             // Alice adds Bob and Charlie
-            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
-            aliceManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
+            aliceManager.AddGroupMember(groupId, charlieKeyPair.PublicKey);
 
             // Bob adds Alice and Charlie
-            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
-            bobManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
+            bobManager.AddGroupMember(groupId, charlieKeyPair.PublicKey);
 
             // Charlie adds Alice and Bob
-            charlieManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
-            charlieManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            charlieManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
+            charlieManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
 
             // Exchange sender keys
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
@@ -474,9 +483,9 @@ namespace LibEmiddle.Tests.Unit
             string groupId = $"member-addition-test-group-{Guid.NewGuid()}";
 
             // Create test participants
-            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var daveKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var daveKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -487,8 +496,8 @@ namespace LibEmiddle.Tests.Unit
             bobManager.CreateGroup(groupId);
 
             // 2. Bidirectional authorization between Alice and Bob
-            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
-            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
+            bobManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
 
             // 3. Exchange distribution messages between Alice and Bob
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
@@ -515,11 +524,11 @@ namespace LibEmiddle.Tests.Unit
             daveManager.CreateGroup(groupId);
 
             // Bidirectional authorization for Dave with both Alice and Bob
-            aliceManager.AddGroupMember(groupId, daveKeyPair.publicKey);
-            daveManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, daveKeyPair.PublicKey);
+            daveManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
 
-            bobManager.AddGroupMember(groupId, daveKeyPair.publicKey);
-            daveManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, daveKeyPair.PublicKey);
+            daveManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
 
             // 6. Exchange distribution messages for all members
             var daveDistribution = daveManager.CreateDistributionMessage(groupId);
@@ -577,9 +586,9 @@ namespace LibEmiddle.Tests.Unit
             // This test simulates a group chat between Alice, Bob, and Charlie
 
             // Step 1: Generate identity keys for the participants
-            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var charlieKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var charlieKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Step 2: Create group chat managers for each participant
             var aliceManager = new GroupChatManager(aliceKeyPair);
@@ -594,16 +603,16 @@ namespace LibEmiddle.Tests.Unit
 
             // Step 4: Each participant authorizes all others
             // Alice authorizes Bob and Charlie
-            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
-            aliceManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
+            aliceManager.AddGroupMember(groupId, charlieKeyPair.PublicKey);
 
             // Bob authorizes Alice and Charlie
-            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
-            bobManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
+            bobManager.AddGroupMember(groupId, charlieKeyPair.PublicKey);
 
             // Charlie authorizes Alice and Bob
-            charlieManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
-            charlieManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            charlieManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
+            charlieManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
 
             // Step 5: Each participant creates their distribution message
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
@@ -657,15 +666,15 @@ namespace LibEmiddle.Tests.Unit
         public void DeleteGroup_ShouldWorkCorrectly()
         {
             // Arrange
-            var adminKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var memberKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = $"test-delete-{Guid.NewGuid()}";
 
             // Create group and add a member
             groupManager.CreateGroup(groupId);
-            groupManager.AddGroupMember(groupId, memberKeyPair.publicKey);
+            groupManager.AddGroupMember(groupId, memberKeyPair.PublicKey);
 
             // Verify group exists
             Assert.IsTrue(groupManager.GroupExists(groupId));

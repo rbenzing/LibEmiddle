@@ -9,16 +9,14 @@ LibEmiddle/
 │   │   │   └── Sodium.cs
 │   │   ├── Crypto/
 │   │   │   ├── AES.cs
+│   │   │   ├── CryptoProvider.cs
 │   │   │   ├── DoubleRatchet.cs
 │   │   │   ├── KeyAuth.cs
 │   │   │   ├── KeyConversion.cs
 │   │   │   ├── KeyGenerator.cs
-│   │   │   ├── KeyPair.cs
 │   │   │   ├── KeyStorage.cs
-│   │   │   ├── KeyValidation.cs
 │   │   │   └── NonceGenerator.cs
 │   │   ├── KeyExchange/
-│   │   │   ├── DoubleRatchetExchange.cs
 │   │   │   ├── SessionPersistence.cs
 │   │   │   └── X3DHExchange.cs
 │   │   ├── Messaging/
@@ -42,31 +40,46 @@ LibEmiddle/
 │   │   │       ├── SecureWebSocketClient.cs
 │   │   │       └── StandardWebSocketClient.cs
 │   │   ├── Models/
-│   │   │   ├── DeviceLinkMessage.cs
 │   │   │   ├── DeviceRevocationMessage.cs
 │   │   │   ├── DeviceSyncMessage.cs
-│   │   │   ├── DoubleRatchetSession.cs
-│   │   │   ├── EncryptedGroupMessage.cs
-│   │   │   ├── EncryptedSenderKeyDistribution.cs
-│   │   │   ├── KeyFileMetadata.cs
-│   │   │   ├── SenderKeyDistributionMessage.cs
 │   │   │   ├── X3DHKeyBundle.cs
 │   │   │   ├── X3DHPublicBundle.cs
 │   │   │   └── X3DHSession.cs
 │   │   ├── MultiDevice/
 │   │   │   ├── DeviceLinking.cs
 │   │   │   └── DeviceManager.cs
-│   │   ├── LibEmiddle.csproj
-│   │   └── AssemblyInfo.cs
+│   │   └── LibEmiddle.csproj
 │   ├── LibEmiddle.Abstractions/
+│   │   ├── ICryptoProvider.cs
 │   │   ├── IMailboxTransport.cs
 │   │   ├── IWebSocketClient.cs
-│   │   ├── ICryptoProvider.cs
-│   │   ├── IKeyManager.cs
-│   │   ├── LibEmiddle.Abstractions.csproj
-│   │   └── AssemblyInfo.cs
+│   │   └── LibEmiddle.Abstractions.csproj
+│   ├── LibEmiddle.Domain/
+│   │   ├── Constants/
+│   │   │   ├── Constants.cs
+│   │   │   └── ProtocolVersion.cs 
+│   │   ├── DTO/
+│   │   │   └── SerializedSessionData.cs 
+│   │   ├── Enums/
+│   │   │   └── Enums.cs 
+│   │   ├── Helpers/
+│   │   │   ├── Helpers.cs
+│   │   │   ├── JsonSerialization.cs 
+│   │   │   └── KeyValidation.cs
+│   │   ├── DoubleRatchetSession.cs
+│   │   ├── EncyptedGroupMessage.cs
+│   │   ├── EncryptedMessage.cs
+│   │   ├── EncryptedSenderKeyDistribution.cs
+│   │   ├── InitialMessageData.cs
+│   │   ├── KeyFileMetadata.cs
+│   │   ├── KeyPair.cs
+│   │   ├── MailboxMessage.cs
+│   │   ├── MessageRecord.cs
+│   │   ├── SenderKeyDistributionMessage.cs
+│   │   ├── SenderSessionResult.cs
+│   │   └── LibEmiddle.Domain.csproj
 │   └── Directory.Build.props
-├── test/
+├── tests/
 │   └── LibEmiddle.Tests.Unit/
 │       ├── Mocks/
 │       │   └── MailboxMockFactory.cs
@@ -121,6 +134,7 @@ LibEmiddle/
 │           └── libsodium.dll
 ├── LICENSE
 ├── NOTICE
-├── CHANGELOG
+├── CODE-OF-CONDUCT.md
 ├── README.md
+├── Structure.txt
 └── LibEmiddle.sln

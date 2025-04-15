@@ -1,7 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
-using LibEmiddle.Models;
 
 namespace LibEmiddle.Messaging.Group
 {
@@ -23,68 +22,98 @@ namespace LibEmiddle.Messaging.Group
 
         // Add configurable rotation period (default 7 days)
         private TimeSpan _keyRotationPeriod = TimeSpan.FromDays(7);
+        private readonly ConcurrentDictionary<string, Enums.KeyRotationStrategy> _groupRotationStrategies =
+    new ConcurrentDictionary<string, Enums.KeyRotationStrategy>();
 
         /// <summary>
         /// Identity key pair for this client
         /// </summary>
-        private readonly (byte[] publicKey, byte[] privateKey) _identityKeyPair;
+        private readonly KeyPair _identityKeyPair;
 
-        private readonly ConcurrentDictionary<string, object> _groupLocks =
-        new ConcurrentDictionary<string, object>();
+        private static readonly ConcurrentDictionary<string, object> _groupLocks = new();
+
+
+        // Implementation of skipped message key store
+        private readonly SkippedMessageKeyStore _skippedMessageKeyStore;
 
         /// <summary>
         /// Creates a new GroupChatManager with the specified identity key pair
         /// </summary>
-        /// <param name="identityKeyPair">Identity key pair for signing and verification</param>
-        public GroupChatManager((byte[] publicKey, byte[] privateKey) identityKeyPair)
+        /// <param name="identityKeyPair">Ed25519 Identity key pair for signing and verification</param>
+        public GroupChatManager(KeyPair identityKeyPair)
         {
+            if (identityKeyPair.PublicKey == null || identityKeyPair.PrivateKey == null)
+                throw new ArgumentException("Identity key pair must have both public and private keys", nameof(identityKeyPair));
+
             _identityKeyPair = identityKeyPair;
 
             _keyManager = new GroupKeyManager();
             _messageCrypto = new GroupMessageCrypto();
             _memberManager = new GroupMemberManager(identityKeyPair);
+            _skippedMessageKeyStore = new SkippedMessageKeyStore();
             _distributionManager = new SenderKeyDistribution(identityKeyPair);
             _sessionPersistence = new GroupSessionPersistence();
             _securityValidator = new GroupSecurityValidator();
         }
 
         /// <summary>
-        /// Method to configure key rotation period
+        /// Sets the key rotation strategy for a specific group
         /// </summary>
-        /// <param name="period">The time period between key rotations</param>
-        public void SetKeyRotationPeriod(TimeSpan period)
+        /// <param name="groupId">Group identifier</param>
+        /// <param name="strategy">Key rotation strategy to use</param>
+        public void SetKeyRotationStrategy(string groupId, Enums.KeyRotationStrategy strategy)
         {
-            if (period < TimeSpan.FromHours(1))
-                throw new ArgumentException("Key rotation period must be at least 1 hour", nameof(period));
-
-            _keyRotationPeriod = period;
+            _securityValidator.ValidateGroupId(groupId);
+            _groupRotationStrategies[groupId] = strategy;
         }
 
         /// <summary>
-        /// Creates a new group with the specified ID
+        /// Gets the current key rotation strategy for a group
         /// </summary>
         /// <param name="groupId">Group identifier</param>
+        /// <returns>Current rotation strategy</returns>
+        public Enums.KeyRotationStrategy GetKeyRotationStrategy(string groupId)
+        {
+            _securityValidator.ValidateGroupId(groupId);
+            return _groupRotationStrategies.GetOrAdd(groupId, Enums.KeyRotationStrategy.Standard);
+        }
+
+        /// <summary>
+        /// Creates a new group with the specified ID and rotation strategy
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <param name="rotationStrategy">Key rotation strategy (optional)</param>
         /// <returns>Sender key for this group</returns>
-        public byte[] CreateGroup(string groupId)
+        public byte[] CreateGroup(string groupId, Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
         {
             _securityValidator.ValidateGroupId(groupId);
 
+            // Store the rotation strategy
+            SetKeyRotationStrategy(groupId, rotationStrategy);
+
             // Generate a new sender key and create group session
-            byte[] senderKey = _keyManager.GenerateGroupKey();
-            var groupSession = new GroupSession
-            {
-                GroupId = groupId,
-                SenderKey = senderKey,
-                CreatorIdentityKey = _identityKeyPair.publicKey,
-                CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                LastKeyRotation = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            };
+            byte[] chainKey = _keyManager.GenerateInitialChainKey();
+
+            // Initialize sender state in key manager
+            _keyManager.InitializeSenderState(groupId, chainKey);
+
+            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // Create a group session
+            var groupSession = new GroupSession(
+                groupId: groupId,
+                chainKey: chainKey,
+                iteration: 0,
+                creatorIdentityKey: _identityKeyPair.PublicKey,
+                creationTimestamp: currentTime,
+                keyEstablishmentTimestamp: currentTime,
+                metadata: null);
 
             // Store the group session
             _sessionPersistence.StoreGroupSession(groupSession);
 
             // Make the creator an admin of the group
-            _memberManager.AddMember(groupId, _identityKeyPair.publicKey, Enums.MemberRole.Owner);
+            _memberManager.AddMember(groupId, _identityKeyPair.PublicKey, Enums.MemberRole.Owner);
 
             // Record that we've joined this group now
             _messageCrypto.RecordGroupJoin(groupId);
@@ -94,9 +123,64 @@ namespace LibEmiddle.Messaging.Group
             ProcessSenderKeyDistribution(distribution);
 
             // Set initial key rotation timestamp
-            _lastKeyRotationTimestamps[groupId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            _lastKeyRotationTimestamps[groupId] = currentTime;
 
-            return senderKey;
+            return chainKey;
+        }
+
+        private void CheckAndRotateKeyIfNeeded(string groupId)
+        {
+            // Get current time
+            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // Get last rotation time, or 0 if not previously set
+            long lastRotationTime = _lastKeyRotationTimestamps.GetOrAdd(groupId, 0);
+
+            // Calculate elapsed time
+            TimeSpan elapsed = TimeSpan.FromMilliseconds(currentTime - lastRotationTime);
+
+            // Get the rotation strategy for this group
+            var rotationStrategy = _groupRotationStrategies.GetOrAdd(groupId, Enums.KeyRotationStrategy.Standard);
+
+            // Determine if rotation is needed based on strategy
+            bool shouldRotate = false;
+
+            switch (rotationStrategy)
+            {
+                case Enums.KeyRotationStrategy.Standard:
+                    // Standard strategy always rotates before each message
+                    shouldRotate = true;
+                    break;
+
+                case Enums.KeyRotationStrategy.Hourly:
+                    // Hourly strategy rotates if more than an hour has passed
+                    shouldRotate = elapsed >= TimeSpan.FromHours(1);
+                    break;
+
+                case Enums.KeyRotationStrategy.Daily:
+                    // Daily strategy rotates if more than a day has passed
+                    shouldRotate = elapsed >= TimeSpan.FromDays(1);
+                    break;
+
+                default:
+                    // Use the configured rotation period as a fallback
+                    shouldRotate = elapsed >= _keyRotationPeriod;
+                    break;
+            }
+
+            // Check if rotation is needed and user has permission
+            if (shouldRotate && _memberManager.HasKeyRotationPermission(groupId, _identityKeyPair.PublicKey))
+            {
+                try
+                {
+                    RotateGroupKey(groupId);
+                }
+                catch (Exception ex)
+                {
+                    // Log the error but continue (don't block messaging if rotation fails)
+                    LoggingManager.LogError(nameof(GroupChatManager), $"Failed to rotate group key for {groupId}: {ex.Message}");
+                }
+            }
         }
 
         /// <summary>
@@ -115,8 +199,11 @@ namespace LibEmiddle.Messaging.Group
                 throw new InvalidOperationException($"Group {groupId} does not exist or has been deleted");
             }
 
-            // Create distribution message
-            return _distributionManager.CreateDistributionMessage(groupId, groupSession.SenderKey);
+            // Create distribution message using the Chain Key from the session
+            return _distributionManager.CreateDistributionMessage(
+                groupId,
+                groupSession.ChainKey,
+                groupSession.Iteration);
         }
 
         /// <summary>
@@ -153,7 +240,8 @@ namespace LibEmiddle.Messaging.Group
         }
 
         /// <summary>
-        /// Encrypts a message for a group
+        /// Encrypts a message for a group. For Standard rotation, it does not force a key rotation on every message;
+        /// for time‐based strategies it calls CheckAndRotateKeyIfNeeded.
         /// </summary>
         /// <param name="groupId">Group identifier</param>
         /// <param name="message">Message to encrypt</param>
@@ -162,54 +250,51 @@ namespace LibEmiddle.Messaging.Group
         {
             _securityValidator.ValidateGroupId(groupId);
 
-            // First check if key rotation is needed
-            CheckAndRotateKeyIfNeeded(groupId);
+            // Determine the rotation strategy for the group.
+            var rotationStrategy = _groupRotationStrategies.GetOrAdd(groupId, Enums.KeyRotationStrategy.Standard);
+            if (rotationStrategy != Enums.KeyRotationStrategy.Standard)
+            {
+                // For Hourly or Daily strategies, check if the key rotation time threshold has passed.
+                CheckAndRotateKeyIfNeeded(groupId);
+            }
+            else
+            {
+                // For Standard strategy, you might choose to rotate only once at group creation.
+                // If you currently rotate on every message, comment this out:
+                // if (_memberManager.HasKeyRotationPermission(groupId, _identityKeyPair.PublicKey))
+                // {
+                //     RotateGroupKey(groupId);
+                // }
+            }
 
-            // Use a lock specific to this group ID to synchronize access
+            // Synchronize access for the specific group.
             lock (GetGroupLock(groupId))
             {
-                // Get group session
+                // Retrieve the current group session.
                 var groupSession = _sessionPersistence.GetGroupSession(groupId);
                 if (groupSession == null)
                 {
                     throw new InvalidOperationException($"Group {groupId} does not exist or sender key not found");
                 }
 
-                // Make a deep copy of the sender key to avoid concurrent modification
-                byte[] senderKeyCopy = Sodium.GenerateRandomBytes(groupSession.SenderKey.Length);
-                groupSession.SenderKey.AsSpan().CopyTo(senderKeyCopy.AsSpan());
-
-                // Encrypt message with the copy
-                return _messageCrypto.EncryptMessage(groupId, message, senderKeyCopy, _identityKeyPair);
-            }
-        }
-
-        /// <summary>
-        /// Add method to check and rotate key if needed
-        /// </summary>
-        /// <param name="groupId">The group ID to check</param>
-        private void CheckAndRotateKeyIfNeeded(string groupId)
-        {
-            // Get current time
-            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-            // Get last rotation time, or 0 if not previously set
-            long lastRotationTime = _lastKeyRotationTimestamps.GetOrAdd(groupId, 0);
-
-            // Calculate elapsed time
-            TimeSpan elapsed = TimeSpan.FromMilliseconds(currentTime - lastRotationTime);
-
-            // Check if rotation is needed
-            if (elapsed >= _keyRotationPeriod && _memberManager.HasKeyRotationPermission(groupId, _identityKeyPair.publicKey))
-            {
+                // Get the message key and iteration number from the key manager.
+                // The key manager is expected to return a tuple: (messageKey, iteration).
+                var (messageKey, iteration) = _keyManager.GetSenderMessageKey(groupId);
                 try
                 {
-                    RotateGroupKey(groupId);
+                    // Encrypt the message using the provided key.
+                    var encryptedMessage = _messageCrypto.EncryptMessage(groupId, message, messageKey, _identityKeyPair);
+
+                    // Append iteration information to the message ID for tracing.
+                    string originalMessageId = encryptedMessage.MessageId ?? Guid.NewGuid().ToString();
+                    encryptedMessage.MessageId = $"iter:{iteration}:{originalMessageId}";
+
+                    return encryptedMessage;
                 }
-                catch (Exception ex)
+                finally
                 {
-                    // Log the error but continue (don't block messaging if rotation fails)
-                    LoggingManager.LogError(nameof(GroupChatManager), $"Failed to rotate group key for {groupId}: {ex.Message}");
+                    // Securely clear the message key once used.
+                    SecureMemory.SecureClear(messageKey);
                 }
             }
         }
@@ -221,25 +306,51 @@ namespace LibEmiddle.Messaging.Group
         /// <returns>Decrypted message if successful, null otherwise</returns>
         public string? DecryptGroupMessage(EncryptedGroupMessage encryptedMessage)
         {
-            // Validate the encrypted message
+            // Validate the encrypted message first.
             if (!_securityValidator.ValidateEncryptedMessage(encryptedMessage))
             {
                 return null;
             }
 
-            // The specific group processing needs thread safety
-            // We need to ensure sender key is consistently retrieved
-            // Delegate to the thread-safe implementations in SenderKeyDistribution and GroupMessageCrypto
-
-            // Get sender key for this message
-            var senderKey = _distributionManager.GetSenderKeyForMessage(encryptedMessage);
-            if (senderKey == null)
+            if (encryptedMessage.GroupId == null)
             {
-                return null;
+                throw new ArgumentNullException(nameof(encryptedMessage.GroupId), "Group id cannot be null.");
             }
 
-            // Decrypt the message
-            return _messageCrypto.DecryptMessage(encryptedMessage, senderKey);
+            // Synchronize access for the specific group.
+            lock (GetGroupLock(encryptedMessage.GroupId))
+            {
+                try
+                {
+                    // Get the sender key required to decrypt this message,
+                    // using your distribution manager and skipped key store.
+                    var senderKey = _distributionManager.GetSenderKeyForMessage(
+                        encryptedMessage,
+                        _skippedMessageKeyStore);
+
+                    if (senderKey == null)
+                    {
+                        return null;
+                    }
+
+                    try
+                    {
+                        // Attempt decryption using your message crypto component.
+                        return _messageCrypto.DecryptMessage(encryptedMessage, senderKey);
+                    }
+                    finally
+                    {
+                        // Securely clear the sender key to avoid leaving sensitive material in memory.
+                        SecureMemory.SecureClear(senderKey);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LoggingManager.LogError(nameof(GroupChatManager),
+                        $"Error decrypting message: {ex.Message}");
+                    return null;
+                }
+            }
         }
 
         /// <summary>
@@ -325,40 +436,44 @@ namespace LibEmiddle.Messaging.Group
         }
 
         /// <summary>
-        /// Rotates the group key and distributes it to all members
+        /// Rotates the group key for a given group and updates the stored session.
         /// </summary>
         /// <param name="groupId">Group identifier</param>
-        /// <returns>New sender key</returns>
+        /// <returns>The new chain key</returns>
         public byte[] RotateGroupKey(string groupId)
         {
             _securityValidator.ValidateGroupId(groupId);
 
-            // Check if user has permission to rotate key
-            if (!_memberManager.HasKeyRotationPermission(groupId, _identityKeyPair.publicKey))
+            // Ensure the current user has permission to rotate the key.
+            if (!_memberManager.HasKeyRotationPermission(groupId, _identityKeyPair.PublicKey))
             {
                 throw new UnauthorizedAccessException("You don't have permission to rotate the group key");
             }
 
-            // Generate a new key and update the session
-            byte[] newKey = _keyManager.GenerateGroupKey();
-            var groupSession = _sessionPersistence.GetGroupSession(groupId);
+            // Generate a new chain key (sender key) using the key manager.
+            byte[] newKey = _keyManager.GenerateInitialChainKey();
 
-            if (groupSession == null)
+            // Reinitialize the sender state with the new key.
+            _keyManager.InitializeSenderState(groupId, newKey);
+
+            // Retrieve the current group session.
+            var currentSession = _sessionPersistence.GetGroupSession(groupId);
+            if (currentSession == null)
             {
                 throw new InvalidOperationException($"Group {groupId} does not exist");
             }
 
-            groupSession.SenderKey = newKey;
-            groupSession.LastKeyRotation = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            // Create an updated session by "rotating" the key.
+            // It is assumed that WithRotatedKey creates a new GroupSession that preserves iteration and message counts.
+            var updatedSession = currentSession.WithRotatedKey(newKey);
 
-            // Store the updated session
-            _sessionPersistence.StoreGroupSession(groupSession);
+            // Store the updated group session.
+            _sessionPersistence.StoreGroupSession(updatedSession);
 
-            // Clear any existing distribution records for this group in the distribution manager
-            // This ensures that old sender keys cannot be used
+            // Remove any outdated distribution messages so that only the new key is used.
             _distributionManager.DeleteGroupDistributions(groupId);
 
-            // Update the rotation timestamp
+            // Update the key rotation timestamp.
             _lastKeyRotationTimestamps[groupId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             return newKey;
@@ -382,10 +497,16 @@ namespace LibEmiddle.Messaging.Group
         public bool DeleteGroup(string groupId)
         {
             // Check if user has permission to delete the group
-            if (!_memberManager.IsGroupAdmin(groupId, _identityKeyPair.publicKey))
+            if (!_memberManager.IsGroupAdmin(groupId, _identityKeyPair.PublicKey))
             {
                 throw new UnauthorizedAccessException("You don't have permission to delete this group");
             }
+
+            // Clean up keyManager state
+            _keyManager.ClearSenderState(groupId);
+
+            // Clean up rotation timestamps
+            _lastKeyRotationTimestamps.TryRemove(groupId, out _);
 
             return _sessionPersistence.DeleteGroupSession(groupId) &&
                    _memberManager.DeleteGroup(groupId) &&
@@ -397,7 +518,7 @@ namespace LibEmiddle.Messaging.Group
         /// </summary>
         /// <param name="groupId"></param>
         /// <returns></returns>
-        private object GetGroupLock(string groupId)
+        private static object GetGroupLock(string groupId)
         {
             return _groupLocks.GetOrAdd(groupId, _ => new object());
         }
@@ -409,7 +530,80 @@ namespace LibEmiddle.Messaging.Group
         {
             // Dispose any disposable members
             (_distributionManager as IDisposable)?.Dispose();
-            // Add any other disposable components
+            (_keyManager as IDisposable)?.Dispose();
+
+            // Clear any remaining sensitive data
+            foreach (var groupId in _lastKeyRotationTimestamps.Keys.ToList())
+            {
+                try
+                {
+                    _keyManager.ClearSenderState(groupId);
+                }
+                catch
+                {
+                    // Ignore errors during disposal
+                }
+            }
+
+            GC.SuppressFinalize(this);
+        }
+
+        /// <summary>
+        /// Implementation of skipped message key store for the SenderKeyDistribution
+        /// </summary>
+        private class SkippedMessageKeyStore : SenderKeyDistribution.ISkippedMessageKeyStore
+        {
+            // Dictionary to store skipped message keys
+            // Key format: "{groupId}:{senderIdentityBase64}:{iteration}"
+            private readonly ConcurrentDictionary<string, byte[]> _skippedKeys =
+                new ConcurrentDictionary<string, byte[]>();
+
+            // Maximum number of skipped keys to store
+            private const int MAX_SKIPPED_KEYS = 1000;
+
+            /// <summary>
+            /// Stores a skipped message key
+            /// </summary>
+            public void StoreSkippedMessageKey(string groupId, byte[] senderId, uint iteration, byte[] messageKey)
+            {
+                string key = $"{groupId}:{Convert.ToBase64String(senderId)}:{iteration}";
+
+                // Store a copy of the message key
+                _skippedKeys[key] = (byte[])messageKey.Clone();
+
+                // If we have too many keys, remove some old ones to prevent unbounded growth
+                if (_skippedKeys.Count > MAX_SKIPPED_KEYS)
+                {
+                    // Remove oldest 20% of keys
+                    int removeCount = MAX_SKIPPED_KEYS / 5;
+                    foreach (var oldKey in _skippedKeys.Keys.Take(removeCount))
+                    {
+                        if (_skippedKeys.TryRemove(oldKey, out var oldValue))
+                        {
+                            // Securely clear the removed key
+                            SecureMemory.SecureClear(oldValue);
+                        }
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Gets and removes a skipped message key
+            /// </summary>
+            public byte[]? GetSkippedMessageKey(string groupId, byte[] senderId, uint iteration)
+            {
+                string key = $"{groupId}:{Convert.ToBase64String(senderId)}:{iteration}";
+
+                if (_skippedKeys.TryRemove(key, out var messageKey))
+                {
+                    // Return a copy of the key and clear the original
+                    byte[] result = (byte[])messageKey.Clone();
+                    SecureMemory.SecureClear(messageKey);
+                    return result;
+                }
+
+                return null;
+            }
         }
     }
 }

@@ -1,29 +1,39 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Collections.Generic;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Diagnostics;
-using LibEmiddle.API;
+using System.Reflection;
+using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Group;
-using LibEmiddle.Models;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Crypto;
+using System.Threading.Tasks;
+using LibEmiddle.Core;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class LargeGroupMessagingTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup() { 
+            _cryptoProvider = new CryptoProvider(); 
+        }
+
         [TestMethod]
         public void LargeGroup_TenMembers_ShouldHandleAllMessages()
         {
             // Arrange - Create a group with 10 members
             int memberCount = 10;
-            var memberKeyPairs = new List<(byte[] publicKey, byte[] privateKey)>();
+            var memberKeyPairs = new List<KeyPair>();
             var groupManagers = new List<GroupChatManager>();
 
             for (int i = 0; i < memberCount; i++)
             {
-                var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+                var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
                 memberKeyPairs.Add(keyPair);
                 groupManagers.Add(new GroupChatManager(keyPair));
             }
@@ -45,7 +55,7 @@ namespace LibEmiddle.Tests.Unit
                     {
                         bool authorizationResult = groupManagers[authorizerIdx].AddGroupMember(
                             groupId,
-                            memberKeyPairs[targetIdx].publicKey);
+                            memberKeyPairs[targetIdx].PublicKey);
 
                         Assert.IsTrue(authorizationResult,
                             $"Member {authorizerIdx} should authorize member {targetIdx}");
@@ -74,7 +84,7 @@ namespace LibEmiddle.Tests.Unit
                         // Debug logging for failed distributions
                         if (!result)
                         {
-                            string senderKey = Convert.ToBase64String(memberKeyPairs[senderIdx].publicKey);
+                            string senderKey = Convert.ToBase64String(memberKeyPairs[senderIdx].PublicKey);
                             Trace.TraceWarning($"Failed to process distribution from sender {senderIdx} with key {senderKey}");
 
                             // Check authorization status using reflection
@@ -82,10 +92,10 @@ namespace LibEmiddle.Tests.Unit
                                 BindingFlags.NonPublic | BindingFlags.Instance);
                             var memberManager = memberManagerField.GetValue(groupManagers[receiverIdx]) as GroupMemberManager;
 
-                            bool isMember = memberManager.IsMember(groupId, memberKeyPairs[senderIdx].publicKey);
+                            bool isMember = memberManager.IsMember(groupId, memberKeyPairs[senderIdx].PublicKey);
 
-                            string receiverKey = Convert.ToBase64String(memberKeyPairs[receiverIdx].publicKey);
-                            string senderBase64Key = Convert.ToBase64String(memberKeyPairs[senderIdx].publicKey);
+                            string receiverKey = Convert.ToBase64String(memberKeyPairs[receiverIdx].PublicKey);
+                            string senderBase64Key = Convert.ToBase64String(memberKeyPairs[senderIdx].PublicKey);
 
                             Trace.TraceWarning($"Receiver {receiverIdx} key: {receiverKey}");
                             Trace.TraceWarning($"Sender {senderIdx} key: {senderBase64Key}");
@@ -130,10 +140,10 @@ namespace LibEmiddle.Tests.Unit
         public void GroupMember_RemovalSimulation_ShouldNotReceiveNewMessages()
         {
             // Arrange - Create a group with some members
-            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var charlieKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var daveKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var charlieKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var daveKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -144,9 +154,9 @@ namespace LibEmiddle.Tests.Unit
 
             // Alice creates the group as admin and adds all other members
             aliceManager.CreateGroup(groupId);
-            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
-            aliceManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
-            aliceManager.AddGroupMember(groupId, daveKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
+            aliceManager.AddGroupMember(groupId, charlieKeyPair.PublicKey);
+            aliceManager.AddGroupMember(groupId, daveKeyPair.PublicKey);
 
             // Everyone creates their local view of the group
             bobManager.CreateGroup(groupId);
@@ -154,17 +164,17 @@ namespace LibEmiddle.Tests.Unit
             daveManager.CreateGroup(groupId);
 
             // All members need to add Alice and each other for bidirectional communication
-            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
-            bobManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
-            bobManager.AddGroupMember(groupId, daveKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
+            bobManager.AddGroupMember(groupId, charlieKeyPair.PublicKey);
+            bobManager.AddGroupMember(groupId, daveKeyPair.PublicKey);
 
-            charlieManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
-            charlieManager.AddGroupMember(groupId, bobKeyPair.publicKey);
-            charlieManager.AddGroupMember(groupId, daveKeyPair.publicKey);
+            charlieManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
+            charlieManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
+            charlieManager.AddGroupMember(groupId, daveKeyPair.PublicKey);
 
-            daveManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
-            daveManager.AddGroupMember(groupId, bobKeyPair.publicKey);
-            daveManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
+            daveManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
+            daveManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
+            daveManager.AddGroupMember(groupId, charlieKeyPair.PublicKey);
 
             // Exchange initial distribution messages
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
@@ -211,19 +221,19 @@ namespace LibEmiddle.Tests.Unit
 
             // Alice creates new group and adds only Bob and Charlie
             aliceManager.CreateGroup(newGroupId);
-            aliceManager.AddGroupMember(newGroupId, bobKeyPair.publicKey);
-            aliceManager.AddGroupMember(newGroupId, charlieKeyPair.publicKey);
+            aliceManager.AddGroupMember(newGroupId, bobKeyPair.PublicKey);
+            aliceManager.AddGroupMember(newGroupId, charlieKeyPair.PublicKey);
 
             // Bob and Charlie create their view of the new group
             bobManager.CreateGroup(newGroupId);
             charlieManager.CreateGroup(newGroupId);
 
             // Bob and Charlie add Alice and each other
-            bobManager.AddGroupMember(newGroupId, aliceKeyPair.publicKey);
-            bobManager.AddGroupMember(newGroupId, charlieKeyPair.publicKey);
+            bobManager.AddGroupMember(newGroupId, aliceKeyPair.PublicKey);
+            bobManager.AddGroupMember(newGroupId, charlieKeyPair.PublicKey);
 
-            charlieManager.AddGroupMember(newGroupId, aliceKeyPair.publicKey);
-            charlieManager.AddGroupMember(newGroupId, bobKeyPair.publicKey);
+            charlieManager.AddGroupMember(newGroupId, aliceKeyPair.PublicKey);
+            charlieManager.AddGroupMember(newGroupId, bobKeyPair.PublicKey);
 
             // 2. Exchange new distribution messages (without Dave)
             var aliceNewDistribution = aliceManager.CreateDistributionMessage(newGroupId);
@@ -250,7 +260,7 @@ namespace LibEmiddle.Tests.Unit
 
             // 6. Try to have Dave decrypt (even if Dave creates his own group, he won't be authorized by others)
             daveManager.CreateGroup(newGroupId);  // Dave tries to join new group
-            daveManager.AddGroupMember(newGroupId, aliceKeyPair.publicKey);
+            daveManager.AddGroupMember(newGroupId, aliceKeyPair.PublicKey);
             // But no one has authorized Dave in the new group
 
             string daveDecryptedNew = daveManager.DecryptGroupMessage(aliceNewMsg);
@@ -265,8 +275,8 @@ namespace LibEmiddle.Tests.Unit
         public void ConcurrentGroupAccess_ShouldHandleThreadSafely()
         {
             // Arrange - Create a group with multiple members
-            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -278,10 +288,10 @@ namespace LibEmiddle.Tests.Unit
             bobManager.CreateGroup(groupId);
 
             // Both add each other - this is the key for bidirectional communication
-            bool aliceAuthBobResult = aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            bool aliceAuthBobResult = aliceManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
             Assert.IsTrue(aliceAuthBobResult, "Alice should be able to add Bob");
 
-            bool bobAuthAliceResult = bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
+            bool bobAuthAliceResult = bobManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
             Assert.IsTrue(bobAuthAliceResult, "Bob should be able to add Alice");
 
             // Exchange distribution messages
@@ -315,11 +325,11 @@ namespace LibEmiddle.Tests.Unit
             }
 
             // Create tasks for Alice sending messages
-            var aliceTasks = new List<System.Threading.Tasks.Task>();
+            var aliceTasks = new List<Task>();
             for (int i = 0; i < messageCount; i++)
             {
                 int index = i; // Capture for closure
-                var task = System.Threading.Tasks.Task.Run(() => {
+                var task = Task.Run(() => {
                     try
                     {
                         aliceEncryptedMessages[index] = aliceManager.EncryptGroupMessage(groupId, aliceMessages[index]);
@@ -333,11 +343,11 @@ namespace LibEmiddle.Tests.Unit
             }
 
             // Create tasks for Bob sending messages
-            var bobTasks = new List<System.Threading.Tasks.Task>();
+            var bobTasks = new List<Task>();
             for (int i = 0; i < messageCount; i++)
             {
                 int index = i; // Capture for closure
-                var task = System.Threading.Tasks.Task.Run(() => {
+                var task = Task.Run(() => {
                     try
                     {
                         bobEncryptedMessages[index] = bobManager.EncryptGroupMessage(groupId, bobMessages[index]);
@@ -358,11 +368,11 @@ namespace LibEmiddle.Tests.Unit
             Assert.AreEqual(0, exceptions.Count, "There should be no exceptions during concurrent encryption");
 
             // Create tasks for Bob decrypting Alice's messages
-            var bobDecryptTasks = new List<System.Threading.Tasks.Task>();
+            var bobDecryptTasks = new List<Task>();
             for (int i = 0; i < messageCount; i++)
             {
                 int index = i; // Capture for closure
-                var task = System.Threading.Tasks.Task.Run(() => {
+                var task = Task.Run(() => {
                     try
                     {
                         string decrypted = bobManager.DecryptGroupMessage(aliceEncryptedMessages[index]);
@@ -377,7 +387,7 @@ namespace LibEmiddle.Tests.Unit
             }
 
             // Wait for all decryption tasks to complete
-            System.Threading.Tasks.Task.WaitAll(bobDecryptTasks.ToArray());
+            Task.WaitAll(bobDecryptTasks.ToArray());
 
             // Check for exceptions during decryption
             Assert.AreEqual(0, exceptions.Count, "There should be no exceptions during concurrent decryption");

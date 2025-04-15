@@ -3,14 +3,24 @@ using System;
 using System.Text;
 using System.Security.Cryptography;
 using LibEmiddle.API;
-using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Group;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class PerformanceTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void Performance_EncryptionAndDecryptionSpeedTest()
         {
@@ -174,29 +184,31 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = KeyExchange.X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = KeyExchange.X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = KeyExchange.DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             // Create a session ID that will be shared between Alice and Bob
             string sessionId = "alice-bob-session-" + Guid.NewGuid().ToString();
 
-            var aliceDRSession = new LibEmiddle.Models.DoubleRatchetSession(
+            var aliceDRSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
-            var bobDRSession = new LibEmiddle.Models.DoubleRatchetSession(
+            var bobDRSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: bobKeyPair,
-                remoteDHRatchetKey: aliceKeyPair.publicKey,
+                remoteDHRatchetKey: aliceKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
@@ -214,7 +226,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 // Alice to Bob
                 var (aliceUpdatedSession, encryptedMessage) =
-                    DoubleRatchet.DoubleRatchetEncrypt(currentAliceSession, message);
+                    _cryptoProvider.DoubleRatchetEncrypt(currentAliceSession, message);
 
                 // Add required security fields
                 encryptedMessage.MessageId = Guid.NewGuid();
@@ -222,7 +234,7 @@ namespace LibEmiddle.Tests.Unit
                 encryptedMessage.SessionId = sessionId;
 
                 var (bobUpdatedSession, decryptedMessage) =
-                    DoubleRatchet.DoubleRatchetDecrypt(currentBobSession, encryptedMessage);
+                    _cryptoProvider.DoubleRatchetDecrypt(currentBobSession, encryptedMessage);
 
                 // Make sure both sessions are valid before continuing
                 Assert.IsNotNull(aliceUpdatedSession, $"Alice's updated session should not be null at iteration {i}");

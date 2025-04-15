@@ -1,4 +1,4 @@
-﻿namespace LibEmiddle.Models
+﻿namespace LibEmiddle.Domain
 {
     /// <summary>
     /// Enhanced EncryptedSenderKeyDistribution class with additional security features
@@ -16,7 +16,12 @@
         public byte[]? Nonce { get; set; }
 
         /// <summary>
-        /// Ephemeral public key used for ECDH
+        /// Public key of the recipient
+        /// </summary>
+        public byte[]? RecipientPublicKey { get; set; }
+
+        /// <summary>
+        /// Public key of the sender
         /// </summary>
         public byte[]? SenderPublicKey { get; set; }
 

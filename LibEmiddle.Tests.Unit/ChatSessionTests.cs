@@ -1,10 +1,11 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Linq;
-using LibEmiddle.KeyExchange;
+using System.Threading.Tasks;
+using LibEmiddle.Abstractions;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.Models;
+using LibEmiddle.KeyExchange;
 using LibEmiddle.Messaging.Chat;
 
 namespace LibEmiddle.Tests.Unit
@@ -12,21 +13,25 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class ChatSessionTests
     {
-        private (byte[] publicKey, byte[] privateKey) _aliceKeyPair;
-        private (byte[] publicKey, byte[] privateKey) _bobKeyPair;
+        private KeyPair _aliceKeyPair;
+        private KeyPair _bobKeyPair;
         private DoubleRatchetSession _aliceRatchetSession;
         private DoubleRatchetSession _bobRatchetSession;
         private ChatSession _aliceChatSession;
+        private CryptoProvider _cryptoProvider;
 
         [TestInitialize]
-        public void TestInitialize()
+        public void Setup()
         {
+
+            _cryptoProvider = new CryptoProvider();
+
             // Generate proper key pairs for Alice and Bob
-            _aliceKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            _bobKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            _aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            _bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Create a shared secret (simulating X3DH)
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(_bobKeyPair.publicKey, _aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(_aliceKeyPair.PrivateKey, _bobKeyPair.PublicKey);
 
             // Initialize Double Ratchet
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
@@ -36,30 +41,32 @@ namespace LibEmiddle.Tests.Unit
             // Create Alice's sending session
             _aliceRatchetSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: _aliceKeyPair,
-                remoteDHRatchetKey: _bobKeyPair.publicKey,
+                remoteDHRatchetKey: _bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberSending: 0,
+                messageNumberReceiving: 0,
                 sessionId: sessionId
             );
 
             // Create Bob's receiving session
             _bobRatchetSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: _bobKeyPair,
-                remoteDHRatchetKey: _aliceKeyPair.publicKey,
+                remoteDHRatchetKey: _aliceKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberSending: 0,
+                messageNumberReceiving: 0,
                 sessionId: sessionId
             );
 
             // Create Alice's chat session
             _aliceChatSession = new ChatSession(
                 _aliceRatchetSession,
-                _bobKeyPair.publicKey,
-                _aliceKeyPair.publicKey
+                _bobKeyPair.PublicKey,
+                _aliceKeyPair.PublicKey
             );
         }
 
@@ -74,10 +81,10 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void ChatSession_Activate_ShouldChangeStateToActive()
+        public async Task ChatSession_Activate_ShouldChangeStateToActive()
         {
             // Act
-            bool result = _aliceChatSession.Activate();
+            bool result = await _aliceChatSession.ActivateAsync();
 
             // Assert
             Assert.IsTrue(result);
@@ -86,13 +93,13 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void ChatSession_ActivateAlreadyActiveSession_ShouldReturnFalse()
+        public async Task ChatSession_ActivateAlreadyActiveSession_ShouldReturnFalse()
         {
             // Arrange
-            _aliceChatSession.Activate();
+            await _aliceChatSession.ActivateAsync();
 
             // Act
-            bool result = _aliceChatSession.Activate();
+            bool result = await _aliceChatSession.ActivateAsync();
 
             // Assert
             Assert.IsFalse(result);
@@ -100,14 +107,14 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void ChatSession_Suspend_ShouldChangeStateToSuspended()
+        public async Task ChatSession_Suspend_ShouldChangeStateToSuspended()
         {
             // Arrange
-            _aliceChatSession.Activate();
+            await _aliceChatSession.ActivateAsync();
             string suspensionReason = "Testing suspension";
 
             // Act
-            bool result = _aliceChatSession.Suspend(suspensionReason);
+            bool result = await _aliceChatSession.SuspendAsync(suspensionReason);
 
             // Assert
             Assert.IsTrue(result);
@@ -117,10 +124,10 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void ChatSession_SuspendFromInitialized_ShouldChangeStateToSuspended()
+        public async Task ChatSession_SuspendFromInitialized_ShouldChangeStateToSuspended()
         {
             // Act
-            bool result = _aliceChatSession.Suspend("Direct suspension");
+            bool result = await _aliceChatSession.SuspendAsync("Direct suspension"); ;
 
             // Assert
             Assert.IsTrue(result);
@@ -128,10 +135,10 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void ChatSession_Terminate_ShouldChangeStateToTerminated()
+        public async Task ChatSession_Terminate_ShouldChangeStateToTerminated()
         {
             // Act
-            bool result = _aliceChatSession.Terminate();
+            bool result = await _aliceChatSession.TerminateAsync();
 
             // Assert
             Assert.IsTrue(result);
@@ -139,60 +146,64 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
-        public void ChatSession_ActivateTerminatedSession_ShouldThrowException()
+        public async Task ChatSession_ActivateTerminatedSession_ShouldThrowException()
         {
             // Arrange
-            _aliceChatSession.Terminate();
+            await _aliceChatSession.TerminateAsync();
 
-            // Act
-            _aliceChatSession.Activate();
+            // Act & Assert
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => _aliceChatSession.ActivateAsync());
         }
 
         [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
-        public void ChatSession_SuspendTerminatedSession_ShouldThrowException()
+        public async Task ChatSession_SuspendTerminatedSession_ShouldThrowException()
         {
             // Arrange
-            _aliceChatSession.Terminate();
+            await _aliceChatSession.TerminateAsync();
 
-            // Act
-            _aliceChatSession.Suspend();
+            // Act & Assert
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => _aliceChatSession.SuspendAsync());
         }
 
         [TestMethod]
-        public void ChatSession_StateChangeEvents_ShouldBeRaised()
+        public async Task ChatSession_StateChangeEvents_ShouldBeRaised()
         {
-            // Arrange
-            Enums.ChatSessionState? previousState = null;
-            Enums.ChatSessionState? newState = null;
-            DateTime? timestamp = null;
+            // Arrange: Create a TaskCompletionSource to await the event.
+            var tcs = new TaskCompletionSource<(Enums.ChatSessionState previous, Enums.ChatSessionState current, DateTime timestamp)>();
 
-            _aliceChatSession.StateChanged += (sender, e) => {
-                previousState = e.PreviousState;
-                newState = e.NewState;
-                timestamp = e.Timestamp;
+            _aliceChatSession.StateChanged += (sender, e) =>
+            {
+                tcs.TrySetResult((e.PreviousState, e.NewState, e.Timestamp));
             };
 
-            // Act
-            _aliceChatSession.Activate();
+            // Act: Activate the session.
+            await _aliceChatSession.ActivateAsync();
 
-            // Assert
-            Assert.IsNotNull(previousState);
-            Assert.IsNotNull(newState);
-            Assert.IsNotNull(timestamp);
-            Assert.AreEqual(Enums.ChatSessionState.Initialized, previousState);
-            Assert.AreEqual(Enums.ChatSessionState.Active, newState);
+            // Wait for the event to be raised, or time out after 1 second.
+            var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(1000));
+            if (completedTask != tcs.Task)
+            {
+                Assert.Fail("StateChanged event was not raised within the expected time.");
+            }
+
+            // Retrieve the event results.
+            var (previousState, currentState, eventTimestamp) = await tcs.Task;
+
+            // Assert: Verify that the event reflects the expected state change.
+            Assert.AreEqual(Enums.ChatSessionState.Initialized, previousState, "Expected previous state to be Initialized.");
+            Assert.AreEqual(Enums.ChatSessionState.Active, currentState, "Expected new state to be Active.");
+            Assert.IsTrue(eventTimestamp > DateTime.MinValue, "Expected a valid timestamp to be set.");
         }
 
+
         [TestMethod]
-        public void ChatSession_EncryptMessage_ShouldAutoActivateSession()
+        public async Task ChatSession_EncryptMessage_ShouldAutoActivateSession()
         {
             // Arrange
             string message = "Auto-activation test";
 
             // Act
-            EncryptedMessage encryptedMessage = _aliceChatSession.EncryptMessage(message);
+            EncryptedMessage encryptedMessage = await _aliceChatSession.EncryptAsync(message);
 
             // Assert
             Assert.AreEqual(Enums.ChatSessionState.Active, _aliceChatSession.State);
@@ -201,48 +212,54 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
-        public void ChatSession_EncryptMessageWithoutAutoActivate_ShouldThrowException()
+        public async Task ChatSession_EncryptMessageWithoutPriorActivation_ShouldAutoActivateSession()
         {
             // Arrange
-            string message = "Should fail without auto-activation";
+            // Make sure the session is in the default Initialized state.
+            // (No activation call is made beforehand.)
+            string message = "Test auto-activation message";
 
             // Act
-            _aliceChatSession.EncryptMessage(message, autoActivate: false);
+            EncryptedMessage encryptedMessage = await _aliceChatSession.EncryptAsync(message);
+
+            // Assert
+            // Instead of expecting an exception, we expect the session to auto-activate.
+            Assert.IsNotNull(encryptedMessage, "Encryption should succeed and return an encrypted message.");
+            Assert.AreEqual(Enums.ChatSessionState.Active, _aliceChatSession.State, "Session should be auto-activated on encryption.");
+            Assert.IsNotNull(_aliceChatSession.LastActivatedAt, "LastActivatedAt should be set upon activation.");
         }
 
         [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
-        public void ChatSession_EncryptMessageInSuspendedState_ShouldThrowException()
+        public async Task ChatSession_EncryptMessageInSuspendedState_ShouldThrowException()
         {
             // Arrange
-            _aliceChatSession.Suspend("Testing encryption rejection");
+            await _aliceChatSession.SuspendAsync("Testing encryption rejection");
             string message = "Should fail in suspended state";
 
             // Act
-            _aliceChatSession.EncryptMessage(message);
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => _aliceChatSession.EncryptAsync(message));
         }
 
         [TestMethod]
-        public void ChatSession_DecryptMessage_ShouldWorkInSuspendedState()
+        public async Task ChatSession_DecryptMessage_ShouldWorkInSuspendedState()
         {
             // Arrange
-            _aliceChatSession.Activate();
+            await _aliceChatSession.ActivateAsync();
             string originalMessage = "Test message";
-            EncryptedMessage encryptedMessage = _aliceChatSession.EncryptMessage(originalMessage);
+            EncryptedMessage encryptedMessage = await _aliceChatSession.EncryptAsync(originalMessage);
 
             // Create Bob's chat session
             var bobChatSession = new ChatSession(
                 _bobRatchetSession,
-                _aliceKeyPair.publicKey,
-                _bobKeyPair.publicKey
+                _aliceKeyPair.PublicKey,
+                _bobKeyPair.PublicKey
             );
 
             // Suspend Bob's session
-            bobChatSession.Suspend("Testing decryption in suspended state");
+            await bobChatSession.SuspendAsync("Testing decryption in suspended state");
 
             // Act
-            string decryptedMessage = bobChatSession.DecryptMessage(encryptedMessage);
+            string decryptedMessage = await bobChatSession.DecryptAsync(encryptedMessage);
 
             // Assert
             Assert.IsNotNull(decryptedMessage);
@@ -251,50 +268,49 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
-        public void ChatSession_DecryptMessageInTerminatedState_ShouldThrowException()
+        public async Task ChatSession_DecryptMessageInTerminatedState_ShouldThrowException()
         {
             // Arrange
-            _aliceChatSession.Activate();
+            await _aliceChatSession.ActivateAsync();
             string originalMessage = "Test message";
-            EncryptedMessage encryptedMessage = _aliceChatSession.EncryptMessage(originalMessage);
+            EncryptedMessage encryptedMessage = await _aliceChatSession.EncryptAsync(originalMessage);
 
             // Create Bob's chat session
             var bobChatSession = new ChatSession(
                 _bobRatchetSession,
-                _aliceKeyPair.publicKey,
-                _bobKeyPair.publicKey
+                _aliceKeyPair.PublicKey,
+                _bobKeyPair.PublicKey
             );
 
             // Terminate Bob's session
-            bobChatSession.Terminate();
+            await bobChatSession.TerminateAsync();
 
-            // Act
-            bobChatSession.DecryptMessage(encryptedMessage);
+            // Act & Assert
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => bobChatSession.DecryptAsync(encryptedMessage));
         }
 
         [TestMethod]
-        public void ChatSession_MessageHistory_ShouldTrackSentAndReceivedMessages()
+        public async Task ChatSession_MessageHistory_ShouldTrackSentAndReceivedMessages()
         {
             // Arrange
-            _aliceChatSession.Activate();
+            await _aliceChatSession.ActivateAsync();
             string message1 = "First message";
             string message2 = "Second message";
 
             // Create Bob's chat session
             var bobChatSession = new ChatSession(
                 _bobRatchetSession,
-                _aliceKeyPair.publicKey,
-                _bobKeyPair.publicKey
+                _aliceKeyPair.PublicKey,
+                _bobKeyPair.PublicKey
             );
-            bobChatSession.Activate();
+            await bobChatSession.ActivateAsync();
 
             // Act - Send messages both ways
-            EncryptedMessage encryptedMessage1 = _aliceChatSession.EncryptMessage(message1);
-            string decryptedMessage1 = bobChatSession.DecryptMessage(encryptedMessage1);
+            EncryptedMessage encryptedMessage1 = await _aliceChatSession.EncryptAsync(message1);
+            string decryptedMessage1 = await bobChatSession.DecryptAsync(encryptedMessage1);
 
-            EncryptedMessage encryptedMessage2 = bobChatSession.EncryptMessage(message2);
-            string decryptedMessage2 = _aliceChatSession.DecryptMessage(encryptedMessage2);
+            EncryptedMessage encryptedMessage2 = await bobChatSession.EncryptAsync(message2);
+            string decryptedMessage2 = await _aliceChatSession.DecryptAsync(encryptedMessage2);
 
             // Assert
             var aliceHistory = _aliceChatSession.GetMessageHistory();
@@ -311,13 +327,13 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void ChatSession_ClearMessageHistory_ShouldRemoveAllMessages()
+        public async Task ChatSession_ClearMessageHistory_ShouldRemoveAllMessages()
         {
             // Arrange
-            _aliceChatSession.Activate();
-            _aliceChatSession.EncryptMessage("Message 1");
-            _aliceChatSession.EncryptMessage("Message 2");
-            _aliceChatSession.EncryptMessage("Message 3");
+            await _aliceChatSession.ActivateAsync();
+            await _aliceChatSession.EncryptAsync("Message 1");
+            await _aliceChatSession.EncryptAsync("Message 2");
+            await _aliceChatSession.EncryptAsync("Message 3");
 
             Assert.AreEqual(3, _aliceChatSession.GetMessageCount());
 
@@ -331,24 +347,24 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void ChatSession_IsValid_ShouldReturnFalseWhenTerminated()
+        public async Task ChatSession_IsValid_ShouldReturnFalseWhenTerminated()
         {
             // Arrange
-            _aliceChatSession.Activate();
+            await _aliceChatSession.ActivateAsync();
             Assert.IsTrue(_aliceChatSession.IsValid());
 
             // Act
-            _aliceChatSession.Terminate();
+            await _aliceChatSession.TerminateAsync();
 
             // Assert
             Assert.IsFalse(_aliceChatSession.IsValid());
         }
 
         [TestMethod]
-        public void ChatSession_Dispose_ShouldTerminateSession()
+        public async Task ChatSession_Dispose_ShouldTerminateSession()
         {
             // Arrange
-            _aliceChatSession.Activate();
+            await _aliceChatSession.ActivateAsync();
 
             // Act
             _aliceChatSession.Dispose();
@@ -357,7 +373,7 @@ namespace LibEmiddle.Tests.Unit
             bool exceptionThrown = false;
             try
             {
-                _aliceChatSession.Activate();
+                await _aliceChatSession.ActivateAsync();
             }
             catch (ObjectDisposedException)
             {
@@ -368,13 +384,13 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void ChatSession_MessagePagination_ShouldReturnCorrectSubset()
+        public async Task ChatSession_MessagePagination_ShouldReturnCorrectSubset()
         {
             // Arrange
-            _aliceChatSession.Activate();
+            await _aliceChatSession.ActivateAsync();
             for (int i = 0; i < 10; i++)
             {
-                _aliceChatSession.EncryptMessage($"Message {i + 1}");
+                await _aliceChatSession.EncryptAsync($"Message {i + 1}");
             }
 
             // Act - Get second page of messages (3 per page)

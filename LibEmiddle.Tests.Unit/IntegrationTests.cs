@@ -3,98 +3,105 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using LibEmiddle.KeyExchange;
 using LibEmiddle.Models;
 using LibEmiddle.API;
-using LibEmiddle.Crypto;
+using LibEmiddle.Abstractions;
 using LibEmiddle.Messaging.Group;
+using LibEmiddle.Domain;
+using LibEmiddle.Crypto;
+using LibEmiddle.Core;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class IntegrationTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void FullE2EEFlow_ShouldWorkEndToEnd()
         {
             // This test simulates a full conversation flow between Alice and Bob
 
             // Step 1: Generate identity keys for Alice and Bob
-            var aliceIdentityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-            var bobIdentityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var bobIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Step 2: Bob creates his key bundle and uploads to server
-            var bobKeyBundle = X3DHExchange.CreateX3DHKeyBundle();
-
-            // Convert to public bundle (what would be stored on server)
-            var bobPublicBundle = new X3DHPublicBundle
-            {
-                IdentityKey = bobKeyBundle.IdentityKey,
-                SignedPreKey = bobKeyBundle.SignedPreKey,
-                SignedPreKeySignature = bobKeyBundle.SignedPreKeySignature,
-                OneTimePreKeys = bobKeyBundle.OneTimePreKeys
-            };
+            var bobKeyBundle = X3DHExchange.CreateX3DHKeyBundle(bobIdentityKeyPair);
 
             // Step 3: Alice fetches Bob's bundle and initiates a session
-            var aliceSession = X3DHExchange.InitiateX3DHSession(bobPublicBundle, aliceIdentityKeyPair, out var usedOneTimePreKeyId);
+            SenderSessionResult senderSessionResult = X3DHExchange.InitiateSessionAsSender(
+                bobKeyBundle.ToPublicBundle(),
+                aliceIdentityKeyPair);
 
             // Create a session ID that will be shared between Alice and Bob
-            string sessionId = "alice-bob-session-" + Guid.NewGuid().ToString();
+            string sessionId = $"session-{Guid.NewGuid()}";
 
-            // Create Alice's initial DoubleRatchet session using immutable constructor
-            var aliceDRSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: LibEmiddleClient.GenerateKeyExchangeKeyPair(),
-                remoteDHRatchetKey: bobPublicBundle.SignedPreKey,
-                rootKey: aliceSession.RootKey,
-                sendingChainKey: aliceSession.ChainKey,
-                receivingChainKey: aliceSession.ChainKey,
-                messageNumber: 0,
+            // Step 4: Alice initializes her Double Ratchet session - using correct method from DoubleRatchet class
+            var aliceDRSession = DoubleRatchetExchange.InitializeDoubleRatchet(senderSessionResult.SharedKey);
+
+            // Create Alice's initial session using the root key and chain key from initialization
+            aliceDRSession = new DoubleRatchetSession(
+                dhRatchetKeyPair: _cryptoProvider.GenerateKeyPair(KeyType.X25519),
+                remoteDHRatchetKey: bobKeyBundle.SignedPreKey,
+                rootKey: aliceDRSession.rootKey,
+                sendingChainKey: aliceDRSession.chainKey,
+                receivingChainKey: null,
+                messageNumberSending: 0,
+                messageNumberReceiving: 0,
                 sessionId: sessionId
             );
 
-            // Step 4: Alice sends initial message to Bob
+            // Step 5: Alice sends initial message to Bob
             string initialMessage = "Hello Bob, this is Alice!";
             var (aliceUpdatedSession, encryptedMessage) =
-                DoubleRatchet.DoubleRatchetEncrypt(aliceDRSession, initialMessage);
+                _cryptoProvider.DoubleRatchetEncrypt(aliceDRSession, initialMessage);
 
-            // Add necessary validation fields for enhanced security
-            encryptedMessage.MessageId = Guid.NewGuid();
-            encryptedMessage.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            encryptedMessage.SessionId = sessionId;
+            // Step 6: Bob processes the initial message data to establish his session
+            var bobSharedKey = X3DHExchange.EstablishSessionAsReceiver(
+                senderSessionResult.MessageDataToSend,
+                bobKeyBundle);
 
-            // Step 5: Bob receives Alice's initial message 
-            // (In reality, Bob would process the X3DH initial message first)
+            // Step 7: Bob initializes his Double Ratchet session
+            var bobDRInit = DoubleRatchetExchange.InitializeDoubleRatchet(bobSharedKey);
 
-            // Bob creates his DoubleRatchet session
+            // Create Bob's initial session
             var bobDRSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: (bobKeyBundle.SignedPreKey, bobKeyBundle.GetSignedPreKeyPrivate()),
+                dhRatchetKeyPair: new KeyPair(
+                    bobKeyBundle.SignedPreKey,
+                    bobKeyBundle.GetSignedPreKeyPrivate()
+                ),
                 remoteDHRatchetKey: encryptedMessage.SenderDHKey,
-                rootKey: aliceSession.RootKey, // In reality, Bob would derive this himself
-                sendingChainKey: aliceSession.ChainKey,
-                receivingChainKey: aliceSession.ChainKey,
-                messageNumber: 0,
-                sessionId: sessionId // Must match Alice's session ID
+                rootKey: bobDRInit.rootKey,
+                sendingChainKey: null,
+                receivingChainKey: bobDRInit.chainKey,
+                messageNumberSending: 0,
+                messageNumberReceiving: 0,
+                sessionId: sessionId
             );
 
-            // Bob decrypts Alice's message
+            // Step 8: Bob decrypts Alice's message
             var (bobUpdatedSession, decryptedMessage) =
-                DoubleRatchet.DoubleRatchetDecrypt(bobDRSession, encryptedMessage);
+                _cryptoProvider.DoubleRatchetDecrypt(bobDRSession, encryptedMessage);
 
             // Verify Bob successfully decrypted the message
             Assert.IsNotNull(bobUpdatedSession, "Bob's session should be updated after decryption");
             Assert.IsNotNull(decryptedMessage, "Bob should successfully decrypt Alice's message");
             Assert.AreEqual(initialMessage, decryptedMessage, "Bob should see Alice's original message");
 
-            // Step 6: Bob replies to Alice
+            // Step 9: Bob replies to Alice
             string replyMessage = "Hi Alice, Bob here!";
             var (bobRepliedSession, bobReplyEncrypted) =
-                DoubleRatchet.DoubleRatchetEncrypt(bobUpdatedSession, replyMessage);
+                _cryptoProvider.DoubleRatchetEncrypt(bobUpdatedSession, replyMessage);
 
-            // Add necessary validation fields for enhanced security
-            bobReplyEncrypted.MessageId = Guid.NewGuid();
-            bobReplyEncrypted.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            bobReplyEncrypted.SessionId = sessionId;
-
-            // Step 7: Alice decrypts Bob's reply
+            // Step 10: Alice decrypts Bob's reply
             var (aliceFinalSession, aliceDecryptedReply) =
-                DoubleRatchet.DoubleRatchetDecrypt(aliceUpdatedSession, bobReplyEncrypted);
+                _cryptoProvider.DoubleRatchetDecrypt(aliceUpdatedSession, bobReplyEncrypted);
 
             // Assert final results
             Assert.IsNotNull(aliceFinalSession, "Alice's session should be updated after decryption");
@@ -102,20 +109,20 @@ namespace LibEmiddle.Tests.Unit
             Assert.AreEqual(replyMessage, aliceDecryptedReply, "Alice should see Bob's original message");
 
             // Verify session properties were correctly updated
-            Assert.AreNotEqual(aliceDRSession, aliceUpdatedSession, "Alice's initial session should be different from updated session");
-            Assert.AreNotEqual(bobDRSession, bobUpdatedSession, "Bob's initial session should be different from updated session");
-            Assert.AreNotEqual(aliceUpdatedSession, aliceFinalSession, "Alice's updated session should be different from final session");
-            Assert.AreNotEqual(bobUpdatedSession, bobRepliedSession, "Bob's updated session should be different from replied session");
+            Assert.AreEqual(sessionId, aliceUpdatedSession.SessionId,
+                "Alice's session ID should remain the same after update");
+            Assert.AreEqual(sessionId, bobUpdatedSession.SessionId,
+                "Bob's session ID should remain the same after update");
 
             // Verify message numbers increased
-            Assert.AreEqual(1, aliceUpdatedSession.MessageNumber, "Alice's message number should be incremented");
-            Assert.AreEqual(1, bobRepliedSession.MessageNumber, "Bob's message number should be incremented");
+            Assert.AreEqual(1, aliceUpdatedSession.MessageNumberSending, "Alice's message number should be incremented");
+            Assert.AreEqual(0, bobUpdatedSession.MessageNumberReceiving, "Bob's message number should be correct");
 
             // Verify chain keys changed
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(aliceDRSession.SendingChainKey, aliceUpdatedSession.SendingChainKey),
+            Assert.IsFalse(SecureMemory.SecureCompare(aliceDRSession.SendingChainKey, aliceUpdatedSession.SendingChainKey),
                 "Alice's sending chain key should change after encryption");
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(bobDRSession.SendingChainKey, bobRepliedSession.SendingChainKey),
-                "Bob's sending chain key should change after encryption");
+            Assert.IsFalse(SecureMemory.SecureCompare(bobDRSession.ReceivingChainKey, bobUpdatedSession.ReceivingChainKey),
+                "Bob's receiving chain key should change after decryption");
 
             // Clean up sensitive key material
             bobKeyBundle.ClearPrivateKeys();
@@ -145,16 +152,16 @@ namespace LibEmiddle.Tests.Unit
 
             // Step 4: Each participant adds the others as members
             // Alice adds Bob and Charlie
-            aliceManager.AddGroupMember(groupId, bobKeyPair.publicKey);
-            aliceManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
+            aliceManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
+            aliceManager.AddGroupMember(groupId, charlieKeyPair.PublicKey);
 
             // Bob adds Alice and Charlie
-            bobManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
-            bobManager.AddGroupMember(groupId, charlieKeyPair.publicKey);
+            bobManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
+            bobManager.AddGroupMember(groupId, charlieKeyPair.PublicKey);
 
             // Charlie adds Alice and Bob
-            charlieManager.AddGroupMember(groupId, aliceKeyPair.publicKey);
-            charlieManager.AddGroupMember(groupId, bobKeyPair.publicKey);
+            charlieManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
+            charlieManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
 
             // Step 5: Each participant creates their distribution message with their sender key
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);

@@ -3,6 +3,8 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using LibEmiddle.API;
+using LibEmiddle.Domain;
+using LibEmiddle.Abstractions;
 using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
@@ -10,12 +12,20 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class KeyStorageTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         [ExpectedException(typeof(FileNotFoundException))]
         public void LoadKeyFromFile_NonExistentFile_ShouldThrowException()
         {
             // Act - should throw FileNotFoundException
-            KeyStorage.LoadKeyFromFile("non-existent-file.key");
+            _cryptoProvider.LoadKeyFromFile("non-existent-file.key");
         }
 
         [TestMethod]
@@ -23,7 +33,8 @@ namespace LibEmiddle.Tests.Unit
         public void LoadKeyFromFile_WrongPassword_ShouldThrowCryptographicException()
         {
             // Arrange
-            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var publicKey = _identityKeyPair.PublicKey;
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string correctPassword = "CorrectP@ssw0rd";
             string wrongPassword = "WrongP@ssw0rd";
@@ -31,10 +42,10 @@ namespace LibEmiddle.Tests.Unit
             try
             {
                 // Act
-                KeyStorage.StoreKeyToFile(publicKey, filePath, correctPassword);
+                _cryptoProvider.StoreKeyToFile(publicKey, filePath, correctPassword);
 
                 // Should throw CryptographicException
-                KeyStorage.LoadKeyFromFile(filePath, wrongPassword);
+                _cryptoProvider.LoadKeyFromFile(filePath, wrongPassword);
             }
             finally
             {
@@ -65,8 +76,8 @@ namespace LibEmiddle.Tests.Unit
                 File.WriteAllBytes(filePath, corrupted);
 
                 // Act - should throw InvalidDataException
-                KeyStorage.LoadKeyFromFile(filePath, password);
-            }
+                _cryptoProvider.LoadKeyFromFile(filePath, password);
+            }   
             finally
             {
                 // Cleanup
@@ -81,7 +92,8 @@ namespace LibEmiddle.Tests.Unit
         public void KeyStorage_SaltRotation_ShouldUpdateFile()
         {
             // Arrange
-            var (publicKey, _) = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var publicKey = _identityKeyPair.PublicKey;
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "TestP@ssw0rd";
             bool forceRotation = true;
@@ -89,7 +101,7 @@ namespace LibEmiddle.Tests.Unit
             try
             {
                 // Store the key
-                KeyStorage.StoreKeyToFile(publicKey, filePath, password);
+                _cryptoProvider.StoreKeyToFile(publicKey, filePath, password);
 
                 // Get file info before rotation
                 FileInfo fileInfoBefore = new FileInfo(filePath);
@@ -99,7 +111,7 @@ namespace LibEmiddle.Tests.Unit
                 System.Threading.Thread.Sleep(100);
 
                 // Act - force salt rotation
-                byte[] loadedKey = KeyStorage.LoadKeyFromFile(filePath, password, forceRotation);
+                byte[] loadedKey = _cryptoProvider.LoadKeyFromFile(filePath, password, forceRotation);
 
                 // Get file info after rotation
                 FileInfo fileInfoAfter = new FileInfo(filePath);
@@ -128,7 +140,7 @@ namespace LibEmiddle.Tests.Unit
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             try
             {
-                KeyStorage.StoreKeyToFile(null, filePath);
+                _cryptoProvider.StoreKeyToFile(null, filePath);
             }
             finally
             {
@@ -147,7 +159,7 @@ namespace LibEmiddle.Tests.Unit
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             try
             {
-                KeyStorage.StoreKeyToFile(new byte[0], filePath);
+                _cryptoProvider.StoreKeyToFile(new byte[0], filePath);
             }
             finally
             {

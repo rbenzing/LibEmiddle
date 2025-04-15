@@ -1,4 +1,6 @@
-﻿namespace LibEmiddle.Domain
+﻿#pragma warning disable IDE0130 // Namespace does not match folder structure
+namespace LibEmiddle.Domain
+#pragma warning restore IDE0130 // Namespace does not match folder structure
 {
     /// <summary>
     /// Constants used across the library for cryptographic operations.
@@ -40,6 +42,11 @@
         /// Size of Ed25519 private key (64 bytes)
         /// </summary>
         public const int ED25519_PRIVATE_KEY_SIZE = 64;
+
+        /// <summary>
+        /// Side of Ed25519 signature key (64 bytes)
+        /// </summary>
+        public const int ED25519_SIGNATURE_SIZE = 64;
 
         /// <summary>
         /// Default number of iterations for PBKDF2 key derivation

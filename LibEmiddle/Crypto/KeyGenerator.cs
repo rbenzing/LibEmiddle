@@ -7,13 +7,13 @@ namespace LibEmiddle.Crypto
     /// <summary>
     /// Provides functionality for generating cryptographic keys.
     /// </summary>
-    public static class KeyGenerator
+    internal static class KeyGenerator
     {
         /// <summary>
         /// Generates a sender key for group messaging
         /// </summary>
         /// <returns>Random sender key</returns>
-        public static byte[] GenerateSenderKey()
+        public static byte[] GenerateInitialChainKey()
         {
             byte[] senderKey = Sodium.GenerateRandomBytes(Constants.AES_KEY_SIZE);
             RandomNumberGenerator.Fill(senderKey);
@@ -38,8 +38,9 @@ namespace LibEmiddle.Crypto
 
             byte[] output = new byte[Constants.AES_KEY_SIZE];
             int ret = Sodium.crypto_auth_hmacsha256(
-                output, (nuint)output.Length,
-                normalizedPublicKey, (nuint)normalizedPublicKey.Length,
+                output,
+                normalizedPublicKey, 
+                (UIntPtr)normalizedPublicKey.Length,
                 existingSharedKey);
 
             if (ret != 0)
@@ -53,7 +54,7 @@ namespace LibEmiddle.Crypto
         /// <summary>
         /// Generates a standard Ed25519 key pair using libsodium.
         /// </summary>
-        public static (byte[] publicKey, byte[] privateKey) GenerateEd25519KeyPair()
+        public static KeyPair GenerateEd25519KeyPair()
         {
             Sodium.Initialize();
 
@@ -65,14 +66,14 @@ namespace LibEmiddle.Crypto
             {
                 throw new InvalidOperationException("Ed25519 key pair generation failed.");
             }
-            return (publicKey, privateKey);
+            return new KeyPair(publicKey, privateKey);
         }
 
         /// <summary>
         /// Deterministically generates an Ed25519 key pair from a 32-byte seed.
         /// This method is useful for edge-case testing with minimal or maximal entropy.
         /// </summary>
-        public static (byte[] publicKey, byte[] privateKey) GenerateEd25519KeyPairFromSeed(byte[] seed)
+        public static KeyPair GenerateEd25519KeyPairFromSeed(byte[] seed)
         {
             if (seed == null || seed.Length != 32)
                 throw new ArgumentException("Seed must be 32 bytes.", nameof(seed));
@@ -86,13 +87,13 @@ namespace LibEmiddle.Crypto
             if (result != 0)
                 throw new InvalidOperationException("Ed25519 seeded key pair generation failed.");
 
-            return (publicKey, privateKey);
+            return new KeyPair(publicKey, privateKey);
         }
 
         /// <summary>
         /// Generates an X25519 key pair using libsodium's crypto_box_keypair
         /// </summary>
-        public static (byte[] publicKey, byte[] privateKey) GenerateX25519KeyPair()
+        public static KeyPair GenerateX25519KeyPair()
         {
             Sodium.Initialize();
 
@@ -105,7 +106,7 @@ namespace LibEmiddle.Crypto
             if (result != 0)
                 throw new InvalidOperationException("X25519 key pair generation failed.");
 
-            return (publicKey, privateKey);
+            return new KeyPair(publicKey, privateKey);
         }
     }
 }

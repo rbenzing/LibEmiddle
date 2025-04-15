@@ -1,9 +1,8 @@
 ﻿using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Text;
-using System.Text.Json;
 using System.Security;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using LibEmiddle.Core;
 using LibEmiddle.Models;
 using LibEmiddle.KeyExchange;
@@ -18,14 +17,13 @@ namespace LibEmiddle.MultiDevice
     /// </summary>
     public class DeviceManager : IDisposable
     {
-        private readonly (byte[] publicKey, byte[] privateKey) _deviceKeyPair;
+        private readonly KeyPair _deviceKeyPair;
 
         // Changed from ConcurrentBag to ConcurrentDictionary to prevent duplicates
         private readonly ConcurrentDictionary<string, byte[]> _linkedDevices = new ConcurrentDictionary<string, byte[]>(StringComparer.Ordinal);
 
         // Add a revoked devices tracking set with timestamps
-        private readonly ConcurrentDictionary<string, long> _revokedDevices =
-            new ConcurrentDictionary<string, long>();
+        private readonly ConcurrentDictionary<string, long> _revokedDevices = new ConcurrentDictionary<string, long>();
 
         private readonly byte[] _syncKey;
         private readonly object _syncLock = new object();
@@ -37,18 +35,18 @@ namespace LibEmiddle.MultiDevice
         /// Creates a new multi-device manager
         /// </summary>
         /// <param name="deviceKeyPair">This device's key pair</param>
-        public DeviceManager((byte[] publicKey, byte[] privateKey) deviceKeyPair)
+        public DeviceManager(KeyPair deviceKeyPair)
         {
-            if (deviceKeyPair.publicKey == null || deviceKeyPair.publicKey.Length == 0)
+            if (deviceKeyPair.PublicKey == null || deviceKeyPair.PublicKey.Length == 0)
                 throw new ArgumentException("Device public key cannot be null or empty", nameof(deviceKeyPair));
 
-            if (deviceKeyPair.privateKey == null || deviceKeyPair.privateKey.Length == 0)
+            if (deviceKeyPair.PrivateKey == null || deviceKeyPair.PrivateKey.Length == 0)
                 throw new ArgumentException("Device private key cannot be null or empty", nameof(deviceKeyPair));
 
             // Create a deep copy of the key pair to prevent external modification
-            _deviceKeyPair = (
-                SecureMemory.SecureCopy(deviceKeyPair.publicKey) ?? throw new ArgumentNullException(nameof(deviceKeyPair.publicKey)),
-                SecureMemory.SecureCopy(deviceKeyPair.privateKey) ?? throw new ArgumentNullException(nameof(deviceKeyPair.privateKey))
+            _deviceKeyPair = new KeyPair(
+                SecureMemory.SecureCopy(deviceKeyPair.PublicKey) ?? throw new ArgumentNullException(nameof(deviceKeyPair.PublicKey)),
+                SecureMemory.SecureCopy(deviceKeyPair.PrivateKey) ?? throw new ArgumentNullException(nameof(deviceKeyPair.PrivateKey))
             );
 
             // Generate a random sync key with high entropy
@@ -163,9 +161,9 @@ namespace LibEmiddle.MultiDevice
 
                 try
                 {
-                    senderX25519Private = _deviceKeyPair.privateKey.Length != Constants.X25519_KEY_SIZE ?
-                        KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.privateKey) :
-                        SecureMemory.SecureCopy(_deviceKeyPair.privateKey) ?? Array.Empty<byte>();
+                    senderX25519Private = _deviceKeyPair.PrivateKey.Length != Constants.X25519_KEY_SIZE ?
+                        KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.PrivateKey) :
+                        SecureMemory.SecureCopy(_deviceKeyPair.PrivateKey) ?? Array.Empty<byte>();
 
                     // Thread safety for linked devices access
                     foreach (var deviceEntry in _linkedDevices)
@@ -200,15 +198,15 @@ namespace LibEmiddle.MultiDevice
                             }
 
                             // Perform key exchange
-                            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(x25519PublicKey, senderX25519Private);
+                            byte[] sharedSecret = X3DHExchange.PerformX25519DH(x25519PublicKey, senderX25519Private);
 
                             // Sign the sync data
-                            byte[] signature = MessageSigning.SignMessage(secureSyncData.Value, _deviceKeyPair.privateKey);
+                            byte[] signature = MessageSigning.SignMessage(secureSyncData.Value, _deviceKeyPair.PrivateKey);
 
                             // Create sync message with timestamp for replay protection
                             var syncMessage = new DeviceSyncMessage
                             {
-                                SenderPublicKey = _deviceKeyPair.publicKey,
+                                SenderPublicKey = _deviceKeyPair.PublicKey,
                                 Data = secureSyncData.Value,
                                 Signature = signature,
                                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
@@ -344,15 +342,15 @@ namespace LibEmiddle.MultiDevice
                 try
                 {
                     // Prepare receiver's private key (this device)
-                    x25519Private = _deviceKeyPair.privateKey.Length == Constants.X25519_KEY_SIZE
-                        ? _deviceKeyPair.privateKey.ToArray()
-                        : KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.privateKey);
+                    x25519Private = _deviceKeyPair.PrivateKey.Length == Constants.X25519_KEY_SIZE
+                        ? _deviceKeyPair.PrivateKey.ToArray()
+                        : KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.PrivateKey);
 
                     if (x25519Private == null || x25519Private.Length != Constants.X25519_KEY_SIZE)
                         return null;
 
                     // Step 2: Get shared secret
-                    byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(deviceKey, x25519Private);
+                    byte[] sharedSecret = X3DHExchange.PerformX25519DH(deviceKey, x25519Private);
 
                     // Step 3: Decrypt message
                     byte[] plaintext;
@@ -471,7 +469,7 @@ namespace LibEmiddle.MultiDevice
             timestampBytes.AsSpan().CopyTo(dataToSign.AsSpan(deviceKeyToRevoke.Length, timestampBytes.Length));
 
             // Sign the combined data using _deviceKeyPair (not _identityKeyPair)
-            byte[] signature = MessageSigning.SignMessage(dataToSign, _deviceKeyPair.privateKey);
+            byte[] signature = MessageSigning.SignMessage(dataToSign, _deviceKeyPair.PrivateKey);
 
             // Create and return the revocation message
             return new DeviceRevocationMessage
@@ -818,9 +816,9 @@ namespace LibEmiddle.MultiDevice
             if (disposing)
             {
                 // Securely clear all sensitive data
-                if (_deviceKeyPair.privateKey != null)
+                if (_deviceKeyPair.PrivateKey != null)
                 {
-                    SecureMemory.SecureClear(_deviceKeyPair.privateKey);
+                    SecureMemory.SecureClear(_deviceKeyPair.PrivateKey);
                 }
 
                 if (_syncKey != null)

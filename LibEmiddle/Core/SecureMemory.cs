@@ -1,7 +1,5 @@
 ﻿using System.Buffers;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 
 namespace LibEmiddle.Core
 {
@@ -15,7 +13,7 @@ namespace LibEmiddle.Core
         /// Securely clears sensitive data from memory.
         /// </summary>
         /// <param name="data">Data to clear</param>
-        public static void SecureClear(byte[] data)
+        public static void SecureClear(byte[]? data)
         {
             if (data == null || data.Length == 0)
                 return;
@@ -98,7 +96,7 @@ namespace LibEmiddle.Core
         /// </summary>
         /// <param name="size">Size of the buffer in bytes</param>
         /// <returns>A new secure buffer</returns>
-        public static unsafe byte[] CreateSecureBuffer(int size)
+        public static byte[] CreateSecureBuffer(int size)
         {
             if (size <= 0)
                 throw new ArgumentException("Buffer size must be positive", nameof(size));
@@ -222,7 +220,7 @@ namespace LibEmiddle.Core
         /// <typeparam name="T"></typeparam>
         public sealed class SecureArray<T> : IDisposable where T : struct
         {
-            private T[] _array;
+            private readonly T[] _array;
             private bool _disposed = false;
             private bool _isLocked = false;
 
@@ -251,13 +249,19 @@ namespace LibEmiddle.Core
             {
                 if (typeof(T) == typeof(byte) && !_isLocked)
                 {
-                    unsafe
+                    // Pin the array to get a stable memory address
+                    GCHandle handle = GCHandle.Alloc(_array, GCHandleType.Pinned);
+                    try
                     {
-                        fixed (byte* ptr = (byte[])(object)_array)
-                        {
-                            Sodium.sodium_mlock((IntPtr)ptr, (UIntPtr)(_array.Length * Marshal.SizeOf<T>()));
-                            _isLocked = true;
-                        }
+                        // Get address of pinned array and call sodium_mlock
+                        IntPtr ptr = handle.AddrOfPinnedObject();
+                        Sodium.sodium_mlock(ptr, (UIntPtr)(_array.Length * Marshal.SizeOf<T>()));
+                        _isLocked = true;
+                    }
+                    finally
+                    {
+                        // Important: Free the handle when done
+                        handle.Free();
                     }
                 }
             }
@@ -278,12 +282,18 @@ namespace LibEmiddle.Core
                     {
                         if (_isLocked)
                         {
-                            unsafe
+                            // Pin the array to get a stable memory address
+                            GCHandle handle = GCHandle.Alloc(_array, GCHandleType.Pinned);
+                            try
                             {
-                                fixed (byte* ptr = (byte[])(object)_array)
-                                {
-                                    Sodium.sodium_munlock((IntPtr)ptr, (UIntPtr)(_array.Length * Marshal.SizeOf<T>()));
-                                }
+                                // Get address of pinned array and call sodium_munlock
+                                IntPtr ptr = handle.AddrOfPinnedObject();
+                                Sodium.sodium_munlock(ptr, (UIntPtr)(_array.Length * Marshal.SizeOf<T>()));
+                            }
+                            finally
+                            {
+                                // Important: Free the handle when done
+                                handle.Free();
                             }
                         }
                         else

@@ -15,35 +15,44 @@ using LibEmiddle.MultiDevice;
 using LibEmiddle.Abstractions;
 using LibEmiddle.API;
 using LibEmiddle.Messaging.Transport;
-using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Group;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class ErrorRecoveryTests
     {
+        private CryptoProvider _cryptoProvider;
+
+        [TestInitialize]
+        public void Setup()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
+
         [TestMethod]
         public void DoubleRatchetExchange_ResumeSession_WithValidSession_ShouldReturn()
         {
             // Arrange
-            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             string sessionId = "resume-test-" + Guid.NewGuid().ToString();
 
             var originalSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 5,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
@@ -53,17 +62,18 @@ namespace LibEmiddle.Tests.Unit
             // Assert
             Assert.IsNotNull(resumedSession, "Session should be resumed successfully");
             Assert.AreEqual(originalSession.SessionId, resumedSession.SessionId, "Session ID should be preserved");
-            Assert.AreEqual(originalSession.MessageNumber, resumedSession.MessageNumber, "Message number should be preserved");
+            Assert.AreEqual(originalSession.MessageNumberReceiving, resumedSession.MessageNumberReceiving, "Message number receiving should be preserved");
+            Assert.AreEqual(originalSession.MessageNumberSending, resumedSession.MessageNumberSending, "Message number sending should be preserved");
 
             // Verify key materials are preserved
             Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.DHRatchetKeyPair.publicKey,
-                resumedSession.DHRatchetKeyPair.publicKey),
+                originalSession.DHRatchetKeyPair.PublicKey,
+                resumedSession.DHRatchetKeyPair.PublicKey),
                 "Public keys should match");
 
             Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.DHRatchetKeyPair.privateKey,
-                resumedSession.DHRatchetKeyPair.privateKey),
+                originalSession.DHRatchetKeyPair.PrivateKey,
+                resumedSession.DHRatchetKeyPair.PrivateKey),
                 "Private keys should match");
 
             Assert.IsTrue(SecureMemory.SecureCompare(
@@ -76,11 +86,11 @@ namespace LibEmiddle.Tests.Unit
         public void DoubleRatchetExchange_ResumeSession_WithLastProcessedMessageId_ShouldAddToProcessedIds()
         {
             // Arrange
-            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             string sessionId = "resume-with-msgid-" + Guid.NewGuid().ToString();
@@ -88,11 +98,12 @@ namespace LibEmiddle.Tests.Unit
             // Create session with no processed message IDs
             var originalSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
@@ -137,8 +148,8 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var mockTransport = new Mock<IMailboxTransport>();
-            var recipientKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var senderKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var senderKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Use a counter for attempts
             int attemptCount = 0;
@@ -153,8 +164,8 @@ namespace LibEmiddle.Tests.Unit
                 var msg = new MailboxMessage
                 {
                     MessageId = Guid.NewGuid().ToString(),
-                    RecipientKey = recipientKeyPair.publicKey,
-                    SenderKey = senderKeyPair.publicKey,
+                    RecipientKey = recipientKeyPair.PublicKey,
+                    SenderKey = senderKeyPair.PublicKey,
                     EncryptedPayload = new EncryptedMessage
                     {
                         Ciphertext = new byte[] { 1, 2, 3 },
@@ -245,11 +256,11 @@ namespace LibEmiddle.Tests.Unit
         public void DecryptionFailure_ShouldNotAffectSubsequentDecryption()
         {
             // Arrange
-            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             // Create a session ID that will be shared between Alice and Bob
@@ -257,27 +268,29 @@ namespace LibEmiddle.Tests.Unit
 
             var aliceSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
             var bobSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: bobKeyPair,
-                remoteDHRatchetKey: aliceKeyPair.publicKey,
+                remoteDHRatchetKey: aliceKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
 
             // Alice sends a valid message
             string goodMessage = "This is a valid message";
-            var (aliceUpdatedSession, validEncrypted) = DoubleRatchet.DoubleRatchetEncrypt(aliceSession, goodMessage);
+            var (aliceUpdatedSession, validEncrypted) = _cryptoProvider.DoubleRatchetEncrypt(aliceSession, goodMessage);
 
             // Add security fields
             validEncrypted.MessageId = Guid.NewGuid();
@@ -298,10 +311,10 @@ namespace LibEmiddle.Tests.Unit
 
             // Act
             // First try to decrypt the invalid message
-            var (bobSessionAfterFailure, failedMessage) = DoubleRatchet.DoubleRatchetDecrypt(bobSession, invalidEncrypted);
+            var (bobSessionAfterFailure, failedMessage) = _cryptoProvider.DoubleRatchetDecrypt(bobSession, invalidEncrypted);
 
             // Then decrypt the valid message
-            var (bobSessionAfterSuccess, successMessage) = DoubleRatchet.DoubleRatchetDecrypt(bobSession, validEncrypted);
+            var (bobSessionAfterSuccess, successMessage) = _cryptoProvider.DoubleRatchetDecrypt(bobSession, validEncrypted);
 
             // Assert
             Assert.IsNull(failedMessage, "Invalid message should not decrypt");
@@ -351,7 +364,7 @@ namespace LibEmiddle.Tests.Unit
             var encryptedMessage = new EncryptedGroupMessage
             {
                 GroupId = nonExistentGroupId,
-                SenderIdentityKey = aliceKeyPair.publicKey,
+                SenderIdentityKey = aliceKeyPair.PublicKey,
                 Ciphertext = new byte[64],
                 Nonce = new byte[12],
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), // Adding timestamp required by validation
@@ -374,7 +387,7 @@ namespace LibEmiddle.Tests.Unit
             // Generate many nonces rapidly
             for (int i = 0; i < nonceCount; i++)
             {
-                byte[] nonce = NonceGenerator.GenerateNonce();
+                byte[] nonce = _cryptoProvider.GenerateNonce();
                 string nonceBase64 = Convert.ToBase64String(nonce);
 
                 // Assert - Each nonce should be unique
@@ -393,8 +406,8 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var mockTransport = new Mock<IMailboxTransport>();
-            var identityKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var recipientKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create a stateful flag that can be accessed from the mock
             bool[] firstAttempt = { true }; // Using array to enable modification from lambda
@@ -421,7 +434,7 @@ namespace LibEmiddle.Tests.Unit
                 // Act
                 // Send a message
                 string messageId = mailboxManager.SendMessage(
-                    recipientKeyPair.publicKey,
+                    recipientKeyPair.PublicKey,
                     "Test message that should be retained after transport failure",
                     Enums.MessageType.Chat);
 
@@ -447,27 +460,27 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning("==== Starting MultiDeviceSynchronization_ShouldRecoverFromMessageLoss ====");
 
             // Arrange
-            var mainDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
-            var secondDeviceKeyPair = KeyGenerator.GenerateEd25519KeyPair();
+            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
-            Trace.TraceWarning($"Main device key pair - Public: {Convert.ToBase64String(mainDeviceKeyPair.publicKey)}, " +
-                             $"Private: {Convert.ToBase64String(mainDeviceKeyPair.privateKey).Substring(0, 10)}...");
-            Trace.TraceWarning($"Second device key pair - Public: {Convert.ToBase64String(secondDeviceKeyPair.publicKey)}, " +
-                             $"Private: {Convert.ToBase64String(secondDeviceKeyPair.privateKey).Substring(0, 10)}...");
+            Trace.TraceWarning($"Main device key pair - Public: {Convert.ToBase64String(mainDeviceKeyPair.PublicKey)}, " +
+                             $"Private: {Convert.ToBase64String(mainDeviceKeyPair.PrivateKey).Substring(0, 10)}...");
+            Trace.TraceWarning($"Second device key pair - Public: {Convert.ToBase64String(secondDeviceKeyPair.PublicKey)}, " +
+                             $"Private: {Convert.ToBase64String(secondDeviceKeyPair.PrivateKey).Substring(0, 10)}...");
 
             // Convert to X25519 keys
-            byte[] mainDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey);
+            byte[] mainDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey);
             byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(mainDeviceX25519Private);
 
-            byte[] secondDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.privateKey);
+            byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
             byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
 
             Trace.TraceWarning($"Main device X25519 public key: {Convert.ToBase64String(mainDeviceX25519Public)}");
             Trace.TraceWarning($"Second device X25519 public key: {Convert.ToBase64String(secondDeviceX25519Public)}");
 
             // Let's manually test the key exchange works both ways
-            byte[] sharedSecret1 = X3DHExchange.X3DHKeyExchange(secondDeviceX25519Public, mainDeviceX25519Private);
-            byte[] sharedSecret2 = X3DHExchange.X3DHKeyExchange(mainDeviceX25519Public, secondDeviceX25519Private);
+            byte[] sharedSecret1 = X3DHExchange.PerformX25519DH(secondDeviceX25519Public, mainDeviceX25519Private);
+            byte[] sharedSecret2 = X3DHExchange.PerformX25519DH(mainDeviceX25519Public, secondDeviceX25519Private);
 
             Trace.TraceWarning($"Manual key exchange - Shared secret 1 length: {sharedSecret1.Length}, " +
                              $"Shared secret 2 length: {sharedSecret2.Length}");
@@ -506,7 +519,7 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning("Manually decrypting the sync message to verify it contains the expected data...");
             try
             {
-                byte[] manualPlaintext = AES.AESDecrypt(
+                byte[] manualPlaintext = _cryptoProvider.Decrypt(
                     syncMessageForSecondDevice.Ciphertext,
                     sharedSecret2,
                     syncMessageForSecondDevice.Nonce);
@@ -583,7 +596,7 @@ namespace LibEmiddle.Tests.Unit
                 Trace.TraceWarning("ProcessSyncMessage failed, applying manual extraction...");
                 try
                 {
-                    byte[] extractedPlaintext = AES.AESDecrypt(
+                    byte[] extractedPlaintext = _cryptoProvider.Decrypt(
                         syncMessageForSecondDevice.Ciphertext,
                         sharedSecret2,
                         syncMessageForSecondDevice.Nonce);
@@ -627,11 +640,11 @@ namespace LibEmiddle.Tests.Unit
         public void CrossDeviceSessionRestoration_ShouldWorkCorrectly()
         {
             // Arrange
-            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
 
             string sessionId = "cross-device-" + Guid.NewGuid().ToString();
@@ -639,11 +652,12 @@ namespace LibEmiddle.Tests.Unit
             // Create a session
             var originalSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 10,
+                messageNumberReceiving: 10,
+                messageNumberSending: 6,
                 sessionId: sessionId
             );
 
@@ -668,12 +682,13 @@ namespace LibEmiddle.Tests.Unit
 
             // On the "new device", deserialize and resume the session
             var restoredSession = SessionPersistence.DeserializeSession(serializedSession, encryptionKey);
-            var resumedSession = LibEmiddleClient.ResumeDoubleRatchetSession(restoredSession);
+            var resumedSession = DoubleRatchetExchange.ResumeSession(restoredSession);
 
             // Assert
             Assert.IsNotNull(resumedSession, "Session should be resumed successfully on new device");
             Assert.AreEqual(originalSession.SessionId, resumedSession.SessionId, "Session ID should match");
-            Assert.AreEqual(originalSession.MessageNumber, resumedSession.MessageNumber, "Message number should match");
+            Assert.AreEqual(originalSession.MessageNumberSending, resumedSession.MessageNumberSending, "Message number sending should match");
+            Assert.AreEqual(originalSession.MessageNumberReceiving, resumedSession.MessageNumberReceiving, "Message number receiving should match");
 
             // Verify message history is intact
             foreach (Guid msgId in processedIds)
@@ -684,7 +699,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Verify the resumed session can be used for communication
             string testMessage = "Message after session restoration";
-            var (updatedSession, encryptedMessage) = DoubleRatchet.DoubleRatchetEncrypt(resumedSession, testMessage);
+            var (updatedSession, encryptedMessage) = _cryptoProvider.DoubleRatchetEncrypt(resumedSession, testMessage);
 
             Assert.IsNotNull(updatedSession, "Should get valid updated session after encryption");
             Assert.IsNotNull(encryptedMessage, "Should be able to encrypt new message with resumed session");

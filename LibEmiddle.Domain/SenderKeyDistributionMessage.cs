@@ -1,4 +1,4 @@
-﻿namespace LibEmiddle.Models
+﻿namespace LibEmiddle.Domain
 {
     /// <summary>
     /// Sender key distribution message for group messaging
@@ -11,9 +11,15 @@
         public string? GroupId { get; set; }
 
         /// <summary>
-        /// Sender key for the group
+        /// Current chain key for the group
         /// </summary>
-        public byte[]? SenderKey { get; set; }
+        public byte[]? ChainKey { get; set; }
+
+        /// <summary>
+        /// Current iteration number of the chain key
+        /// This allows recipients to initialize their sender state correctly
+        /// </summary>
+        public uint Iteration { get; set; }
 
         /// <summary>
         /// Sender's identity key
@@ -21,7 +27,7 @@
         public byte[]? SenderIdentityKey { get; set; }
 
         /// <summary>
-        /// Signature of the sender key
+        /// Signature of the distribution message data
         /// </summary>
         public byte[]? Signature { get; set; }
 

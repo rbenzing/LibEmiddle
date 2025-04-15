@@ -17,9 +17,9 @@ namespace LibEmiddle.Messaging.Transport
     /// </remarks>
     /// <param name="identityKeyPair">The user's identity key pair</param>
     /// <param name="transport">The transport implementation to use</param>
-    public class MailboxManager((byte[] publicKey, byte[] privateKey) identityKeyPair, IMailboxTransport transport) : IDisposable
+    public class MailboxManager(KeyPair identityKeyPair, IMailboxTransport transport) : IDisposable
     {
-        private readonly (byte[] publicKey, byte[] privateKey) _identityKeyPair = identityKeyPair;
+        private readonly KeyPair _identityKeyPair = identityKeyPair;
         private readonly IMailboxTransport _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly ConcurrentDictionary<string, DoubleRatchetSession> _sessions =
@@ -134,7 +134,7 @@ namespace LibEmiddle.Messaging.Transport
                 return false;
 
             // Validate recipient is indeed us
-            if (!SecureMemory.SecureCompare(message.RecipientKey, _identityKeyPair.publicKey))
+            if (!SecureMemory.SecureCompare(message.RecipientKey, _identityKeyPair.PublicKey))
                 return false;
 
             // Check the encrypted payload
@@ -186,7 +186,7 @@ namespace LibEmiddle.Messaging.Transport
             var mailboxMessage = new MailboxMessage
             {
                 RecipientKey = recipientKey,
-                SenderKey = _identityKeyPair.publicKey,
+                SenderKey = _identityKeyPair.PublicKey,
                 EncryptedPayload = encryptedPayload,
                 Type = messageType,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
@@ -342,9 +342,9 @@ namespace LibEmiddle.Messaging.Transport
             // This is a simplified implementation for integration purposes
 
             // Convert to X25519 for key exchange if needed
-            byte[] x25519PrivateKey = _identityKeyPair.privateKey.Length != Constants.X25519_KEY_SIZE ?
-                KeyConversion.DeriveX25519PrivateKeyFromEd25519(_identityKeyPair.privateKey) :
-                _identityKeyPair.privateKey;
+            byte[] x25519PrivateKey = _identityKeyPair.PrivateKey.Length != Constants.X25519_KEY_SIZE ?
+                KeyConversion.DeriveX25519PrivateKeyFromEd25519(_identityKeyPair.PrivateKey) :
+                _identityKeyPair.PrivateKey;
 
             // Ensure contact key is in X25519 format
             byte[] contactX25519Key = contactKey.Length != Constants.X25519_KEY_SIZE ?
@@ -352,7 +352,7 @@ namespace LibEmiddle.Messaging.Transport
                 contactKey;
 
             // Perform key exchange  
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(contactX25519Key, x25519PrivateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(contactX25519Key, x25519PrivateKey);
 
             // Initialize Double Ratchet
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
@@ -361,12 +361,13 @@ namespace LibEmiddle.Messaging.Transport
             string sessionId = $"session-{contactId}-{Guid.NewGuid()}";
 
             session = new DoubleRatchetSession(
-                dhRatchetKeyPair: (_identityKeyPair.publicKey, x25519PrivateKey),
+                dhRatchetKeyPair: new KeyPair(_identityKeyPair.PublicKey, x25519PrivateKey),
                 remoteDHRatchetKey: contactX25519Key,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberSending: 0,
+                messageNumberReceiving: 0,
                 sessionId: sessionId
             );
 
@@ -402,7 +403,7 @@ namespace LibEmiddle.Messaging.Transport
                 try
                 {
                     // Fetch new messages
-                    var messages = await _transport.FetchMessagesAsync(_identityKeyPair.publicKey, cancellationToken);
+                    var messages = await _transport.FetchMessagesAsync(_identityKeyPair.PublicKey, cancellationToken);
 
                     foreach (var message in messages)
                     {

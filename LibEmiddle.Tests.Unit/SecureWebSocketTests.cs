@@ -9,10 +9,10 @@ using System.Threading;
 using System.Security;
 using System.Text.Json;
 using LibEmiddle.Abstractions;
-using LibEmiddle.Crypto;
 using LibEmiddle.KeyExchange;
-using LibEmiddle.Models;
+using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -22,26 +22,29 @@ namespace LibEmiddle.Tests.Unit
         private Mock<IWebSocketClient> _mockWebSocket;
         private DoubleRatchetSession _testSession;
         private readonly string _serverUrl = "wss://test.example.com";
+        private CryptoProvider _cryptoProvider;
 
         [TestInitialize]
         public void Setup()
         {
             _mockWebSocket = new Mock<IWebSocketClient>();
+            _cryptoProvider = new CryptoProvider();
 
             // Create a test session simulating key exchange and session initialization
-            var aliceKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            var bobKeyPair = KeyGenerator.GenerateX25519KeyPair();
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(bobKeyPair.publicKey, aliceKeyPair.privateKey);
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
             string sessionId = "test-session-" + Guid.NewGuid().ToString();
 
             _testSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.publicKey,
+                remoteDHRatchetKey: bobKeyPair.PublicKey,
                 rootKey: rootKey,
                 sendingChainKey: chainKey,
                 receivingChainKey: chainKey,
-                messageNumber: 0,
+                messageNumberReceiving: 0,
+                messageNumberSending: 0,
                 sessionId: sessionId
             );
         }

@@ -5,7 +5,6 @@ using LibEmiddle.Core;
 using LibEmiddle.Messaging.Transport;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.Models;
 
 namespace LibEmiddle.MultiDevice
 {
@@ -81,16 +80,16 @@ namespace LibEmiddle.MultiDevice
         /// (Implementation remains unchanged for brevity.)
         /// </summary>
         public static EncryptedMessage CreateDeviceLinkMessage(
-            (byte[] publicKey, byte[] privateKey) mainDeviceKeyPair,
+            KeyPair mainDeviceKeyPair,
             byte[] newDevicePublicKey)
         {
             // Validate that the main device key pair is in Ed25519 format.
-            if (mainDeviceKeyPair.publicKey == null)
-                throw new ArgumentNullException(nameof(mainDeviceKeyPair.publicKey));
-            if (mainDeviceKeyPair.privateKey == null)
-                throw new ArgumentNullException(nameof(mainDeviceKeyPair.privateKey));
-            if (mainDeviceKeyPair.publicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE ||
-                mainDeviceKeyPair.privateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
+            if (mainDeviceKeyPair.PublicKey == null)
+                throw new ArgumentNullException(nameof(mainDeviceKeyPair.PublicKey));
+            if (mainDeviceKeyPair.PrivateKey == null)
+                throw new ArgumentNullException(nameof(mainDeviceKeyPair.PrivateKey));
+            if (mainDeviceKeyPair.PublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE ||
+                mainDeviceKeyPair.PrivateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
             {
                 throw new ArgumentException("Main device key pair must be an Ed25519 key pair.", nameof(mainDeviceKeyPair));
             }
@@ -98,22 +97,22 @@ namespace LibEmiddle.MultiDevice
                 throw new ArgumentNullException(nameof(newDevicePublicKey));
 
             // Convert main device's Ed25519 private key to X25519.
-            byte[] mainDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.privateKey);
+            byte[] mainDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey);
             // Compute the main device's X25519 public key.
             byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(mainDeviceX25519Private);
             // Convert new device's Ed25519 public key to X25519.
             byte[] newDeviceX25519Public = KeyConversion.ConvertEd25519PublicKeyToX25519(newDevicePublicKey);
 
             // Compute the shared secret using X3DH.
-            byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(newDeviceX25519Public, mainDeviceX25519Private);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(newDeviceX25519Public, mainDeviceX25519Private);
 
             // Sign the new device's original Ed25519 public key using the main device's Ed25519 private key.
-            byte[] signature = MessageSigning.SignMessage(newDevicePublicKey, mainDeviceKeyPair.privateKey);
+            byte[] signature = MessageSigning.SignMessage(newDevicePublicKey, mainDeviceKeyPair.PrivateKey);
 
             // Build the payload.
             var payload = new
             {
-                mainDevicePublicKey = Convert.ToBase64String(mainDeviceKeyPair.publicKey),
+                mainDevicePublicKey = Convert.ToBase64String(mainDeviceKeyPair.PublicKey),
                 signature = Convert.ToBase64String(signature)
             };
             string json = System.Text.Json.JsonSerializer.Serialize(payload);
@@ -138,7 +137,7 @@ namespace LibEmiddle.MultiDevice
         /// </summary>
         public static byte[]? ProcessDeviceLinkMessage(
             EncryptedMessage encryptedMessage,
-            (byte[] publicKey, byte[] privateKey) newDeviceKeyPair,
+            KeyPair newDeviceKeyPair,
             byte[] mainDevicePublicKey)
         {
             if (encryptedMessage == null)
@@ -151,10 +150,10 @@ namespace LibEmiddle.MultiDevice
                 LoggingManager.LogWarning(nameof(DeviceLinking), "Device link message missing required fields (ciphertext, nonce, or SenderDHKey).");
                 return null;
             }
-            if (newDeviceKeyPair.publicKey == null)
-                throw new ArgumentNullException(nameof(newDeviceKeyPair.publicKey));
-            if (newDeviceKeyPair.privateKey == null)
-                throw new ArgumentNullException(nameof(newDeviceKeyPair.privateKey));
+            if (newDeviceKeyPair.PublicKey == null)
+                throw new ArgumentNullException(nameof(newDeviceKeyPair.PublicKey));
+            if (newDeviceKeyPair.PrivateKey == null)
+                throw new ArgumentNullException(nameof(newDeviceKeyPair.PrivateKey));
             if (mainDevicePublicKey == null)
                 throw new ArgumentNullException(nameof(mainDevicePublicKey));
 
@@ -169,7 +168,7 @@ namespace LibEmiddle.MultiDevice
                 }
 
                 // Convert the new device's Ed25519 private key to X25519.
-                byte[] newDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(newDeviceKeyPair.privateKey);
+                byte[] newDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(newDeviceKeyPair.PrivateKey);
 
                 // Retrieve the main device's X25519 public key from SenderDHKey.
                 byte[] mainDeviceX25519Public = encryptedMessage.SenderDHKey;
@@ -179,7 +178,7 @@ namespace LibEmiddle.MultiDevice
                 }
 
                 // Compute the shared secret.
-                byte[] sharedSecret = X3DHExchange.X3DHKeyExchange(mainDeviceX25519Public, newDeviceX25519Private);
+                byte[] sharedSecret = X3DHExchange.PerformX25519DH(mainDeviceX25519Public, newDeviceX25519Private);
 
                 // Decrypt the ciphertext.
                 byte[] plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, sharedSecret, encryptedMessage.Nonce);
@@ -204,7 +203,7 @@ namespace LibEmiddle.MultiDevice
                 }
 
                 // Verify that the main device signed the new device's original Ed25519 public key.
-                if (MessageSigning.VerifySignature(newDeviceKeyPair.publicKey, signature, mainDeviceEd25519Public))
+                if (MessageSigning.VerifySignature(newDeviceKeyPair.PublicKey, signature, mainDeviceEd25519Public))
                 {
                     return mainDeviceEd25519Public;
                 }
