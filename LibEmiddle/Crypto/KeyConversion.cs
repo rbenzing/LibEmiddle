@@ -17,7 +17,7 @@ namespace LibEmiddle.Crypto
         /// <exception cref="ArgumentNullException">Thrown when input key is null</exception>
         /// <exception cref="ArgumentException">Thrown when input key has an invalid length</exception>
         /// <exception cref="CryptographicException">Thrown when key conversion fails</exception>
-        public static byte[] ConvertEd25519PublicKeyToX25519(byte[] ed25519PublicKey)
+        public static byte[] ConvertEd25519PublicKeyToX25519(in ReadOnlySpan<byte> ed25519PublicKey)
         {
             // Null check with descriptive message
             ArgumentNullException.ThrowIfNull(nameof(ed25519PublicKey),
@@ -39,7 +39,7 @@ namespace LibEmiddle.Crypto
             {
                 // Use libsodium's secure conversion method
                 byte[] x25519PublicKey = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
-                int conversionResult = Sodium.crypto_sign_ed25519_pk_to_curve25519(x25519PublicKey, ed25519PublicKey);
+                int conversionResult = Sodium.crypto_sign_ed25519_pk_to_curve25519(x25519PublicKey, ed25519PublicKey.ToArray());
 
                 if (conversionResult != 0)
                 {
@@ -90,10 +90,10 @@ namespace LibEmiddle.Crypto
         /// <exception cref="ArgumentNullException">Thrown when input key is null</exception>
         /// <exception cref="ArgumentException">Thrown when input key has an invalid length</exception>
         /// <exception cref="CryptographicException">Thrown when key derivation fails</exception>
-        public static byte[] DeriveX25519PrivateKeyFromEd25519(byte[] ed25519PrivateKey)
+        public static byte[] DeriveX25519PrivateKeyFromEd25519(in ReadOnlySpan<byte> ed25519PrivateKey)
         {
-            ArgumentNullException.ThrowIfNull(nameof(ed25519PrivateKey),
-                "Ed25519 private key cannot be null.");
+            if (ed25519PrivateKey.IsEmpty)
+                throw new ArgumentException("Ed25519 private key cannot be empty.", nameof(ed25519PrivateKey));
 
             // Handle different input key lengths
             byte[] sourceKey;
@@ -101,13 +101,13 @@ namespace LibEmiddle.Crypto
             {
                 // If already 32 bytes, create a secure copy
                 sourceKey = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
-                ed25519PrivateKey.AsSpan(0, Constants.X25519_KEY_SIZE).CopyTo(sourceKey.AsSpan());
+                ed25519PrivateKey.Slice(0, Constants.X25519_KEY_SIZE).CopyTo(sourceKey.AsSpan());
             }
             else if (ed25519PrivateKey.Length == Constants.ED25519_PRIVATE_KEY_SIZE)
             {
                 // Extract seed from 64-byte Ed25519 private key
                 sourceKey = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
-                ed25519PrivateKey.AsSpan(0, Constants.X25519_KEY_SIZE).CopyTo(sourceKey.AsSpan());
+                ed25519PrivateKey.Slice(0, Constants.X25519_KEY_SIZE).CopyTo(sourceKey.AsSpan());
             }
             else
             {
@@ -156,26 +156,26 @@ namespace LibEmiddle.Crypto
         /// <param name="outputLength">Desired output key material length</param>
         /// <returns>Derived key material</returns>
         public static byte[] HkdfDerive(
-            byte[] inputKeyMaterial,
-            byte[]? salt = null,
-            byte[]? info = null,
+            in ReadOnlySpan<byte> inputKeyMaterial,
+            in ReadOnlySpan<byte> salt = default,
+            in ReadOnlySpan<byte> info = default,
             int outputLength = 32)
         {
             // Use empty byte array if salt is null
-            salt ??= new byte[32];
+            ReadOnlySpan<byte> saltSpan = salt;
 
             // Use empty byte array if info is null
-            info ??= Array.Empty<byte>();
+            ReadOnlySpan<byte> infoSpan = info;
 
             // Allocate buffer for PRK (pseudorandom key)
-            byte[] prk = new byte[32];
+            byte[] prk = SecureMemory.CreateSecureBuffer(32);
 
             // Extract step
             int extractResult = Sodium.crypto_kdf_hkdf_sha256_extract(
                 prk,
-                salt,
-                (nuint)salt.Length,
-                inputKeyMaterial,
+                saltSpan.IsEmpty ? null : saltSpan.ToArray(),
+                (nuint)saltSpan.Length,
+                inputKeyMaterial.ToArray(),
                 (nuint)inputKeyMaterial.Length
             );
 
@@ -189,8 +189,8 @@ namespace LibEmiddle.Crypto
             int expandResult = Sodium.crypto_kdf_hkdf_sha256_expand(
                 output,
                 (nuint)outputLength,
-                info,
-                (nuint)(info?.Length ?? 0),
+                info.ToArray(),
+                (nuint)(info.Length),
                 prk
             );
 
@@ -205,7 +205,7 @@ namespace LibEmiddle.Crypto
         /// </summary>
         /// <param name="key">The key to export</param>
         /// <returns>Base64 encoded string representation of the key</returns>
-        public static string ExportKeyToBase64(byte[] key)
+        public static string ExportKeyToBase64(in ReadOnlySpan<byte> key)
         {
             return Convert.ToBase64String(key);
         }

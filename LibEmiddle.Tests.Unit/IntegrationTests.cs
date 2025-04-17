@@ -43,15 +43,19 @@ namespace LibEmiddle.Tests.Unit
             string sessionId = $"session-{Guid.NewGuid()}";
 
             // Step 4: Alice initializes her Double Ratchet session - using correct method from DoubleRatchet class
-            var aliceDRSession = DoubleRatchetExchange.InitializeDoubleRatchet(senderSessionResult.SharedKey);
+            var aliceDRSession = _cryptoProvider.InitializeSessionAsSender(
+                senderSessionResult.SharedKey, 
+                aliceIdentityKeyPair, 
+                bobKeyBundle.SignedPreKey,
+                sessionId);
 
             // Create Alice's initial session using the root key and chain key from initialization
             aliceDRSession = new DoubleRatchetSession(
                 dhRatchetKeyPair: _cryptoProvider.GenerateKeyPair(KeyType.X25519),
                 remoteDHRatchetKey: bobKeyBundle.SignedPreKey,
-                rootKey: aliceDRSession.rootKey,
-                sendingChainKey: aliceDRSession.chainKey,
-                receivingChainKey: null,
+                rootKey: aliceDRSession.RootKey,
+                sendingChainKey: aliceDRSession.SendingChainKey,
+                receivingChainKey: aliceDRSession.ReceivingChainKey,
                 messageNumberSending: 0,
                 messageNumberReceiving: 0,
                 sessionId: sessionId
@@ -68,7 +72,11 @@ namespace LibEmiddle.Tests.Unit
                 bobKeyBundle);
 
             // Step 7: Bob initializes his Double Ratchet session
-            var bobDRInit = DoubleRatchetExchange.InitializeDoubleRatchet(bobSharedKey);
+            var bobDRInit = _cryptoProvider.InitializeSessionAsReceiver(
+                bobSharedKey,
+                bobIdentityKeyPair, 
+                aliceIdentityKeyPair.PublicKey, 
+                sessionId);
 
             // Create Bob's initial session
             var bobDRSession = new DoubleRatchetSession(
@@ -77,9 +85,9 @@ namespace LibEmiddle.Tests.Unit
                     bobKeyBundle.GetSignedPreKeyPrivate()
                 ),
                 remoteDHRatchetKey: encryptedMessage.SenderDHKey,
-                rootKey: bobDRInit.rootKey,
-                sendingChainKey: null,
-                receivingChainKey: bobDRInit.chainKey,
+                rootKey: bobDRInit.RootKey,
+                sendingChainKey: bobDRInit.SendingChainKey,
+                receivingChainKey: bobDRInit.ReceivingChainKey,
                 messageNumberSending: 0,
                 messageNumberReceiving: 0,
                 sessionId: sessionId

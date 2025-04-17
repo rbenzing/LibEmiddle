@@ -1,17 +1,10 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic; // Required for KeyNotFoundException, Dictionary
+﻿using System.Collections.Concurrent;
 using System.Collections.Immutable; // Required for ImmutableDictionary, ImmutableList, ImmutableHashSet
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using LibEmiddle.Core; // For Constants, SecureMemory, Helpers
 using LibEmiddle.Domain; // For DoubleRatchetSession, EncryptedMessage, etc.
 using LibEmiddle.KeyExchange; // For X3DHExchange static class access, InitialMessageData
-using LibEmiddle.Models; // For KeyPair
-using LibEmiddle.Crypto; // For KeyGenerator, KeyConversion, AES, NonceGenerator, etc.
 
 namespace LibEmiddle.Crypto
 {
@@ -23,12 +16,12 @@ namespace LibEmiddle.Crypto
     internal static class DoubleRatchet
     {
         // --- Constants for KDFs ---
-        private static readonly byte[] HkdfSalt = new byte[32]; // 32 zero bytes for HKDF salt
-        private static readonly byte[] InfoRootKeyUpdate = Encoding.UTF8.GetBytes("EmiddleRK_v1"); // Example RK KDF Info
+        private static readonly byte[] InfoRootKeyUpdate = 
+            Encoding.UTF8.GetBytes($"{ProtocolVersion.PROTOCOL_ID}_{ProtocolVersion.MAJOR_VERSION}_{ProtocolVersion.MINOR_VERSION}");
         private const byte MESSAGE_KEY_SEED_BYTE = 0x01; // Seed byte for deriving Message Key via HMAC
         private const byte CHAIN_KEY_SEED_BYTE = 0x02; // Seed byte for deriving next Chain Key via HMAC
-        private static readonly byte[] MessageKeySeed = new byte[] { MESSAGE_KEY_SEED_BYTE }; // Pre-allocate
-        private static readonly byte[] ChainKeySeed = new byte[] { CHAIN_KEY_SEED_BYTE }; // Pre-allocate
+        private static readonly byte[] MessageKeySeed = [MESSAGE_KEY_SEED_BYTE]; // Pre-allocate
+        private static readonly byte[] ChainKeySeed = [CHAIN_KEY_SEED_BYTE]; // Pre-allocate
 
         // --- Session Locking (for async wrappers) ---
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionLocks = new();
@@ -37,6 +30,151 @@ namespace LibEmiddle.Crypto
         private static readonly TimeSpan LOCK_MAX_UNUSED_TIME = TimeSpan.FromMinutes(10);
 
         // --- Double Ratchet Initialization ---
+        /// <summary>
+        /// Derrives the Double Ratchet keypair from a shared key (typically from X3DH).
+        /// Creates the initial root key and chain key for the Double Ratchet session.
+        /// </summary>
+        /// <param name="sharedKey">32-byte shared secret derived from X3DH key agreement.</param>
+        /// <returns>A tuple containing (rootKey, chainKey) used to initialize the Double Ratchet session.</returns>
+        /// <exception cref="ArgumentException">Thrown when sharedKey is empty or has invalid length.</exception>
+        /// <exception cref="CryptographicException">Thrown when key derivation fails.</exception>
+        public static (byte[] rootKey, byte[] chainKey) DerriveDoubleRatchet(in ReadOnlySpan<byte> sharedKey)
+        {
+            if (sharedKey.IsEmpty)
+                throw new ArgumentException("Shared key cannot be empty", nameof(sharedKey));
+
+            if (sharedKey.Length != Constants.AES_KEY_SIZE)
+                throw new ArgumentException($"Shared key must be {Constants.AES_KEY_SIZE} bytes", nameof(sharedKey));
+
+            try
+            {
+                // Derive a 64-byte key material using HKDF from the shared key
+                byte[] derivedKeyMaterial = KeyConversion.HkdfDerive(
+                    inputKeyMaterial: sharedKey.ToArray(), // Convert to array for compatibility with HkdfDerive
+                    salt: null, // Using default salt (optional)
+                    info: Encoding.UTF8.GetBytes("DR_INIT"), // Double Ratchet initialization info
+                    outputLength: Constants.AES_KEY_SIZE * 2); // 64 bytes: 32 for root key, 32 for chain key
+
+                // Create result arrays
+                byte[] rootKey = new byte[Constants.AES_KEY_SIZE];
+                byte[] chainKey = new byte[Constants.AES_KEY_SIZE];
+
+                // Use Span<T> to efficiently copy portions of the derived key material
+                derivedKeyMaterial.AsSpan(0, Constants.AES_KEY_SIZE).CopyTo(rootKey);
+                derivedKeyMaterial.AsSpan(Constants.AES_KEY_SIZE, Constants.AES_KEY_SIZE).CopyTo(chainKey);
+
+                // Securely clear the intermediate derived key material
+                SecureMemory.SecureClear(derivedKeyMaterial);
+
+                LoggingManager.LogDebug(nameof(DoubleRatchet), "Double Ratchet initial keys derived successfully");
+                return (rootKey, chainKey);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(DoubleRatchet), $"Failed to initialize Double Ratchet: {ex.Message}");
+                throw new CryptographicException("Double Ratchet initialization failed", ex);
+            }
+        }
+
+        /// <summary>
+        /// Enhanced initialization method that creates a complete Double Ratchet session
+        /// with support for both sender and receiver roles.
+        /// </summary>
+        /// <param name="sharedKeyFromX3DH">The 32-byte shared secret from X3DH exchange</param>
+        /// <param name="localKeyPair">Local DH key pair (sender's new key pair or receiver's SPK pair)</param>
+        /// <param name="remotePublicKey">Remote party's public key (recipient's SPK or sender's EK)</param>
+        /// <param name="sessionId">Optional session ID, will generate if not provided</param>
+        /// <param name="isInitiator">True if initializing as sender, false as receiver. Default: true</param>
+        /// <returns>Fully initialized Double Ratchet session</returns>
+        /// <exception cref="ArgumentNullException">If required parameters are null</exception>
+        /// <exception cref="ArgumentException">If parameters have invalid format</exception>
+        /// <exception cref="CryptographicException">If cryptographic operations fail</exception>
+        public static DoubleRatchetSession InitializeDoubleRatchet(
+            byte[] sharedKeyFromX3DH,
+            KeyPair localKeyPair,
+            byte[] remotePublicKey,
+            string? sessionId = null,
+            bool isInitiator = true)
+        {
+            // --- Validation ---
+            ArgumentNullException.ThrowIfNull(sharedKeyFromX3DH, nameof(sharedKeyFromX3DH));
+
+            if (localKeyPair.PublicKey == null || localKeyPair.PrivateKey == null)
+                throw new ArgumentException("Local key pair must have both public and private keys", nameof(localKeyPair));
+
+            ArgumentNullException.ThrowIfNull(remotePublicKey, nameof(remotePublicKey));
+
+            // Size validation
+            if (sharedKeyFromX3DH.Length != Constants.AES_KEY_SIZE)
+                throw new ArgumentException($"Invalid X3DH shared key size. Expected {Constants.AES_KEY_SIZE}, got {sharedKeyFromX3DH.Length}.", nameof(sharedKeyFromX3DH));
+
+            if (localKeyPair.PrivateKey.Length != Constants.X25519_KEY_SIZE || localKeyPair.PublicKey.Length != Constants.X25519_KEY_SIZE)
+                throw new ArgumentException($"Invalid local key pair size. Keys must be {Constants.X25519_KEY_SIZE} bytes.", nameof(localKeyPair));
+
+            if (remotePublicKey.Length != Constants.X25519_KEY_SIZE)
+                throw new ArgumentException($"Invalid remote public key size. Expected {Constants.X25519_KEY_SIZE}, got {remotePublicKey.Length}.", nameof(remotePublicKey));
+
+            byte[]? dhOutput = null;
+
+            try
+            {
+                if (isInitiator) // Sender initialization path
+                {
+                    // Sender computes DH with its own private key and recipient's public key
+                    dhOutput = X3DHExchange.PerformX25519DH(localKeyPair.PrivateKey, remotePublicKey);
+
+                    // Derive RK, CKs using the KDF
+                    var (rootKey, sendingChainKey) = KdfRootKey(sharedKeyFromX3DH, dhOutput);
+
+                    // Create sender's initial state
+                    return new DoubleRatchetSession(
+                        dhRatchetKeyPair: localKeyPair,
+                        remoteDHRatchetKey: remotePublicKey,
+                        rootKey: rootKey,
+                        sendingChainKey: sendingChainKey,
+                        receivingChainKey: null, // Sender has no receiving chain initially
+                        messageNumberSending: 0,
+                        messageNumberReceiving: 0,
+                        sessionId: sessionId ?? Guid.NewGuid().ToString(),
+                        recentlyProcessedIds: ImmutableList<Guid>.Empty,
+                        processedMessageNumbersReceiving: ImmutableHashSet<int>.Empty,
+                        skippedMessageKeys: ImmutableDictionary<Tuple<byte[], int>, byte[]>.Empty
+                    );
+                }
+                else // Receiver initialization path
+                {
+                    // Receiver computes DH with its own private key and sender's public key
+                    dhOutput = X3DHExchange.PerformX25519DH(localKeyPair.PrivateKey, remotePublicKey);
+
+                    // Derive RK, CKr using the KDF
+                    var (rootKey, receivingChainKey) = KdfRootKey(sharedKeyFromX3DH, dhOutput);
+
+                    // Create receiver's initial state
+                    return new DoubleRatchetSession(
+                        dhRatchetKeyPair: localKeyPair,
+                        remoteDHRatchetKey: remotePublicKey,
+                        rootKey: rootKey,
+                        sendingChainKey: null, // Receiver has no sending chain initially
+                        receivingChainKey: receivingChainKey,
+                        messageNumberSending: 0,
+                        messageNumberReceiving: 0,
+                        sessionId: sessionId ?? Guid.NewGuid().ToString(),
+                        recentlyProcessedIds: ImmutableList<Guid>.Empty,
+                        processedMessageNumbersReceiving: ImmutableHashSet<int>.Empty,
+                        skippedMessageKeys: ImmutableDictionary<Tuple<byte[], int>, byte[]>.Empty
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(DoubleRatchet), $"Session initialization failed: {ex.Message}");
+                throw new CryptographicException($"Failed to initialize {(isInitiator ? "sender" : "receiver")} session.", ex);
+            }
+            finally
+            {
+                SecureMemory.SecureClear(dhOutput);
+            }
+        }
 
         /// <summary>
         /// Initializes a Double Ratchet session for the initiator (Sender/Alice)
@@ -253,7 +391,6 @@ namespace LibEmiddle.Crypto
             }
         }
 
-
         /// <summary>
         /// Decrypts a message using the Double Ratchet algorithm. Handles DH ratchet steps and skipped messages.
         /// </summary>
@@ -280,7 +417,6 @@ namespace LibEmiddle.Crypto
                 LoggingManager.LogWarning(nameof(DoubleRatchet), $"Invalid message timestamp {encryptedMessage.Timestamp} for message {encryptedMessage.MessageId}");
                 return (null, null);
             }
-
 
             DoubleRatchetSession currentSessionState = session; // Use local var for state updates
             byte[]? messageKey = null;
@@ -399,7 +535,6 @@ namespace LibEmiddle.Crypto
                     SecureMemory.SecureClear(currentReceivingChainKey); // Clear final temp chain key
                 }
 
-
                 // --- Decryption ---
                 if (messageKey == null)
                 {
@@ -449,10 +584,70 @@ namespace LibEmiddle.Crypto
                 // Ensure intermediates are cleared
                 SecureMemory.SecureClear(dhOutput);
                 SecureMemory.SecureClear(newKeyPair?.PrivateKey); // Clear newly generated private key if not used
-                                                                  // messageKey is cleared by SecureArray
+                // messageKey is cleared by SecureArray
             }
         }
 
+        /// <summary>
+        /// Validates that a DoubleRatchetSession is properly initialized with required keys and valid state.
+        /// Used to verify session integrity before performing cryptographic operations.
+        /// </summary>
+        /// <param name="session">The DoubleRatchetSession to validate.</param>
+        /// <returns>True if the session is valid and can be used for cryptographic operations, false otherwise.</returns>
+        public static bool ValidateSession(DoubleRatchetSession? session)
+        {
+            // Check for null session
+            if (session == null)
+                return false;
+
+            try
+            {
+                // Validate required components
+                if (session.RootKey == null || session.RootKey.Length != Constants.AES_KEY_SIZE)
+                    return false;
+
+                // DHRatchetKeyPair validation (need both keys)
+                if (session.DHRatchetKeyPair.PublicKey == null ||
+                    session.DHRatchetKeyPair.PrivateKey == null ||
+                    session.DHRatchetKeyPair.PublicKey.Length != Constants.X25519_KEY_SIZE ||
+                    session.DHRatchetKeyPair.PrivateKey.Length != Constants.X25519_KEY_SIZE)
+                    return false;
+
+                // Remote DHRatchet key validation
+                if (session.RemoteDHRatchetKey == null ||
+                    session.RemoteDHRatchetKey.Length != Constants.X25519_KEY_SIZE)
+                    return false;
+
+                // Validate X25519 public keys
+                if (!KeyValidation.ValidateX25519PublicKey(session.DHRatchetKeyPair.PublicKey) ||
+                    !KeyValidation.ValidateX25519PublicKey(session.RemoteDHRatchetKey))
+                    return false;
+
+                // SessionId should not be null or empty
+                if (string.IsNullOrEmpty(session.SessionId))
+                    return false;
+
+                // Chain keys can be null initially, but if present must be valid size
+                if (session.SendingChainKey != null && session.SendingChainKey.Length != Constants.AES_KEY_SIZE)
+                    return false;
+
+                if (session.ReceivingChainKey != null && session.ReceivingChainKey.Length != Constants.AES_KEY_SIZE)
+                    return false;
+
+                // Message numbers should be non-negative
+                if (session.MessageNumberSending < 0 || session.MessageNumberReceiving < 0)
+                    return false;
+
+                // All validation checks passed
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Log any unexpected errors during validation
+                LoggingManager.LogError(nameof(DoubleRatchet), $"Error validating session: {ex.Message}");
+                return false;
+            }
+        }
 
         // --- Async Wrappers ---
         public static async Task<(DoubleRatchetSession? updatedSession, EncryptedMessage? encryptedMessage)>
@@ -499,10 +694,42 @@ namespace LibEmiddle.Crypto
         }
 
         // --- Session Locking Management & Helpers ---
-        private static SemaphoreSlim GetSessionLock(string sessionId) { /* ... As before ... */ _lockLastUsed[sessionId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); return _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1)); }
-        private static void CleanupUnusedLocksIfNeeded() { if (_sessionLocks.Count > LOCK_CLEANUP_THRESHOLD) { Task.Run(() => CleanupUnusedLocks()); } }
-        private static void CleanupUnusedLocks() { /* ... As before ... */ try { long cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (long)LOCK_MAX_UNUSED_TIME.TotalMilliseconds; var expired = _lockLastUsed.Where(e => e.Value < cutoff).Select(e => e.Key).Take(100).ToList(); int removed = 0; foreach (var sid in expired) { if (_lockLastUsed.TryRemove(sid, out _) && _sessionLocks.TryRemove(sid, out var sem)) { sem.Dispose(); removed++; } } if (removed > 0) LoggingManager.LogInformation(nameof(DoubleRatchet), $"Cleaned {removed} expired session locks."); } catch (Exception ex) { LoggingManager.LogWarning(nameof(DoubleRatchet), $"Lock cleanup error: {ex.Message}"); } }
-        private static bool IsTimestampValid(long messageTimestamp) { /* ... As before ... */ const long expirationThreshold = 5 * 60 * 1000; const long futureTolerance = 10 * 1000; long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); if (messageTimestamp > now + futureTolerance) return false; if (messageTimestamp < now - expirationThreshold) return false; return true; }
+        private static SemaphoreSlim GetSessionLock(string sessionId) { 
+            _lockLastUsed[sessionId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); 
+            return _sessionLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1)); 
+        }
+        private static void CleanupUnusedLocksIfNeeded() { 
+            if (_sessionLocks.Count > LOCK_CLEANUP_THRESHOLD) { 
+                Task.Run(() => CleanupUnusedLocks()); 
+            } 
+        }
+        private static void CleanupUnusedLocks() { 
+            try { 
+                long cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (long)LOCK_MAX_UNUSED_TIME.TotalMilliseconds; 
+                var expired = _lockLastUsed.Where(e => e.Value < cutoff).Select(e => e.Key).Take(100).ToList(); 
+                int removed = 0; foreach (var sid in expired) { 
+                    if (_lockLastUsed.TryRemove(sid, out _) && 
+                        _sessionLocks.TryRemove(sid, out var sem)) { 
+                            sem.Dispose(); 
+                            removed++; 
+                        } 
+                    } 
+                    if (removed > 0) 
+                        LoggingManager.LogInformation(nameof(DoubleRatchet), $"Cleaned {removed} expired session locks."); 
+            } catch (Exception ex) { 
+                LoggingManager.LogWarning(nameof(DoubleRatchet), $"Lock cleanup error: {ex.Message}"); 
+            } 
+        }
+        private static bool IsTimestampValid(long messageTimestamp) { 
+            const long expirationThreshold = 5 * 60 * 1000; 
+            const long futureTolerance = 10 * 1000; 
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); 
+            if (messageTimestamp > now + futureTolerance) 
+                return false; 
+            if (messageTimestamp < now - expirationThreshold) 
+                return false; 
+            return true; 
+        }
     }
 
 

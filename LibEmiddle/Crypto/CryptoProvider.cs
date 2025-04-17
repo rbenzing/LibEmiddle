@@ -194,8 +194,8 @@ namespace LibEmiddle.Crypto
             ArgumentNullException.ThrowIfNullOrEmpty(recipientSignedPreKeyPublic.ToString(), nameof(recipientSignedPreKeyPublic));
             ArgumentNullException.ThrowIfNullOrEmpty(sessionId, nameof(sessionId));
 
-            return DoubleRatchet.InitializeSessionAsSender(sharedKeyFromX3DH, senderIdentityKeyPair, 
-                recipientSignedPreKeyPublic, sessionId);
+            return DoubleRatchet.InitializeDoubleRatchet(sharedKeyFromX3DH, senderIdentityKeyPair, 
+                recipientSignedPreKeyPublic, sessionId, true);
         }
 
         /// <summary>
@@ -218,8 +218,8 @@ namespace LibEmiddle.Crypto
             ArgumentNullException.ThrowIfNullOrEmpty(senderEphemeralKeyPublic.ToString(), nameof(senderEphemeralKeyPublic));
             ArgumentNullException.ThrowIfNullOrEmpty(sessionId, nameof(sessionId));
 
-            return DoubleRatchet.InitializeSessionAsReceiver(sharedKeyFromX3DH, receiverSignedPreKeyPair,
-                senderEphemeralKeyPublic, sessionId);
+            return DoubleRatchet.InitializeDoubleRatchet(sharedKeyFromX3DH, receiverSignedPreKeyPair,
+                senderEphemeralKeyPublic, sessionId, false);
         }
 
         /// <summary>

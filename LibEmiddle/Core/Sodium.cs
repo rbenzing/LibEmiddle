@@ -399,13 +399,13 @@ namespace LibEmiddle.Core
         /// Computes a shared secret using X25519 key exchange.
         /// </summary>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern int crypto_scalarmult_curve25519(byte[] q, byte[] n, byte[] p);
+        public static extern unsafe int crypto_scalarmult_curve25519(byte* q, byte* n, byte* p);
 
         /// <summary>
         /// Computes the public key from a private key using X25519.
         /// </summary>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-        public static extern int crypto_scalarmult_curve25519_base(byte[] q, byte[] n);
+        public static extern unsafe int crypto_scalarmult_curve25519_base(byte* q, byte* n);
 
         #endregion
 
@@ -525,22 +525,21 @@ namespace LibEmiddle.Core
         /// Fills a buffer with random bytes using libsodium's cryptographically secure random number generator.
         /// </summary>
         /// <param name="buffer">The buffer to fill with random data.</param>
-        public static void RandomBytes(byte[] buffer)
+        public static void RandomBytes(Span<byte> buffer)
         {
-            if (buffer == null)
-                throw new ArgumentNullException(nameof(buffer));
+            // Validate that the buffer is not empty.
+            if (buffer.Length == 0)
+                throw new ArgumentException("Buffer cannot be empty", nameof(buffer));
 
             Initialize();
 
-            // Use Marshal for safe pointer handling
-            GCHandle bufferHandle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
-            try
+            // Pin the buffer and pass its pointer to the unmanaged function.
+            unsafe
             {
-                randombytes_buf(bufferHandle.AddrOfPinnedObject(), (UIntPtr)buffer.Length);
-            }
-            finally
-            {
-                bufferHandle.Free();
+                fixed (byte* ptr = buffer)
+                {
+                    randombytes_buf((IntPtr)ptr, (UIntPtr)buffer.Length);
+                }
             }
         }
 
@@ -576,20 +575,28 @@ namespace LibEmiddle.Core
         /// <param name="secretKey">The secret key.</param>
         /// <param name="publicKey">The public key.</param>
         /// <returns>The shared secret.</returns>
-        public static byte[] ScalarMult(byte[] secretKey, byte[] publicKey)
+        public static byte[] ScalarMult(ReadOnlySpan<byte> secretKey, ReadOnlySpan<byte> publicKey)
         {
-            if (secretKey == null)
-                throw new ArgumentNullException(nameof(secretKey));
-            if (publicKey == null)
-                throw new ArgumentNullException(nameof(publicKey));
+            if (secretKey.Length == 0)
+                throw new ArgumentException("Secret key cannot be empty.", nameof(secretKey));
+            if (publicKey.Length == 0)
+                throw new ArgumentException("Public key cannot be empty.", nameof(publicKey));
 
             Initialize();
 
-            byte[] sharedSecret = GenerateRandomBytes(Constants.AES_KEY_SIZE);
-            int result = crypto_scalarmult_curve25519(sharedSecret, secretKey, publicKey);
+            byte[] sharedSecret = new byte[Constants.AES_KEY_SIZE];
 
-            if (result != 0)
-                throw new InvalidOperationException("X25519 key exchange failed.");
+            unsafe
+            {
+                fixed (byte* secretPtr = secretKey)
+                fixed (byte* publicPtr = publicKey)
+                fixed (byte* sharedPtr = sharedSecret)
+                {
+                    int result = crypto_scalarmult_curve25519(sharedPtr, secretPtr, publicPtr);
+                    if (result != 0)
+                        throw new InvalidOperationException("X25519 key exchange failed.");
+                }
+            }
 
             return sharedSecret;
         }
@@ -599,18 +606,29 @@ namespace LibEmiddle.Core
         /// </summary>
         /// <param name="secretKey">The secret key.</param>
         /// <returns>The public key.</returns>
-        public static byte[] ScalarMultBase(byte[] secretKey)
+        public static byte[] ScalarMultBase(ReadOnlySpan<byte> secretKey)
         {
-            if (secretKey == null)
-                throw new ArgumentNullException(nameof(secretKey));
+            // It's a good idea to check that the secret key has an expected length.
+            if (secretKey.Length != Constants.AES_KEY_SIZE)
+                throw new ArgumentException("Invalid secret key length.", nameof(secretKey));
 
             Initialize();
 
-            byte[] publicKey = GenerateRandomBytes(Constants.AES_KEY_SIZE);
-            int result = crypto_scalarmult_curve25519_base(publicKey, secretKey);
+            // Allocate the output publicKey buffer.
+            byte[] publicKey = new byte[Constants.AES_KEY_SIZE];
 
-            if (result != 0)
-                throw new InvalidOperationException("X25519 public key generation failed.");
+            unsafe
+            {
+                fixed (byte* secretPtr = secretKey)
+                fixed (byte* publicPtr = publicKey)
+                {
+                    int result = crypto_scalarmult_curve25519_base(publicPtr, secretPtr);
+                    if (result != 0)
+                    {
+                        throw new InvalidOperationException("X25519 public key generation failed.");
+                    }
+                }
+            }
 
             return publicKey;
         }

@@ -1,4 +1,5 @@
 ﻿using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
@@ -25,102 +26,58 @@ namespace LibEmiddle.Crypto
         }
 
         /// <summary>
-        /// Encrypts data using AES-GCM with libsodium
+        /// Encrypts data using AES-GCM with the built-in .NET implementation.
         /// </summary>
-        /// <param name="plaintext">Data to encrypt</param>
-        /// <param name="key">Encryption key</param>
-        /// <param name="nonce">Nonce for AES-GCM</param>
-        /// <param name="additionalData">Optional authenticated additional data</param>
-        /// <returns>Encrypted data with authentication tag</returns>
-        public static byte[] AESEncrypt(byte[] plaintext, byte[] key, byte[] nonce, byte[]? additionalData = null)
+        /// <param name="plaintext">Data to encrypt.</param>
+        /// <param name="key">Encryption key (32 bytes for AES-256).</param>
+        /// <param name="nonce">Nonce (12 bytes recommended for AES-GCM).</param>
+        /// <param name="additionalData">Optional authenticated additional data.</param>
+        /// <returns>Encrypted data including the 16-byte authentication tag.</returns>
+        /// <exception cref="ArgumentException">If key or nonce have invalid lengths.</exception>
+        /// <exception cref="CryptographicException">If encryption fails.</exception>
+        public static byte[] AESEncrypt(
+            in ReadOnlySpan<byte> plaintext,
+            in ReadOnlySpan<byte> key,
+            in ReadOnlySpan<byte> nonce,
+            in ReadOnlySpan<byte> additionalData = default)
         {
-            ArgumentNullException.ThrowIfNull(plaintext, nameof(plaintext));
-            ArgumentNullException.ThrowIfNull(key, nameof(key));
-            ArgumentNullException.ThrowIfNull(nonce, nameof(nonce));
-
+            // --- Argument Validation ---
+            // Check lengths first (avoids exceptions in AesGcm constructor/Encrypt)
             if (key.Length != Constants.AES_KEY_SIZE)
-                throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
+                throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long. Actual: {key.Length}", nameof(key));
             if (nonce.Length != Constants.NONCE_SIZE)
-                throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long", nameof(nonce));
+                throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long for AES-GCM. Actual: {nonce.Length}", nameof(nonce));
+            // Plaintext can be empty, additionalData can be empty (default)
 
-            // Initialize libsodium
-            Sodium.Initialize();
-
-            // Check if AES-GCM is available on this platform
-            if (!IsAesGcmAvailable())
-            {
-                throw new PlatformNotSupportedException("AES-GCM is not available on this platform");
-            }
-
-            // Prepare additional data if provided
-            byte[] ad = additionalData ?? Array.Empty<byte>();
-
-            // Allocate output buffer for ciphertext
+            // --- Encryption ---
+            // Allocate buffer for ciphertext + tag
             byte[] ciphertext = new byte[plaintext.Length + Constants.AUTH_TAG_SIZE];
-
-            // Allocate unmanaged memory for the state (must be 16-byte aligned)
-            nint state = nint.Zero;
-
-            // Pin the managed buffers so GC doesn't move them
-            GCHandle plaintextHandle = default;
-            GCHandle ciphertextHandle = default;
-            GCHandle keyHandle = default;
-            GCHandle nonceHandle = default;
-            GCHandle adHandle = default;
+            // Tag will be appended by AesGcm.Encrypt
 
             try
             {
-                // Allocate state memory
-                state = Marshal.AllocHGlobal(StateSize);
-                if (state == nint.Zero)
-                    throw new OutOfMemoryException("Failed to allocate memory for AES-GCM state");
-
-                // Pin all the buffers we need to pass to native code
-                plaintextHandle = GCHandle.Alloc(plaintext, GCHandleType.Pinned);
-                ciphertextHandle = GCHandle.Alloc(ciphertext, GCHandleType.Pinned);
-                keyHandle = GCHandle.Alloc(key, GCHandleType.Pinned);
-                nonceHandle = GCHandle.Alloc(nonce, GCHandleType.Pinned);
-                adHandle = GCHandle.Alloc(ad, GCHandleType.Pinned);
-
-                // Precompute the key expansion
-                int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key);
-                if (result != 0)
+                using (var aesGcm = new AesGcm(key, Constants.AUTH_TAG_SIZE)) // Specify tag size
                 {
-                    throw new InvalidOperationException("Failed to initialize AES-GCM state");
+                    // Encrypt directly using spans
+                    aesGcm.Encrypt(
+                        nonce.ToArray(),
+                        plaintext.ToArray(),
+                        ciphertext.ToArray(), // Pass output buffer as Span<byte>
+                        new byte[Constants.AUTH_TAG_SIZE],
+                        associatedData: additionalData.ToArray() // Pass ReadOnlySpan<byte> directly
+                       );
                 }
-
-                // Encrypt using libsodium
-                result = Sodium.crypto_aead_aes256gcm_encrypt_afternm(
-                    ciphertext, out ulong cipherLength,
-                    plaintext, (ulong)plaintext.Length,
-                    ad, (ulong)ad.Length,
-                    null, // nsec is always null for AES-GCM
-                    nonce,
-                    state);
-
-                if (result != 0)
-                {
-                    throw new InvalidOperationException("Encryption failed");
-                }
-
                 return ciphertext;
             }
-            catch (DllNotFoundException)
+            catch (CryptographicException ex) // Catch specific crypto errors
             {
-                throw new PlatformNotSupportedException("The libsodium library is not available");
+                LoggingManager.LogError(nameof(AES), $"AES-GCM encryption failed: {ex.Message}");
+                throw; // Re-throw to indicate failure
             }
-            finally
+            catch (Exception ex) // Catch unexpected errors
             {
-                // Free unmanaged memory
-                if (state != nint.Zero)
-                    Marshal.FreeHGlobal(state);
-
-                // Unpin all managed buffers
-                if (plaintextHandle.IsAllocated) plaintextHandle.Free();
-                if (ciphertextHandle.IsAllocated) ciphertextHandle.Free();
-                if (keyHandle.IsAllocated) keyHandle.Free();
-                if (nonceHandle.IsAllocated) nonceHandle.Free();
-                if (adHandle.IsAllocated) adHandle.Free();
+                LoggingManager.LogError(nameof(AES), $"Unexpected error during AES-GCM encryption: {ex.Message}");
+                throw new CryptographicException("Unexpected error during encryption.", ex);
             }
         }
 
@@ -132,11 +89,18 @@ namespace LibEmiddle.Crypto
         /// <param name="nonce">Nonce used for encryption</param>
         /// <param name="additionalData">Optional authenticated additional data</param>
         /// <returns>Decrypted data</returns>
-        public static byte[] AESDecrypt(byte[] ciphertextWithTag, byte[] key, byte[] nonce, byte[]? additionalData = null)
+        public static byte[] AESDecrypt(
+            in ReadOnlySpan<byte> ciphertextWithTag,
+            in ReadOnlySpan<byte> key,
+            in ReadOnlySpan<byte> nonce,
+            in ReadOnlySpan<byte> additionalData = default)
         {
-            ArgumentNullException.ThrowIfNull(ciphertextWithTag, nameof(ciphertextWithTag));
-            ArgumentNullException.ThrowIfNull(key, nameof(key));
-            ArgumentNullException.ThrowIfNull(nonce, nameof(nonce));
+            if (ciphertextWithTag.IsEmpty)
+                throw new ArgumentException("Ciphertext cannot be empty", nameof(ciphertextWithTag));
+            if (key.IsEmpty)
+                throw new ArgumentException("Key cannot be empty", nameof(key));
+            if (nonce.IsEmpty)
+                throw new ArgumentException("Nonce cannot be empty", nameof(nonce));
 
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
@@ -155,38 +119,19 @@ namespace LibEmiddle.Crypto
             }
 
             // Prepare additional data if provided
-            byte[] ad = additionalData ?? Array.Empty<byte>();
+            ReadOnlySpan<byte> ad = additionalData;
 
             // Allocate output buffer for plaintext
             // Plaintext will be at most the size of ciphertext - authentication tag
-            byte[] plaintext = new byte[ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE];
+            ReadOnlySpan<byte> plaintext = new byte[ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE];
 
             // Allocate unmanaged memory for the state (must be 16-byte aligned)
             nint state = nint.Zero;
 
-            // Pin the managed buffers so GC doesn't move them
-            GCHandle plaintextHandle = default;
-            GCHandle ciphertextHandle = default;
-            GCHandle keyHandle = default;
-            GCHandle nonceHandle = default;
-            GCHandle adHandle = default;
-
             try
             {
-                // Allocate the state memory
-                state = Marshal.AllocHGlobal(StateSize);
-                if (state == nint.Zero)
-                    throw new OutOfMemoryException("Failed to allocate memory for AES-GCM state");
-
-                // Pin all the buffers we need to pass to native code
-                plaintextHandle = GCHandle.Alloc(plaintext, GCHandleType.Pinned);
-                ciphertextHandle = GCHandle.Alloc(ciphertextWithTag, GCHandleType.Pinned);
-                keyHandle = GCHandle.Alloc(key, GCHandleType.Pinned);
-                nonceHandle = GCHandle.Alloc(nonce, GCHandleType.Pinned);
-                adHandle = GCHandle.Alloc(ad, GCHandleType.Pinned);
-
                 // Precompute the key expansion
-                int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key);
+                int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key.ToArray());
                 if (result != 0)
                 {
                     throw new InvalidOperationException("Failed to initialize AES-GCM state");
@@ -194,16 +139,16 @@ namespace LibEmiddle.Crypto
 
                 // Decrypt using libsodium
                 result = Sodium.crypto_aead_aes256gcm_decrypt_afternm(
-                    plaintext, out ulong plaintextLength,
+                    plaintext.ToArray(), out ulong plaintextLength,
                     null, // nsec is always null for AES-GCM
-                    ciphertextWithTag, (ulong)ciphertextWithTag.Length,
-                    ad, (ulong)ad.Length,
-                    nonce,
+                    ciphertextWithTag.ToArray(), (ulong)ciphertextWithTag.Length,
+                    ad.ToArray(), (ulong)ad.Length,
+                    nonce.ToArray(),
                     state);
 
                 if (result != 0)
                 {
-                    throw new System.Security.Cryptography.CryptographicException(
+                    throw new CryptographicException(
                         "Authentication failed. The data may have been tampered with or the wrong key was used.");
                 }
 
@@ -211,17 +156,17 @@ namespace LibEmiddle.Crypto
                 if (plaintextLength < (ulong)plaintext.Length)
                 {
                     byte[] resizedPlaintext = new byte[plaintextLength];
-                    plaintext.AsSpan(0, (int)plaintextLength).CopyTo(resizedPlaintext);
+                    plaintext.ToArray().AsSpan(0, (int)plaintextLength).CopyTo(resizedPlaintext);
                     return resizedPlaintext;
                 }
 
-                return plaintext;
+                return plaintext.ToArray();
             }
             catch (DllNotFoundException)
             {
                 throw new PlatformNotSupportedException("The libsodium library is not available");
             }
-            catch (System.Security.Cryptography.CryptographicException)
+            catch (CryptographicException)
             {
                 // Rethrow cryptographic exceptions as they contain important security information
                 throw;
@@ -238,13 +183,6 @@ namespace LibEmiddle.Crypto
                 {
                     Marshal.FreeHGlobal(state);
                 }
-
-                // Unpin all managed buffers
-                if (plaintextHandle.IsAllocated) plaintextHandle.Free();
-                if (ciphertextHandle.IsAllocated) ciphertextHandle.Free();
-                if (keyHandle.IsAllocated) keyHandle.Free();
-                if (nonceHandle.IsAllocated) nonceHandle.Free();
-                if (adHandle.IsAllocated) adHandle.Free();
             }
         }
 
@@ -254,10 +192,11 @@ namespace LibEmiddle.Crypto
         /// <param name="message">Message to encrypt</param>
         /// <param name="key">AES-256 encryption key (32 bytes)</param>
         /// <returns>EncryptedMessage object containing ciphertext and nonce</returns>
-        public static EncryptedMessage Encrypt(string message, byte[] key)
+        public static EncryptedMessage Encrypt(string message, in ReadOnlySpan<byte> key)
         {
             ArgumentException.ThrowIfNullOrEmpty(message, nameof(message));
-            ArgumentNullException.ThrowIfNull(key, nameof(key));
+            ArgumentNullException.ThrowIfNull(key.ToString(), nameof(key));
+
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
 
@@ -280,12 +219,13 @@ namespace LibEmiddle.Crypto
         /// <param name="encryptedMessage">EncryptedMessage object</param>
         /// <param name="key">Decryption key</param>
         /// <returns>Decrypted message string</returns>
-        public static string Decrypt(EncryptedMessage encryptedMessage, byte[] key)
+        public static string Decrypt(EncryptedMessage encryptedMessage, in ReadOnlySpan<byte> key)
         {
             ArgumentNullException.ThrowIfNull(encryptedMessage, nameof(encryptedMessage));
             ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, "Ciphertext cannot be null");
             ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce, "Nonce cannot be null");
-            ArgumentNullException.ThrowIfNull(key, nameof(key));
+            ArgumentNullException.ThrowIfNull(key.ToString(), nameof(key));
+
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
 
@@ -296,7 +236,7 @@ namespace LibEmiddle.Crypto
                 // Validate the plaintext before converting to string
                 if (plaintext == null || plaintext.Length == 0)
                 {
-                    throw new System.Security.Cryptography.CryptographicException("Decryption produced empty plaintext");
+                    throw new CryptographicException("Decryption produced empty plaintext");
                 }
 
                 // Check if the plaintext contains valid UTF-8 before conversion
@@ -312,9 +252,9 @@ namespace LibEmiddle.Crypto
 
                 return result;
             }
-            catch (System.Security.Cryptography.CryptographicException ex)
+            catch (CryptographicException ex)
             {
-                throw new System.Security.Cryptography.CryptographicException("Message decryption failed. The key may be incorrect.", ex);
+                throw new CryptographicException("Message decryption failed. The key may be incorrect.", ex);
             }
         }
 
@@ -327,11 +267,16 @@ namespace LibEmiddle.Crypto
         /// <param name="tag">Output parameter for the authentication tag</param>
         /// <param name="additionalData">Optional authenticated additional data</param>
         /// <returns>Encrypted data without authentication tag</returns>
-        public static byte[] AESEncryptDetached(byte[] plaintext, byte[] key, byte[] nonce, out byte[] tag, byte[]? additionalData = null)
+        public static ReadOnlySpan<byte> AESEncryptDetached(
+            ReadOnlySpan<byte> plaintext,
+            in ReadOnlySpan<byte> key,
+            in ReadOnlySpan<byte> nonce, 
+            out byte[] tag,
+            in ReadOnlySpan<byte> additionalData = default)
         {
-            ArgumentNullException.ThrowIfNull(plaintext);
-            ArgumentNullException.ThrowIfNull(key);
-            ArgumentNullException.ThrowIfNull(nonce);
+            ArgumentNullException.ThrowIfNull(plaintext.ToArray());
+            ArgumentNullException.ThrowIfNull(key.ToArray());
+            ArgumentNullException.ThrowIfNull(nonce.ToArray());
 
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
@@ -348,16 +293,10 @@ namespace LibEmiddle.Crypto
             }
 
             // Prepare additional data if provided
-            byte[] ad = additionalData ?? Array.Empty<byte>();
+            ReadOnlySpan<byte> ad = additionalData;
 
             // Allocate unmanaged memory for the state (must be 16-byte aligned)
             nint state = nint.Zero;
-
-            // Pin the managed buffers so GC doesn't move them
-            GCHandle plaintextHandle = default;
-            GCHandle keyHandle = default;
-            GCHandle nonceHandle = default;
-            GCHandle adHandle = default;
 
             try
             {
@@ -367,32 +306,26 @@ namespace LibEmiddle.Crypto
                     throw new OutOfMemoryException("Failed to allocate memory for AES-GCM state");
 
                 // Precompute the key expansion
-                int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key);
+                int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key.ToArray());
                 if (result != 0)
                 {
                     throw new InvalidOperationException("Failed to initialize AES-GCM state");
                 }
 
                 // Allocate output buffer for ciphertext (same size as plaintext)
-                byte[] ciphertext = new byte[plaintext.Length];
+                ReadOnlySpan<byte> ciphertext = new byte[plaintext.Length];
 
                 // Allocate tag buffer
                 tag = new byte[Constants.AUTH_TAG_SIZE];
 
-                // Pin all the buffers we need to pass to native code
-                plaintextHandle = GCHandle.Alloc(plaintext, GCHandleType.Pinned);
-                keyHandle = GCHandle.Alloc(key, GCHandleType.Pinned);
-                nonceHandle = GCHandle.Alloc(nonce, GCHandleType.Pinned);
-                adHandle = GCHandle.Alloc(ad, GCHandleType.Pinned);
-
                 // Encrypt using libsodium in detached mode
                 result = Sodium.crypto_aead_aes256gcm_encrypt_detached_afternm(
-                    ciphertext,
+                    ciphertext.ToArray(),
                     tag, out ulong tagLength,
-                    plaintext, (ulong)plaintext.Length,
-                    ad, (ulong)ad.Length,
+                    plaintext.ToArray(), (ulong)plaintext.Length,
+                    ad.ToArray(), (ulong)ad.Length,
                     null, // nsec is always null for AES-GCM
-                    nonce,
+                    nonce.ToArray(),
                     state);
 
                 if (result != 0)
@@ -411,12 +344,6 @@ namespace LibEmiddle.Crypto
                 // Free unmanaged memory
                 if (state != nint.Zero)
                     Marshal.FreeHGlobal(state);
-
-                // Unpin all managed buffers
-                if (plaintextHandle.IsAllocated) plaintextHandle.Free();
-                if (keyHandle.IsAllocated) keyHandle.Free();
-                if (nonceHandle.IsAllocated) nonceHandle.Free();
-                if (adHandle.IsAllocated) adHandle.Free();
             }
         }
 
@@ -429,12 +356,17 @@ namespace LibEmiddle.Crypto
         /// <param name="nonce">Nonce used for encryption</param>
         /// <param name="additionalData">Optional authenticated additional data</param>
         /// <returns>Decrypted data</returns>
-        public static byte[] AESDecryptDetached(byte[] ciphertext, byte[] tag, byte[] key, byte[] nonce, byte[]? additionalData = null)
+        public static ReadOnlySpan<byte> AESDecryptDetached(
+            in ReadOnlySpan<byte> ciphertext, 
+            in ReadOnlySpan<byte> tag, 
+            in ReadOnlySpan<byte> key, 
+            in ReadOnlySpan<byte> nonce, 
+            in ReadOnlySpan<byte> additionalData = default)
         {
-            ArgumentNullException.ThrowIfNull(ciphertext);
-            ArgumentNullException.ThrowIfNull(tag);
-            ArgumentNullException.ThrowIfNull(key);
-            ArgumentNullException.ThrowIfNull(nonce);
+            ArgumentNullException.ThrowIfNull(ciphertext.ToArray());
+            ArgumentNullException.ThrowIfNull(tag.ToArray());
+            ArgumentNullException.ThrowIfNull(key.ToArray());
+            ArgumentNullException.ThrowIfNull(nonce.ToArray());
 
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
@@ -453,18 +385,10 @@ namespace LibEmiddle.Crypto
             }
 
             // Prepare additional data if provided
-            byte[] ad = additionalData ?? Array.Empty<byte>();
+            ReadOnlySpan<byte> ad = additionalData;
 
             // Allocate unmanaged memory for the state (must be 16-byte aligned)
             nint state = nint.Zero;
-
-            // Pin the managed buffers so GC doesn't move them
-            GCHandle plaintextHandle = default;
-            GCHandle ciphertextHandle = default;
-            GCHandle tagHandle = default;
-            GCHandle keyHandle = default;
-            GCHandle nonceHandle = default;
-            GCHandle adHandle = default;
 
             try
             {
@@ -474,36 +398,29 @@ namespace LibEmiddle.Crypto
                     throw new OutOfMemoryException("Failed to allocate memory for AES-GCM state");
 
                 // Precompute the key expansion
-                int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key);
+                int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key.ToArray());
                 if (result != 0)
                 {
                     throw new InvalidOperationException("Failed to initialize AES-GCM state");
                 }
 
                 // Allocate output buffer for plaintext (same size as ciphertext)
-                byte[] plaintext = new byte[ciphertext.Length];
-
-                // Pin all the buffers we need to pass to native code
-                plaintextHandle = GCHandle.Alloc(plaintext, GCHandleType.Pinned);
-                ciphertextHandle = GCHandle.Alloc(ciphertext, GCHandleType.Pinned);
-                tagHandle = GCHandle.Alloc(tag, GCHandleType.Pinned);
-                keyHandle = GCHandle.Alloc(key, GCHandleType.Pinned);
-                nonceHandle = GCHandle.Alloc(nonce, GCHandleType.Pinned);
-                adHandle = GCHandle.Alloc(ad, GCHandleType.Pinned);
+                ReadOnlySpan<byte> plaintext = new byte[ciphertext.Length];
 
                 // Decrypt using libsodium in detached mode
                 result = Sodium.crypto_aead_aes256gcm_decrypt_detached_afternm(
-                    plaintext,
+                    plaintext.ToArray(),
                     null, // nsec is always null for AES-GCM
-                    ciphertext, (ulong)ciphertext.Length,
-                    tag,
-                    ad, (ulong)ad.Length,
-                    nonce,
+                    ciphertext.ToArray(), (ulong)ciphertext.Length,
+                    tag.ToArray(),
+                    ad.ToArray(), (ulong)ad.Length,
+                    nonce.ToArray(),
                     state);
 
                 if (result != 0)
                 {
-                    throw new System.Security.Cryptography.CryptographicException("Authentication failed. The data may have been tampered with or the wrong key was used.");
+                    throw new CryptographicException(
+                        "Authentication failed. The data may have been tampered with or the wrong key was used.");
                 }
 
                 return plaintext;
@@ -517,14 +434,6 @@ namespace LibEmiddle.Crypto
                 // Free unmanaged memory
                 if (state != nint.Zero)
                     Marshal.FreeHGlobal(state);
-
-                // Unpin all managed buffers
-                if (plaintextHandle.IsAllocated) plaintextHandle.Free();
-                if (ciphertextHandle.IsAllocated) ciphertextHandle.Free();
-                if (tagHandle.IsAllocated) tagHandle.Free();
-                if (keyHandle.IsAllocated) keyHandle.Free();
-                if (nonceHandle.IsAllocated) nonceHandle.Free();
-                if (adHandle.IsAllocated) adHandle.Free();
             }
         }
 
@@ -540,9 +449,9 @@ namespace LibEmiddle.Crypto
             /// Creates a new AES-GCM context with the specified key
             /// </summary>
             /// <param name="key">The encryption/decryption key</param>
-            public AesGcmContext(byte[] key)
+            public AesGcmContext(ReadOnlySpan<byte> key)
             {
-                ArgumentNullException.ThrowIfNull(key);
+                ArgumentNullException.ThrowIfNull(key.ToArray(), nameof(key));
                 if (key.Length != Constants.AES_KEY_SIZE)
                     throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
 
@@ -562,15 +471,11 @@ namespace LibEmiddle.Crypto
 
                 try
                 {
-                    // Create a copy of the key to avoid modifying the original
-                    byte[] keyCopy = new byte[key.Length];
-                    key.CopyTo(keyCopy, 0);
-
                     // Precompute the key expansion
-                    int result = Sodium.crypto_aead_aes256gcm_beforenm(_state, keyCopy);
+                    int result = Sodium.crypto_aead_aes256gcm_beforenm(_state, key.ToArray());
 
                     // Clear the key copy after use
-                    SecureMemory.SecureClear(keyCopy);
+                    SecureMemory.SecureClear(key.ToArray());
 
                     if (result != 0)
                     {
@@ -593,41 +498,34 @@ namespace LibEmiddle.Crypto
             /// <param name="nonce">Nonce for AES-GCM</param>
             /// <param name="additionalData">Optional authenticated additional data</param>
             /// <returns>Encrypted data with authentication tag</returns>
-            public byte[] Encrypt(byte[] plaintext, byte[] nonce, byte[]? additionalData = null)
+            public ReadOnlySpan<byte> Encrypt(
+                ReadOnlySpan<byte> plaintext,
+                ReadOnlySpan<byte> nonce,
+                ReadOnlySpan<byte> additionalData = default)
             {
                 ThrowIfDisposed();
-                ArgumentNullException.ThrowIfNull(plaintext);
-                ArgumentNullException.ThrowIfNull(nonce);
+
+                ArgumentNullException.ThrowIfNull(plaintext.ToArray());
+                ArgumentNullException.ThrowIfNull(nonce.ToArray());
+
                 if (nonce.Length != Constants.NONCE_SIZE)
                     throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long", nameof(nonce));
 
                 // Prepare additional data if provided
-                byte[] ad = additionalData ?? Array.Empty<byte>();
+                ReadOnlySpan<byte> ad = additionalData;
 
                 // Allocate output buffer for ciphertext
-                byte[] ciphertext = new byte[plaintext.Length + Constants.AUTH_TAG_SIZE];
-
-                // Pin the managed buffers so GC doesn't move them
-                GCHandle plaintextHandle = default;
-                GCHandle ciphertextHandle = default;
-                GCHandle nonceHandle = default;
-                GCHandle adHandle = default;
+                ReadOnlySpan<byte> ciphertext = new byte[plaintext.Length + Constants.AUTH_TAG_SIZE];
 
                 try
                 {
-                    // Pin all the buffers we need to pass to native code
-                    plaintextHandle = GCHandle.Alloc(plaintext, GCHandleType.Pinned);
-                    ciphertextHandle = GCHandle.Alloc(ciphertext, GCHandleType.Pinned);
-                    nonceHandle = GCHandle.Alloc(nonce, GCHandleType.Pinned);
-                    adHandle = GCHandle.Alloc(ad, GCHandleType.Pinned);
-
                     // Encrypt using libsodium
                     int result = Sodium.crypto_aead_aes256gcm_encrypt_afternm(
-                        ciphertext, out ulong cipherLength,
-                        plaintext, (ulong)plaintext.Length,
-                        ad, (ulong)ad.Length,
+                        ciphertext.ToArray(), out ulong cipherLength,
+                        plaintext.ToArray(), (ulong)plaintext.Length,
+                        ad.ToArray(), (ulong)ad.Length,
                         null, // nsec is always null for AES-GCM
-                        nonce,
+                        nonce.ToArray(),
                         _state);
 
                     if (result != 0)
@@ -639,11 +537,7 @@ namespace LibEmiddle.Crypto
                 }
                 finally
                 {
-                    // Unpin all managed buffers
-                    if (plaintextHandle.IsAllocated) plaintextHandle.Free();
-                    if (ciphertextHandle.IsAllocated) ciphertextHandle.Free();
-                    if (nonceHandle.IsAllocated) nonceHandle.Free();
-                    if (adHandle.IsAllocated) adHandle.Free();
+                    // free memory || secure clear
                 }
             }
 
@@ -654,67 +548,57 @@ namespace LibEmiddle.Crypto
             /// <param name="nonce">Nonce used for encryption</param>
             /// <param name="additionalData">Optional authenticated additional data</param>
             /// <returns>Decrypted data</returns>
-            public byte[] Decrypt(byte[] ciphertextWithTag, byte[] nonce, byte[]? additionalData = null)
+            public byte[] Decrypt(
+                ReadOnlySpan<byte> ciphertextWithTag,
+                ReadOnlySpan<byte> nonce,
+                ReadOnlySpan<byte> additionalData = default)
             {
                 ThrowIfDisposed();
-                ArgumentNullException.ThrowIfNull(ciphertextWithTag);
-                ArgumentNullException.ThrowIfNull(nonce);
+
+                ArgumentNullException.ThrowIfNull(ciphertextWithTag.ToArray());
+                ArgumentNullException.ThrowIfNull(nonce.ToArray());
+
                 if (nonce.Length != Constants.NONCE_SIZE)
                     throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long", nameof(nonce));
                 if (ciphertextWithTag.Length < Constants.AUTH_TAG_SIZE)
                     throw new ArgumentException("Ciphertext too short to contain tag", nameof(ciphertextWithTag));
 
                 // Prepare additional data if provided
-                byte[] ad = additionalData ?? Array.Empty<byte>();
+                ReadOnlySpan<byte> ad = additionalData;
 
                 // Allocate output buffer for plaintext
-                byte[] plaintext = new byte[ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE];
-
-                // Pin the managed buffers so GC doesn't move them
-                GCHandle plaintextHandle = default;
-                GCHandle ciphertextHandle = default;
-                GCHandle nonceHandle = default;
-                GCHandle adHandle = default;
+                ReadOnlySpan<byte> plaintext = new byte[ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE];
 
                 try
                 {
-                    // Pin all the buffers we need to pass to native code
-                    plaintextHandle = GCHandle.Alloc(plaintext, GCHandleType.Pinned);
-                    ciphertextHandle = GCHandle.Alloc(ciphertextWithTag, GCHandleType.Pinned);
-                    nonceHandle = GCHandle.Alloc(nonce, GCHandleType.Pinned);
-                    adHandle = GCHandle.Alloc(ad, GCHandleType.Pinned);
-
                     // Decrypt using libsodium
                     int result = Sodium.crypto_aead_aes256gcm_decrypt_afternm(
-                        plaintext, out ulong plaintextLength,
+                        plaintext.ToArray(), out ulong plaintextLength,
                         null, // nsec is always null for AES-GCM
-                        ciphertextWithTag, (ulong)ciphertextWithTag.Length,
-                        ad, (ulong)ad.Length,
-                        nonce,
+                        ciphertextWithTag.ToArray(), (ulong)ciphertextWithTag.Length,
+                        ad.ToArray(), (ulong)ad.Length,
+                        nonce.ToArray(),
                         _state);
 
                     if (result != 0)
                     {
-                        throw new System.Security.Cryptography.CryptographicException("Authentication failed. The data may have been tampered with or the wrong key was used.");
+                        throw new CryptographicException(
+                            "Authentication failed. The data may have been tampered with or the wrong key was used.");
                     }
 
                     // Create a properly sized result array if needed
                     if (plaintextLength < (ulong)plaintext.Length)
                     {
                         byte[] resizedPlaintext = new byte[plaintextLength];
-                        plaintext.AsSpan(0, (int)plaintextLength).CopyTo(resizedPlaintext);
+                        plaintext.ToArray().AsSpan(0, (int)plaintextLength).CopyTo(resizedPlaintext);
                         return resizedPlaintext;
                     }
 
-                    return plaintext;
+                    return plaintext.ToArray();
                 }
                 finally
                 {
-                    // Unpin all managed buffers
-                    if (plaintextHandle.IsAllocated) plaintextHandle.Free();
-                    if (ciphertextHandle.IsAllocated) ciphertextHandle.Free();
-                    if (nonceHandle.IsAllocated) nonceHandle.Free();
-                    if (adHandle.IsAllocated) adHandle.Free();
+                    // free memory || secure clear
                 }
             }
 

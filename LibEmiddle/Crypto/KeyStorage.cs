@@ -17,14 +17,12 @@ namespace LibEmiddle.Crypto
         /// <param name="filePath">Path where the key will be stored</param>
         /// <param name="password">Optional password for additional encryption</param>
         /// <param name="saltRotationDays">Number of days after which the salt should be rotated (default: 30)</param>
-        public static void StoreKeyToFile(byte[] key, string filePath, string? password = null, int saltRotationDays = 30)
+        public static void StoreKeyToFile(in ReadOnlySpan<byte> key, string filePath, string? password = null, int saltRotationDays = 30)
         {
-            if (key == null)
-                throw new ArgumentException("Key cannot be null", nameof(key));
-            if (key.Length == 0)
+            if (key.IsEmpty)
                 throw new ArgumentException("Key cannot be empty", nameof(key));
 
-            byte[] dataToStore = key;
+            ReadOnlySpan<byte> dataToStore = default;
 
             // If password is provided, encrypt the key before storing
             if (!string.IsNullOrEmpty(password))
@@ -97,7 +95,7 @@ namespace LibEmiddle.Crypto
             }
 
             // Write to file
-            File.WriteAllBytes(filePath, dataToStore);
+            File.WriteAllBytes(filePath, dataToStore.ToArray());
         }
 
         /// <summary>

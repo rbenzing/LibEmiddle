@@ -34,33 +34,6 @@
         public uint? RecipientOneTimePreKeyId { get; set; } // Nullable uint
 
         /// <summary>
-        /// Performs basic structural validation checks on the contained data.
-        /// Checks for non-null keys and correct key lengths according to constants.
-        /// Does NOT perform cryptographic validation (e.g., point-on-curve checks).
-        /// </summary>
-        /// <returns>True if the data appears structurally valid, false otherwise.</returns>
-        public bool IsValid()
-        {
-            // Check for nulls and correct lengths based on defined constants
-            bool isValid = SenderIdentityKeyPublic != null &&
-                           SenderIdentityKeyPublic.Length == Constants.ED25519_PUBLIC_KEY_SIZE &&
-                           SenderEphemeralKeyPublic != null &&
-                           SenderEphemeralKeyPublic.Length == Constants.X25519_KEY_SIZE &&
-                           RecipientSignedPreKeyId != 0; // Signed PreKey ID must be non-zero
-
-            // Check that OPK ID is also non-zero if present
-            isValid &= (!RecipientOneTimePreKeyId.HasValue || RecipientOneTimePreKeyId.Value != 0);
-
-            // Add calls to KeyValidation if desired (basic format checks)
-            isValid &= KeyValidation.ValidateEd25519PublicKey(SenderIdentityKeyPublic);
-            
-            if (SenderEphemeralKeyPublic != null)
-                isValid &= KeyValidation.ValidateX25519PublicKey(SenderEphemeralKeyPublic);
-
-            return isValid;
-        }
-
-        /// <summary>
         /// Parameterless constructor for serialization frameworks or manual initialization.
         /// </summary>
         public InitialMessageData() { }
@@ -84,12 +57,40 @@
             // Perform validation on construction
             if (SenderIdentityKeyPublic.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
                 throw new ArgumentException($"Sender Identity Key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(senderIKPub));
+
             if (SenderEphemeralKeyPublic.Length != Constants.X25519_KEY_SIZE)
                 throw new ArgumentException($"Sender Ephemeral Key must be {Constants.X25519_KEY_SIZE} bytes.", nameof(senderEKPub));
+
             if (RecipientSignedPreKeyId == 0)
                 throw new ArgumentException("Recipient Signed PreKey ID cannot be zero.", nameof(recipientSPKId));
-            if (RecipientOneTimePreKeyId.HasValue && RecipientOneTimePreKeyId.Value == 0) 
+
+            if (RecipientOneTimePreKeyId.HasValue && RecipientOneTimePreKeyId.Value == 0)
                 throw new ArgumentException("Recipient One Time PreKey ID cannot be zero.", nameof(recipientOPKId));
+        }
+
+        /// <summary>
+        /// Validates the instance properties to ensure they meet the expected criteria.
+        /// </summary>
+        /// <returns>True if the instance is valid; otherwise, false.</returns>
+        public bool IsValid()
+        {
+            // Check Sender's Identity Key
+            if (SenderIdentityKeyPublic == null || SenderIdentityKeyPublic.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+                return false;
+
+            // Check Sender's Ephemeral Key
+            if (SenderEphemeralKeyPublic == null || SenderEphemeralKeyPublic.Length != Constants.X25519_KEY_SIZE)
+                return false;
+
+            // Check Recipient Signed PreKey ID
+            if (RecipientSignedPreKeyId == 0)
+                return false;
+
+            // If present, check Recipient One-Time PreKey ID
+            if (RecipientOneTimePreKeyId.HasValue && RecipientOneTimePreKeyId.Value == 0)
+                return false;
+
+            return true;
         }
     }
 }

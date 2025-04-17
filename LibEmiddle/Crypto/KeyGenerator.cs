@@ -26,7 +26,7 @@ namespace LibEmiddle.Crypto
         /// <param name="existingSharedKey">The shared key (32 bytes required).</param>
         /// <param name="normalizedPublicKey">The data to be HMACed.</param>
         /// <returns>The 32-byte HMAC-SHA256 result.</returns>
-        public static byte[] GenerateHmacSha256(byte[] existingSharedKey, byte[] normalizedPublicKey)
+        public static byte[] GenerateHmacSha256(in ReadOnlySpan<byte> existingSharedKey, in ReadOnlySpan<byte> normalizedPublicKey)
         {
             // Ensure the existingSharedKey is of the required length.
             if (existingSharedKey.Length != Constants.AES_KEY_SIZE)
@@ -39,9 +39,9 @@ namespace LibEmiddle.Crypto
             byte[] output = new byte[Constants.AES_KEY_SIZE];
             int ret = Sodium.crypto_auth_hmacsha256(
                 output,
-                normalizedPublicKey, 
+                normalizedPublicKey.ToArray(),
                 (UIntPtr)normalizedPublicKey.Length,
-                existingSharedKey);
+                existingSharedKey.ToArray());
 
             if (ret != 0)
             {

@@ -1,6 +1,7 @@
-﻿#pragma warning disable IDE0130 // Namespace does not match folder structure
-namespace LibEmiddle.Domain
-#pragma warning restore IDE0130 // Namespace does not match folder structure
+﻿using LibEmiddle.Core;
+using LibEmiddle.Domain;
+
+namespace LibEmiddle.Crypto
 {
     public class KeyValidation
     {
@@ -58,47 +59,63 @@ namespace LibEmiddle.Domain
         /// </summary>
         /// <param name="publicKey">The public key bytes to validate.</param>
         /// <returns>True if the key passes basic checks (length, not all-zero), false otherwise.</returns>
-        public static bool ValidateEd25519PublicKey(byte[]? publicKey)
+        public static bool ValidateEd25519PublicKey(ReadOnlySpan<byte> publicKey)
         {
-            // 1. Check for null and correct length
-            if (publicKey == null || publicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+            // 1. Check for empty span and correct length
+            if (publicKey.IsEmpty || publicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
             {
                 // Optional: Log the failure reason
-                // LoggingManager.LogWarning("ValidateEd25519PublicKey", $"Key validation failed: Null or incorrect length ({(publicKey == null ? "null" : publicKey.Length)} bytes, expected {ED25519_PUBLIC_KEY_SIZE}).");
+                // LoggingManager.LogWarning("ValidateEd25519PublicKey", $"Key validation failed: Empty or incorrect length ({publicKey.Length} bytes, expected {ED25519_PUBLIC_KEY_SIZE}).");
                 return false;
             }
 
             // 2. Check if the key consists entirely of zero bytes.
             // This represents the identity element and is often disallowed.
-            if (publicKey.All(b => b == 0))
+            bool allZeros = true;
+            for (int i = 0; i < publicKey.Length; i++)
+            {
+                if (publicKey[i] != 0)
+                {
+                    allZeros = false;
+                    break;
+                }
+            }
+
+            if (allZeros)
             {
                 // Optional: Log the failure reason
                 // LoggingManager.LogWarning("ValidateEd25519PublicKey", "Key validation failed: Key is all zeros.");
                 return false;
             }
 
-            // 3. Placeholder for Library-Specific Point Validation (if available)
-            // If your cryptographic library (e.g., NSec, BouncyCastle wrapper)
-            // provides an explicit function to check if the bytes represent a
-            // valid point on the curve, call it here.
-            // Example (conceptual):
-            // try
-            // {
-            //     if (!YourCryptoLib.Ed25519.IsPointOnCurve(publicKey))
-            //     {
-            //         LoggingManager.LogWarning("ValidateEd25519PublicKey", "Key validation failed: Library reported point is not on curve.");
-            //         return false;
-            //     }
-            // }
-            // catch (Exception ex) // Catch potential decoding errors
-            // {
-            //     LoggingManager.LogError("ValidateEd25519PublicKey", $"Error during library key validation: {ex.Message}");
-            //     return false;
-            // }
+            // 3. Use libsodium to check if the point is on the curve
+            try
+            {
+                // Ensure libsodium is initialized
+                Sodium.Initialize();
 
+                // Create a temporary array to pass to Sodium's API
+                // since it doesn't accept span parameters
+                byte[] tempKey = publicKey.ToArray();
 
-            // If basic checks pass, return true.
-            // Deeper cryptographic validity will be checked during signature verification.
+                // Call libsodium's function to check if the point is valid
+                int result = Sodium.crypto_core_ed25519_is_valid_point(tempKey);
+
+                if (result != 1)
+                {
+                    // Optional: Log the failure reason
+                    // LoggingManager.LogWarning("ValidateEd25519PublicKey", "Key validation failed: Sodium reported point is not on curve.");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log the error and return false
+                LoggingManager.LogError(nameof(KeyValidation), $"Error during Ed25519 key validation: {ex.Message}");
+                return false;
+            }
+
+            // If all checks pass, return true.
             return true;
         }
     }

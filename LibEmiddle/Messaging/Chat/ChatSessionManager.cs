@@ -203,7 +203,6 @@ namespace LibEmiddle.Messaging.Chat
                     sharedKeyFromX3DH: sharedKey,
                     // Pass our identity keypair - Check if DR init *needs* IK or just generates its own ratchet key pair.
                     // If it only generates internally, this argument might be removable from InitializeSessionAsSender signature.
-                    senderIdentityKeyPair: _identityKeyPair,
                     recipientSignedPreKeyPublic: recipientBundle.SignedPreKey ?? throw new InvalidOperationException("Recipient bundle missing SignedPreKey required for DR initialization."), // Bob's SPK is initial DHr
                     sessionId: sessionId
                 );

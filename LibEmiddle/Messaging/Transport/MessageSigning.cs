@@ -15,10 +15,10 @@ namespace LibEmiddle.Messaging.Transport
         /// <param name="message">Message to sign</param>
         /// <param name="privateKey">Private key for signing (64 bytes Ed25519)</param>
         /// <returns>Signature</returns>
-        public static byte[] SignMessage(byte[] message, byte[] privateKey)
+        public static byte[] SignMessage(ReadOnlySpan<byte> message, ReadOnlySpan<byte> privateKey)
         {
-            ArgumentNullException.ThrowIfNull(message, nameof(message));
-            ArgumentNullException.ThrowIfNull(privateKey, nameof(privateKey));
+            ArgumentNullException.ThrowIfNull(message.ToArray(), nameof(message));
+            ArgumentNullException.ThrowIfNull(privateKey.ToArray(), nameof(privateKey));
 
             // Ed25519 private keys should be 64 bytes
             if (privateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
@@ -36,11 +36,11 @@ namespace LibEmiddle.Messaging.Transport
         /// <param name="signature">Signature to verify (64 bytes Ed25519)</param>
         /// <param name="publicKey">Public key of signer (32 bytes Ed25519)</param>
         /// <returns>True if signature is valid</returns>
-        public static bool VerifySignature(byte[] message, byte[] signature, byte[] publicKey)
+        public static bool VerifySignature(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey)
         {
-            ArgumentNullException.ThrowIfNull(message, nameof(message));
-            ArgumentNullException.ThrowIfNull(signature, nameof(signature));
-            ArgumentNullException.ThrowIfNull(publicKey, nameof(publicKey));
+            ArgumentNullException.ThrowIfNull(message.ToArray(), nameof(message));
+            ArgumentNullException.ThrowIfNull(signature.ToArray(), nameof(signature));
+            ArgumentNullException.ThrowIfNull(publicKey.ToArray(), nameof(publicKey));
 
             // Use Ed25519 validation here.
             if (!KeyValidation.ValidateEd25519PublicKey(publicKey))
@@ -57,15 +57,15 @@ namespace LibEmiddle.Messaging.Transport
         /// <param name="message">Message to sign</param>
         /// <param name="privateKey">Private key for signing (64 bytes Ed25519)</param>
         /// <returns>Signature as Base64 string</returns>
-        public static string SignTextMessage(string message, byte[] privateKey)
+        public static string SignTextMessage(string message, ReadOnlySpan<byte> privateKey)
         {
             if (string.IsNullOrEmpty(message))
                 throw new ArgumentException("Message cannot be null or empty", nameof(message));
 
-            ArgumentNullException.ThrowIfNull(privateKey, nameof(privateKey));
+            ArgumentNullException.ThrowIfNull(privateKey.ToArray(), nameof(privateKey));
 
-            byte[] messageBytes = Encoding.UTF8.GetBytes(message);
-            byte[] signature = SignMessage(messageBytes, privateKey);
+            ReadOnlySpan<byte> messageBytes = Encoding.UTF8.GetBytes(message);
+            ReadOnlySpan<byte> signature = SignMessage(messageBytes, privateKey);
             return Convert.ToBase64String(signature);
         }
 
@@ -102,13 +102,13 @@ namespace LibEmiddle.Messaging.Transport
         /// <param name="data">Data object to sign</param>
         /// <param name="privateKey">Private key for signing (64 bytes Ed25519)</param>
         /// <returns>Signature as a byte array</returns>
-        public static byte[] SignObject<T>(T data, byte[] privateKey)
+        public static ReadOnlySpan<byte> SignObject<T>(T data, ReadOnlySpan<byte> privateKey)
         {
             // Normalize the object by serializing with our standard options
             string json = JsonSerialization.Serialize(data);
 
             // Sign the canonical representation
-            byte[] messageBytes = Encoding.UTF8.GetBytes(json);
+            ReadOnlySpan<byte> messageBytes = Encoding.UTF8.GetBytes(json);
             return SignMessage(messageBytes, privateKey);
         }
 

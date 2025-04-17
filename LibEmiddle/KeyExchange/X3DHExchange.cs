@@ -39,7 +39,7 @@ namespace LibEmiddle.KeyExchange
         /// <exception cref="ArgumentException">Thrown if the provided identity key pair is invalid.</exception>
         /// <exception cref="CryptographicException">Thrown if key generation or signing fails.</exception>
         public static X3DHKeyBundle CreateX3DHKeyBundle(
-            KeyPair? identityKeyPair = null,
+            in KeyPair? identityKeyPair = null,
             int numOneTimeKeys = 5)
         {
             // Ensures bundle contains private keys for IK, SPK, and OPKs
@@ -50,7 +50,7 @@ namespace LibEmiddle.KeyExchange
             // Temporary storage for private OPKs before adding securely to bundle
             var oneTimePreKeysPrivateTemp = new Dictionary<uint, byte[]>(numOneTimeKeys);
 
-            byte[]? signature = null;
+            ReadOnlySpan<byte> signature = default;
             uint signedPreKeyId = 0;
 
             // --- 1. Identity Key ---
@@ -146,7 +146,7 @@ namespace LibEmiddle.KeyExchange
                     // Public parts
                     IdentityKey = localIdentityKeyPair.PublicKey,
                     SignedPreKey = signedPreKeyPair.PublicKey,
-                    SignedPreKeySignature = signature,
+                    SignedPreKeySignature = signature.ToArray(),
                     OneTimePreKeys = oneTimePreKeysPublic,
                     SignedPreKeyId = signedPreKeyId,
                     OneTimePreKeyIds = oneTimePreKeyIds,
@@ -200,7 +200,7 @@ namespace LibEmiddle.KeyExchange
         /// </summary>
         /// <param name="bundle">The public bundle to validate.</param>
         /// <returns>True if the bundle is valid, false otherwise.</returns>
-        public static bool ValidateKeyBundle(X3DHPublicBundle bundle)
+        public static bool ValidateKeyBundle(in X3DHPublicBundle bundle)
         {
             if (bundle == null) return false;
 
@@ -329,8 +329,8 @@ namespace LibEmiddle.KeyExchange
         /// <param name="usedOneTimePreKeyId">Output parameter containing the ID of the used one-time pre-key, if any</param>
         /// <returns>Initial message keys and session data</returns>
         public static X3DHSession InitiateX3DHSession(
-            X3DHPublicBundle recipientBundle,
-            KeyPair senderIdentityKeyPair,
+            in X3DHPublicBundle recipientBundle,
+            in KeyPair senderIdentityKeyPair,
             out uint? usedOneTimePreKeyId)
         {
             // Initialize output parameter
@@ -481,7 +481,7 @@ namespace LibEmiddle.KeyExchange
                         : DeriveSharedSecret(dh1, dh2, dh3);
 
                     // Initialize Double Ratchet with the master secret from X3DH
-                    var (rootKey, chainKey) = DoubleRatchet.InitializeDoubleRatchet(sharedSecret);
+                    var (rootKey, chainKey) = DoubleRatchet.DerriveDoubleRatchet(sharedSecret);
 
                     // Create the session object with all necessary information
                     var session = new X3DHSession(
@@ -784,9 +784,9 @@ namespace LibEmiddle.KeyExchange
         {
             ArgumentNullException.ThrowIfNull(existingBundle, nameof(existingBundle));
 
-            byte[]? identityPrivateKey = null;
+            ReadOnlySpan<byte> identityPrivateKey = default;
             KeyPair newSignedPreKeyPair;
-            byte[] signature;
+            ReadOnlySpan<byte> signature;
 
             try
             {
@@ -816,7 +816,7 @@ namespace LibEmiddle.KeyExchange
 
                 // Update the existing bundle IN PLACE
                 existingBundle.SignedPreKey = newSignedPreKeyPair.PublicKey; // Set new public key
-                existingBundle.SignedPreKeySignature = signature; // Set new signature
+                existingBundle.SignedPreKeySignature = signature.ToArray(); // Set new signature
                 existingBundle.SignedPreKeyId = newSignedPreKeyId; // Set new ID
                 existingBundle.SetSignedPreKeyPrivate(newSignedPreKeyPair.PrivateKey); // Securely set new private key (clears old one)
                 existingBundle.CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); // Update timestamp
@@ -834,11 +834,6 @@ namespace LibEmiddle.KeyExchange
             }
             finally
             {
-                // Clear the copy of the identity private key we retrieved, ONLY if it was assigned
-                if (identityPrivateKey != null)
-                {
-                    SecureMemory.SecureClear(identityPrivateKey);
-                }
                 // Clear the intermediate new SPK private key *only if* it wasn't successfully stored
                 // Note: SetSignedPreKeyPrivate stores a copy, so the original newSignedPreKeyPair.PrivateKey
                 // should ideally be cleared *after* the Set call succeeds or if it fails.
@@ -858,24 +853,26 @@ namespace LibEmiddle.KeyExchange
         /// <exception cref="ArgumentNullException"></exception>
         /// <exception cref="ArgumentException">If keys are invalid size.</exception>
         /// <exception cref="CryptographicException">If DH calculation fails.</exception>
-        public static byte[] PerformX25519DH(byte[] privateKey, byte[] publicKey)
+        public static byte[] PerformX25519DH(in ReadOnlySpan<byte> privateKey, in ReadOnlySpan<byte> publicKey)
         {
-            ArgumentNullException.ThrowIfNull(privateKey, nameof(privateKey));
-            ArgumentNullException.ThrowIfNull(publicKey, nameof(publicKey));
+            if (privateKey.IsEmpty)
+                throw new ArgumentException("Private key cannot be empty", nameof(privateKey));
+            if (publicKey.IsEmpty)
+                throw new ArgumentException("Public key cannot be empty", nameof(publicKey));
 
             if (privateKey.Length != Constants.X25519_KEY_SIZE || publicKey.Length != Constants.X25519_KEY_SIZE)
                 throw new ArgumentException($"Both keys must be {Constants.X25519_KEY_SIZE} bytes for X25519 DH.");
 
-            if (!KeyValidation.ValidateX25519PublicKey(publicKey))
+            if (!KeyValidation.ValidateX25519PublicKey(publicKey.ToArray()))
                 throw new ArgumentException("Invalid peer public key provided for DH.", nameof(publicKey));
 
             byte[]? sharedOutput = null;
             // Use a copy of the private key for the operation if needed, although Sodium might handle this.
             // For safety, let's assume Sodium.ScalarMult might need a writable buffer or just to be safe.
-            byte[] privateKeyCopy = SecureMemory.SecureCopy(privateKey);
+            byte[] privateKeyCopy = SecureMemory.SecureCopy(privateKey.ToArray());
             try
             {
-                sharedOutput = Sodium.ScalarMult(privateKeyCopy, publicKey); // Use your crypto library's function
+                sharedOutput = Sodium.ScalarMult(privateKeyCopy, publicKey.ToArray()); // Use your crypto library's function
                 if (sharedOutput == null || sharedOutput.Length != 32) // Expect 32-byte output
                 {
                     throw new CryptographicException("X25519 scalar multiplication returned invalid result.");
@@ -888,9 +885,6 @@ namespace LibEmiddle.KeyExchange
             }
             finally
             {
-                if (sharedOutput != null) { 
-                    SecureMemory.SecureClear(sharedOutput); // Clear potentially partial output
-                }
                 SecureMemory.SecureClear(privateKeyCopy); // Clear the copy
             }
         }

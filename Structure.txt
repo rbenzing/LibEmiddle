@@ -15,6 +15,7 @@ LibEmiddle/
 │   │   │   ├── KeyConversion.cs
 │   │   │   ├── KeyGenerator.cs
 │   │   │   ├── KeyStorage.cs
+│   │   │   ├── KeyValidation.cs
 │   │   │   └── NonceGenerator.cs
 │   │   ├── KeyExchange/
 │   │   │   ├── SessionPersistence.cs
@@ -59,13 +60,13 @@ LibEmiddle/
 │   │   │   ├── Constants.cs
 │   │   │   └── ProtocolVersion.cs 
 │   │   ├── DTO/
+│   │   │   ├── GroupSessionDto.cs
 │   │   │   └── SerializedSessionData.cs 
 │   │   ├── Enums/
 │   │   │   └── Enums.cs 
 │   │   ├── Helpers/
 │   │   │   ├── Helpers.cs
-│   │   │   ├── JsonSerialization.cs 
-│   │   │   └── KeyValidation.cs
+│   │   │   └── JsonSerialization.cs 
 │   │   ├── DoubleRatchetSession.cs
 │   │   ├── EncyptedGroupMessage.cs
 │   │   ├── EncryptedMessage.cs

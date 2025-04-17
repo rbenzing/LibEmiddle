@@ -4,7 +4,6 @@ using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.KeyExchange;
-using LibEmiddle.Models;
 
 namespace LibEmiddle.Messaging.Transport
 {
@@ -355,7 +354,7 @@ namespace LibEmiddle.Messaging.Transport
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(contactX25519Key, x25519PrivateKey);
 
             // Initialize Double Ratchet
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = DoubleRatchet.DerriveDoubleRatchet(sharedSecret);
 
             // Create a session with a unique ID
             string sessionId = $"session-{contactId}-{Guid.NewGuid()}";
@@ -597,7 +596,7 @@ namespace LibEmiddle.Messaging.Transport
             {
                 var session = SessionPersistence.DeserializeSession(sessionData, decryptionKey);
 
-                if (session != null && DoubleRatchetExchange.ValidateSession(session))
+                if (session != null && DoubleRatchet.ValidateSession(session))
                 {
                     _sessions[recipientId] = session;
                     return true;
