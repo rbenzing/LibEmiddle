@@ -40,7 +40,7 @@ namespace LibEmiddle.Tests.Unit
                 rng.GetBytes(existingSharedKey);
             }
 
-            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Act
             byte[] derivedKey1 = DeviceLinking.DeriveSharedKeyForNewDevice(
@@ -158,7 +158,8 @@ namespace LibEmiddle.Tests.Unit
 
             // Derive X25519 keys for the second device
             byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
-            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
+            byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
+            Sodium.ComputePublicKey(secondDeviceX25519Public, secondDeviceX25519Private);
 
             // Validate the derived X25519 public key
             bool isValid = _cryptoProvider.ValidateX25519PublicKey(secondDeviceX25519Public);
@@ -244,8 +245,10 @@ namespace LibEmiddle.Tests.Unit
 
                 // Convert to X25519 keys
                 byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
-                byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
-                byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(_cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
+                byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+                Sodium.ComputePublicKey(secondDeviceX25519Public, secondDeviceX25519Private);
+                byte[] mainDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+                Sodium.ComputePublicKey(mainDeviceX25519Public, _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
 
                 // Now manually perform X3DH key exchange for encryption between devices
                 byte[] sharedSecret = X3DHExchange.PerformX25519DH(
@@ -334,8 +337,10 @@ namespace LibEmiddle.Tests.Unit
 
             // Convert to X25519 keys
             byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
-            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
-            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(_cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
+            byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+            Sodium.ComputePublicKey(secondDeviceX25519Public, secondDeviceX25519Private);
+            byte[] mainDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+            Sodium.ComputePublicKey(mainDeviceX25519Public, _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
 
             // Create managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -380,11 +385,17 @@ namespace LibEmiddle.Tests.Unit
             var fourthDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create X25519 keys for each device for linking
-            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
+            byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+            Sodium.ComputePublicKey(
+                secondDeviceX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey));
-            byte[] thirdDeviceX25519Public = Sodium.ScalarMultBase(
+            byte[] thirdDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+            Sodium.ComputePublicKey(
+                thirdDeviceX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(thirdDeviceKeyPair.PrivateKey));
-            byte[] fourthDeviceX25519Public = Sodium.ScalarMultBase(
+            byte[] fourthDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+            Sodium.ComputePublicKey(
+                fourthDeviceX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(fourthDeviceKeyPair.PrivateKey));
 
             // Create device manager for main device
@@ -434,9 +445,13 @@ namespace LibEmiddle.Tests.Unit
             var thirdDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create X25519 keys for each device for linking
-            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
+            byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+            Sodium.ComputePublicKey(
+                secondDeviceX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey));
-            byte[] thirdDeviceX25519Public = Sodium.ScalarMultBase(
+            byte[] thirdDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+            Sodium.ComputePublicKey(
+                thirdDeviceX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(thirdDeviceKeyPair.PrivateKey));
 
             // Create device manager for main device
@@ -482,8 +497,10 @@ namespace LibEmiddle.Tests.Unit
 
             // Convert to X25519 keys
             byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
-            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
-            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(_cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
+            byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+            Sodium.ComputePublicKey(secondDeviceX25519Public, secondDeviceX25519Private);
+            byte[] mainDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+            Sodium.ComputePublicKey(mainDeviceX25519Public, _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
 
             // Create managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -546,7 +563,9 @@ namespace LibEmiddle.Tests.Unit
             var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create X25519 keys
-            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(
+            byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
+            Sodium.ComputePublicKey(
+                secondDeviceX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey));
 
             // Create device manager

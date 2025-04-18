@@ -17,7 +17,7 @@ namespace LibEmiddle.Crypto
         /// <param name="filePath">Path where the key will be stored</param>
         /// <param name="password">Optional password for additional encryption</param>
         /// <param name="saltRotationDays">Number of days after which the salt should be rotated (default: 30)</param>
-        public static void StoreKeyToFile(in ReadOnlySpan<byte> key, string filePath, string? password = null, int saltRotationDays = 30)
+        public static void StoreKeyToFile(ReadOnlySpan<byte> key, string filePath, string? password = null, int saltRotationDays = 30)
         {
             if (key.IsEmpty)
                 throw new ArgumentException("Key cannot be empty", nameof(key));
@@ -28,8 +28,7 @@ namespace LibEmiddle.Crypto
             if (!string.IsNullOrEmpty(password))
             {
                 // Generate salt with high entropy
-                byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
-                RandomNumberGenerator.Fill(salt);
+                byte[] salt = SecureMemory.CreateSecureBuffer(Constants.DEFAULT_SALT_SIZE);
 
                 // Store creation timestamp for salt rotation
                 long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -61,11 +60,11 @@ namespace LibEmiddle.Crypto
                 byte[] metadataLength = BitConverter.GetBytes(metadataBytes.Length);
 
                 // Calculate total size needed
-                int totalSize = metadataLength.Length +
-                                metadataBytes.Length +
-                                salt.Length +
-                                nonce.Length +
-                                encryptedKey.Length;
+                uint totalSize = (uint)metadataLength.Length +
+                                (uint)metadataBytes.Length +
+                                (uint)salt.Length +
+                                (uint)nonce.Length +
+                                (uint)encryptedKey.Length;
 
                 // Use SecureMemory to create a secure buffer for the output
                 byte[] result = SecureMemory.CreateSecureBuffer(totalSize);
@@ -132,7 +131,7 @@ namespace LibEmiddle.Crypto
                     if (metadataLength > 0 && metadataLength < 1024 && metadataLength <= storedData.Length - 4)
                     {
                         // This is a new format file with metadata
-                        byte[] metadataBytes = Sodium.GenerateRandomBytes(metadataLength);
+                        byte[] metadataBytes = SecureMemory.CreateSecureBuffer((uint)metadataLength);
                         storedData.AsSpan(4, metadataLength).CopyTo(metadataBytes);
 
                         string metadataJson = Encoding.UTF8.GetString(metadataBytes);
@@ -152,9 +151,10 @@ namespace LibEmiddle.Crypto
 
                             // Extract salt, nonce, and encrypted key
                             int offset = 4 + metadataLength;
-                            byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE); // Using constant for consistency
-                            byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
-                            byte[] encryptedKey = Sodium.GenerateRandomBytes(storedData.Length - offset - salt.Length - nonce.Length);
+                            byte[] salt = SecureMemory.CreateSecureBuffer(Constants.DEFAULT_SALT_SIZE); // Using constant for consistency
+                            byte[] nonce = SecureMemory.CreateSecureBuffer(Constants.NONCE_SIZE);
+                            byte[] encryptedKey = SecureMemory.CreateSecureBuffer(
+                                (uint)storedData.Length - (uint)offset - (uint)salt.Length - (uint)nonce.Length);
 
                             // Copy salt data - using spans for efficient memory handling
                             storedData.AsSpan(offset, salt.Length).CopyTo(salt.AsSpan());
@@ -188,9 +188,10 @@ namespace LibEmiddle.Crypto
                 }
 
                 // Fall back to old format (for backward compatibility)
-                byte[] oldSalt = Sodium.GenerateRandomBytes(16);
-                byte[] oldNonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
-                byte[] oldEncryptedKey = Sodium.GenerateRandomBytes(storedData.Length - oldSalt.Length - oldNonce.Length);
+                byte[] oldSalt = SecureMemory.CreateSecureBuffer(16);
+                byte[] oldNonce = SecureMemory.CreateSecureBuffer(Constants.NONCE_SIZE);
+                byte[] oldEncryptedKey = SecureMemory.CreateSecureBuffer(
+                    (uint)storedData.Length - (uint)oldSalt.Length - (uint)oldNonce.Length);
 
                 // Use spans for efficient memory copying
                 storedData.AsSpan(0, oldSalt.Length).CopyTo(oldSalt.AsSpan());
@@ -240,7 +241,7 @@ namespace LibEmiddle.Crypto
                 using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Write))
                 {
                     // Create a buffer of random data
-                    byte[] randomBuffer = Sodium.GenerateRandomBytes(4096);
+                    byte[] randomBuffer = SecureMemory.CreateSecureBuffer(4096);
 
                     // Overwrite file with random data multiple times
                     for (int i = 0; i < 3; i++)

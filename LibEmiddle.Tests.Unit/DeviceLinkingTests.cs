@@ -122,7 +122,8 @@ namespace LibEmiddle.Tests.Unit
                 (() => {
                     KeyPair ed25519Pair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
                     var x25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.PrivateKey);
-                    var x25519Public = Sodium.ScalarMultBase(x25519Private);
+                    var x25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
+                    Sodium.ComputePublicKey(x25519Public, x25519Private);
                     return new KeyPair(x25519Public, x25519Private);
                 }, "Ed25519 to X25519 Conversion"),
 
@@ -237,8 +238,8 @@ namespace LibEmiddle.Tests.Unit
                 () => {
                     var randomMessage = new EncryptedMessage
                     {
-                        Ciphertext = SecureMemory.CreateSecureBuffer(originalMessage.Ciphertext.Length),
-                        Nonce = SecureMemory.CreateSecureBuffer(originalMessage.Nonce.Length)
+                        Ciphertext = SecureMemory.CreateSecureBuffer((uint)originalMessage.Ciphertext.Length),
+                        Nonce = SecureMemory.CreateSecureBuffer((uint) originalMessage.Nonce.Length)
                     };
                     return randomMessage;
                 }

@@ -16,8 +16,8 @@ namespace LibEmiddle.Crypto
         {
             Sodium.Initialize();
 
-            byte[] publicKey = Sodium.GenerateRandomBytes(Constants.ED25519_PUBLIC_KEY_SIZE);
-            byte[] privateKey = Sodium.GenerateRandomBytes(Constants.ED25519_PRIVATE_KEY_SIZE);
+            byte[] publicKey = SecureMemory.CreateSecureBuffer(Constants.ED25519_PUBLIC_KEY_SIZE);
+            byte[] privateKey = SecureMemory.CreateSecureBuffer(Constants.ED25519_PRIVATE_KEY_SIZE);
             
             int result = Sodium.crypto_sign_keypair(
                 publicKey,
@@ -37,7 +37,7 @@ namespace LibEmiddle.Crypto
         /// <param name="message">The message to sign.</param>
         /// <param name="privateKey">The private key (64 bytes).</param>
         /// <returns>The signature (64 bytes).</returns>
-        public static byte[] SignDetached(in ReadOnlySpan<byte> message, in ReadOnlySpan<byte> privateKey)
+        public static byte[] SignDetached(ReadOnlySpan<byte> message, ReadOnlySpan<byte> privateKey)
         {
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
@@ -48,13 +48,13 @@ namespace LibEmiddle.Crypto
 
             Sodium.Initialize();
 
-            byte[] signature = Sodium.GenerateRandomBytes(Constants.ED25519_PRIVATE_KEY_SIZE);
+            byte[] signature = SecureMemory.CreateSecureBuffer(Constants.ED25519_PRIVATE_KEY_SIZE);
             
             int result = Sodium.crypto_sign_detached(
                 signature,
-                out ulong signatureLength,
+                out nuint signatureLength,
                 message.ToArray(),
-                (ulong)message.Length,
+                (nuint)message.Length,
                 privateKey.ToArray());
 
             if (result != 0 && signatureLength > 0)
@@ -72,7 +72,7 @@ namespace LibEmiddle.Crypto
         /// <param name="message">The original message.</param>
         /// <param name="publicKey">The public key (32 bytes).</param>
         /// <returns>True if the signature is valid, false otherwise.</returns>
-        public static bool VerifyDetached(in ReadOnlySpan<byte> signature, in ReadOnlySpan<byte> message, in ReadOnlySpan<byte> publicKey)
+        public static bool VerifyDetached(ReadOnlySpan<byte> signature, ReadOnlySpan<byte> message, ReadOnlySpan<byte> publicKey)
         {
             if (signature == null)
                 throw new ArgumentNullException(nameof(signature));
@@ -90,7 +90,7 @@ namespace LibEmiddle.Crypto
             int result = Sodium.crypto_sign_verify_detached(
                         signature.ToArray(),
                         message.ToArray(),
-                        (ulong)message.Length,
+                        (nuint)message.Length,
                         publicKey.ToArray());
 
             return result == 0;

@@ -1,6 +1,7 @@
 using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
+using System.Security.Cryptography;
 
 namespace LibEmiddle.Crypto
 {
@@ -31,7 +32,11 @@ namespace LibEmiddle.Crypto
         /// <summary>
         /// Encrypts data using AES-GCM.
         /// </summary>
-        public byte[] Encrypt(byte[] plaintext, byte[] key, byte[] nonce, byte[]? additionalData = null)
+        public byte[] Encrypt(
+            byte[] plaintext,
+            byte[] key, 
+            byte[] nonce,
+            byte[]? additionalData = null)
         {
             Initialize();
             return AES.AESEncrypt(plaintext, key, nonce, additionalData);
@@ -40,7 +45,11 @@ namespace LibEmiddle.Crypto
         /// <summary>
         /// Decrypts data using AES-GCM.
         /// </summary>
-        public byte[] Decrypt(byte[] ciphertext, byte[] key, byte[] nonce, byte[]? additionalData = null)
+        public byte[] Decrypt(
+            byte[] ciphertext, 
+            byte[] key, 
+            byte[] nonce, 
+            byte[]? additionalData = null)
         {
             Initialize();
             return AES.AESDecrypt(ciphertext, key, nonce, additionalData);
@@ -68,22 +77,13 @@ namespace LibEmiddle.Crypto
         }
 
         /// <summary>
-        /// Generates a symmetric key
-        /// </summary>
-        public byte[] GenerateSymmetricKey()
-        {
-            Initialize();
-            return KeyGenerator.GenerateInitialChainKey();
-        }
-
-        /// <summary>
         /// Generates a nonce of the specified size.
         /// </summary>
-        public byte[] GenerateNonce(int size = 12)
+        public byte[] GenerateNonce(uint size = 12)
         {
             ArgumentNullException.ThrowIfNullOrEmpty(size.ToString(), nameof(size));
 
-            if (size < 12)
+            if (size <= 12)
             {
                 throw new ArgumentException("Size must be 12 or greater.", nameof(size));
             }
@@ -110,7 +110,11 @@ namespace LibEmiddle.Crypto
         /// <summary>
         /// Derives a key using HKDF.
         /// </summary>
-        public byte[] DeriveKey(byte[] ikm, byte[]? salt = null, byte[]? info = null, int length = 32)
+        public byte[] DeriveKey(
+            byte[] ikm, 
+            byte[]? salt = null, 
+            byte[]? info = null, 
+            int length = 32)
         {
             ArgumentNullException.ThrowIfNullOrEmpty(ikm.ToString(), nameof(ikm));
 
@@ -144,7 +148,7 @@ namespace LibEmiddle.Crypto
         /// <summary>
         /// Converts an Ed25519 public key to X25519.
         /// </summary>
-        public byte[] ConvertEd25519PublicKeyToX25519(byte[] ed25519PublicKey)
+        public byte[] ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey)
         {
             ArgumentNullException.ThrowIfNullOrEmpty(ed25519PublicKey.ToString(), nameof(ed25519PublicKey));
 
@@ -155,8 +159,10 @@ namespace LibEmiddle.Crypto
         /// <summary>
         /// Derives an X25519 private key from an Ed25519 private key.
         /// </summary>
-        public byte[] DeriveX25519PrivateKeyFromEd25519(byte[] ed25519PrivateKey)
+        public byte[] DeriveX25519PrivateKeyFromEd25519(ReadOnlySpan<byte> ed25519PrivateKey)
         {
+            ArgumentNullException.ThrowIfNullOrEmpty(ed25519PrivateKey.ToString(), nameof(ed25519PrivateKey));
+
             Initialize();
             return KeyConversion.DeriveX25519PrivateKeyFromEd25519(ed25519PrivateKey);
         }
@@ -168,10 +174,23 @@ namespace LibEmiddle.Crypto
         /// <returns></returns>
         public KeyPair GenerateEd25519KeyPairFromSeed(byte[] seed)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(seed.ToString(), nameof(seed)); 
-            
+            ArgumentNullException.ThrowIfNullOrEmpty(seed.ToString(), nameof(seed));
+
             Initialize();
             return KeyGenerator.GenerateEd25519KeyPairFromSeed(seed);
+        }
+
+        /// <summary>
+        /// Derrives the Double Ratchet keypair from a shared key (typically from X3DH).
+        /// Creates the initial root key and chain key for the Double Ratchet session.
+        /// </summary>
+        /// <param name="sharedKey">32-byte shared secret derived from X3DH key agreement.</param>
+        /// <returns>A tuple containing (rootKey, chainKey) used to initialize the Double Ratchet session.</returns>
+        /// <exception cref="ArgumentException">Thrown when sharedKey is empty or has invalid length.</exception>
+        /// <exception cref="CryptographicException">Thrown when key derivation fails.</exception>
+        public (byte[] rootKey, byte[] chainKey) DerriveDoubleRatchet(byte[] sharedKey)
+        {
+            return DoubleRatchet.DerriveDoubleRatchet(sharedKey);
         }
 
         /// <summary>
@@ -223,13 +242,65 @@ namespace LibEmiddle.Crypto
         }
 
         /// <summary>
+        /// Resumes a Double Ratchet session, optionally marking a previously processed message ID.
+        /// This is useful after deserializing a persisted session to ensure replay protection logic is maintained.
+        /// </summary>
+        /// <param name="session">The session to resume.</param>
+        /// <param name="lastProcessedMessageId">Optional last processed message ID to mark as processed.</param>
+        /// <returns>A new session instance with updated state.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if session is null.</exception>
+        public DoubleRatchetSession ResumeSession(
+            DoubleRatchetSession session, 
+            Guid? lastProcessedMessageId = null)
+        {
+            return DoubleRatchet.ResumeSession(session, lastProcessedMessageId);
+        }
+
+        /// <summary>
+        /// Performs a Diffie-Hellman ratchet step with improved key derivation
+        /// </summary>
+        /// <param name="rootKey">Current root key</param>
+        /// <param name="dhOutput">Output from new Diffie-Hellman exchange</param>
+        /// <returns>New root key and chain key</returns>
+        public (byte[] newRootKey, byte[] newChainKey) DHRatchetStep(
+            byte[] rootKey, 
+            byte[] dhOutput)
+        {
+            ArgumentNullException.ThrowIfNullOrEmpty(rootKey.ToString(), nameof(rootKey));
+            ArgumentNullException.ThrowIfNullOrEmpty(dhOutput.ToString(), nameof(dhOutput));
+
+            return DoubleRatchet.DHRatchetStep(rootKey, dhOutput);
+        }
+
+        /// <summary>
+        /// Performs a step in the Double Ratchet to derive new keys
+        /// </summary>
+        /// <param name="chainKey">Current chain key</param>
+        /// <param name="sessionId">Optional session ID for tracking</param>
+        /// <param name="strategy">Key rotation strategy</param>
+        /// <returns>New chain key and message key</returns>
+        public (byte[] newChainKey, byte[] messageKey) RatchetStep(
+            byte[] chainKey,
+            string? sessionId = null,
+            Enums.KeyRotationStrategy strategy = Enums.KeyRotationStrategy.Standard)
+        {
+            ArgumentNullException.ThrowIfNullOrEmpty(chainKey.ToString(), nameof(chainKey));
+            ArgumentNullException.ThrowIfNullOrEmpty(sessionId, nameof(sessionId));
+
+            return DoubleRatchet.RatchetStep(chainKey, sessionId, strategy);
+        }
+
+        /// <summary>
         /// Encrypts a message using the Double Ratchet algorithm.
         /// </summary>
         /// <param name="session"></param>
         /// <param name="message"></param>
         /// <param name="rotationStrategy"></param>
         /// <returns></returns>
-        public (DoubleRatchetSession updatedSession, EncryptedMessage encryptedMessage) DoubleRatchetEncrypt(DoubleRatchetSession session, string message, Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
+        public (DoubleRatchetSession updatedSession, EncryptedMessage encryptedMessage) DoubleRatchetEncrypt(
+            DoubleRatchetSession session, 
+            string message, 
+            Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
         {
             ArgumentNullException.ThrowIfNullOrEmpty(session.ToString(), nameof(session));
 
@@ -243,7 +314,9 @@ namespace LibEmiddle.Crypto
         /// <param name="session"></param>
         /// <param name="encryptedMessage"></param>
         /// <returns></returns>
-        public (DoubleRatchetSession? updatedSession, string? decryptedMessage) DoubleRatchetDecrypt(DoubleRatchetSession session, EncryptedMessage encryptedMessage)
+        public (DoubleRatchetSession? updatedSession, string? decryptedMessage) DoubleRatchetDecrypt(
+            DoubleRatchetSession session, 
+            EncryptedMessage encryptedMessage)
         {
             ArgumentNullException.ThrowIfNullOrEmpty(session.ToString(), nameof(session));
 
@@ -258,7 +331,10 @@ namespace LibEmiddle.Crypto
         /// <param name="message"></param>
         /// <param name="rotationStrategy"></param>
         /// <returns></returns>
-        public async Task<(DoubleRatchetSession? updatedSession, EncryptedMessage? encryptedMessage)> DoubleRatchetEncryptAsync(DoubleRatchetSession session, string message, Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
+        public async Task<(DoubleRatchetSession? updatedSession, EncryptedMessage? encryptedMessage)> DoubleRatchetEncryptAsync(
+            DoubleRatchetSession session, 
+            string message, 
+            Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
         {
             ArgumentNullException.ThrowIfNullOrEmpty(session.ToString(), nameof(session));
 
@@ -272,7 +348,9 @@ namespace LibEmiddle.Crypto
         /// <param name="session"></param>
         /// <param name="encryptedMessage"></param>
         /// <returns></returns>
-        public async Task<(DoubleRatchetSession? updatedSession, string? decryptedMessage)> DoubleRatchetDecryptAsync(DoubleRatchetSession session, EncryptedMessage encryptedMessage)
+        public async Task<(DoubleRatchetSession? updatedSession, string? decryptedMessage)> DoubleRatchetDecryptAsync(
+            DoubleRatchetSession session, 
+            EncryptedMessage encryptedMessage)
         {
             ArgumentNullException.ThrowIfNullOrEmpty(session.ToString(), nameof(session));
 
@@ -349,17 +427,6 @@ namespace LibEmiddle.Crypto
         public bool SecureCompare(byte[] a, byte[] b)
         {
             return SecureMemory.SecureCompare(a, b);
-        }
-
-        /// <summary>
-        /// Generates random bytes using libsodium's CSPRNG.
-        /// </summary>
-        public byte[] GenerateRandomBytes(int count)
-        {
-            Initialize();
-            byte[] randomBytes = new byte[count];
-            Sodium.RandomBytes(randomBytes);
-            return randomBytes;
         }
     }
 } 

@@ -84,7 +84,7 @@ namespace LibEmiddle.Models
 
             // Combine device key and timestamp for verification
             byte[] timestampBytes = BitConverter.GetBytes(RevocationTimestamp);
-            byte[] dataToVerify = Sodium.GenerateRandomBytes(RevokedDeviceKey.Length + timestampBytes.Length);
+            byte[] dataToVerify = SecureMemory.CreateSecureBuffer((uint)RevokedDeviceKey.Length + (uint)timestampBytes.Length);
 
             RevokedDeviceKey.AsSpan().CopyTo(dataToVerify.AsSpan(0, RevokedDeviceKey.Length));
             timestampBytes.AsSpan().CopyTo(dataToVerify.AsSpan(RevokedDeviceKey.Length, timestampBytes.Length));

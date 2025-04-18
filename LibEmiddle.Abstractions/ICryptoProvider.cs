@@ -19,8 +19,7 @@ namespace LibEmiddle.Abstractions
         // Key generation
         KeyPair GenerateKeyPair(KeyType keyType);
         KeyPair GenerateEd25519KeyPairFromSeed(byte[] seed);
-        byte[] GenerateSymmetricKey();
-        byte[] GenerateNonce(int size = 12);
+        byte[] GenerateNonce(uint size = 12);
         byte[] GenerateHmacSha256(byte[] existingSharedKey, byte[] normalizedPublicKey);
 
         // Key derivation
@@ -50,8 +49,8 @@ namespace LibEmiddle.Abstractions
         Task<(DoubleRatchetSession? updatedSession, string? decryptedMessage)> DoubleRatchetDecryptAsync(DoubleRatchetSession session, EncryptedMessage encryptedMessage);
 
         // Key conversion
-        byte[] ConvertEd25519PublicKeyToX25519(byte[] ed25519PublicKey);
-        byte[] DeriveX25519PrivateKeyFromEd25519(byte[] ed25519PrivateKey);
+        byte[] ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey);
+        byte[] DeriveX25519PrivateKeyFromEd25519(ReadOnlySpan<byte> ed25519PrivateKey);
         bool ValidateX25519PublicKey(byte[] publicKey);
         string ExportKeyToBase64(byte[] key);
         byte[] ImportKeyFromBase64(string base64Key);
@@ -61,9 +60,6 @@ namespace LibEmiddle.Abstractions
         // Secure memory handling
         void SecureClear(byte[] data);
         bool SecureCompare(byte[] a, byte[] b);
-
-        // Random generation
-        byte[] GenerateRandomBytes(int count);
     }
 
     /// <summary>

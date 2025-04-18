@@ -39,7 +39,7 @@ namespace LibEmiddle.KeyExchange
         /// <exception cref="ArgumentException">Thrown if the provided identity key pair is invalid.</exception>
         /// <exception cref="CryptographicException">Thrown if key generation or signing fails.</exception>
         public static X3DHKeyBundle CreateX3DHKeyBundle(
-            in KeyPair? identityKeyPair = null,
+            KeyPair? identityKeyPair = null,
             int numOneTimeKeys = 5)
         {
             // Ensures bundle contains private keys for IK, SPK, and OPKs
@@ -406,7 +406,7 @@ namespace LibEmiddle.KeyExchange
                     if (recipientBundle.OneTimePreKeys != null && recipientBundle.OneTimePreKeys.Count > 0)
                     {
                         // Select a random pre-key with secure random generation
-                        byte[] randomBytes = Sodium.GenerateRandomBytes(4);
+                        byte[] randomBytes = SecureMemory.CreateSecureBuffer(4);
                         // Use BitConverter.ToInt32 to convert the random bytes to an int
                         int index = Math.Abs(BitConverter.ToInt32(randomBytes, 0)) %
                             recipientBundle.OneTimePreKeys.Count;
@@ -853,7 +853,7 @@ namespace LibEmiddle.KeyExchange
         /// <exception cref="ArgumentNullException"></exception>
         /// <exception cref="ArgumentException">If keys are invalid size.</exception>
         /// <exception cref="CryptographicException">If DH calculation fails.</exception>
-        public static byte[] PerformX25519DH(in ReadOnlySpan<byte> privateKey, in ReadOnlySpan<byte> publicKey)
+        public static byte[] PerformX25519DH(ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> publicKey)
         {
             if (privateKey.IsEmpty)
                 throw new ArgumentException("Private key cannot be empty", nameof(privateKey));
@@ -866,18 +866,18 @@ namespace LibEmiddle.KeyExchange
             if (!KeyValidation.ValidateX25519PublicKey(publicKey.ToArray()))
                 throw new ArgumentException("Invalid peer public key provided for DH.", nameof(publicKey));
 
-            byte[]? sharedOutput = null;
-            // Use a copy of the private key for the operation if needed, although Sodium might handle this.
-            // For safety, let's assume Sodium.ScalarMult might need a writable buffer or just to be safe.
+            byte[] sharedOutput = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
             byte[] privateKeyCopy = SecureMemory.SecureCopy(privateKey.ToArray());
             try
             {
-                sharedOutput = Sodium.ScalarMult(privateKeyCopy, publicKey.ToArray()); // Use your crypto library's function
-                if (sharedOutput == null || sharedOutput.Length != 32) // Expect 32-byte output
+                Sodium.ComputeSharedSecret(sharedOutput, privateKeyCopy, publicKey.ToArray());
+
+                if (sharedOutput == null || sharedOutput.Length != Constants.X25519_KEY_SIZE)
                 {
                     throw new CryptographicException("X25519 scalar multiplication returned invalid result.");
                 }
-                return sharedOutput;
+
+                return sharedOutput.ToArray();
             }
             catch (Exception ex)
             {
@@ -885,7 +885,7 @@ namespace LibEmiddle.KeyExchange
             }
             finally
             {
-                SecureMemory.SecureClear(privateKeyCopy); // Clear the copy
+                SecureMemory.SecureClear(privateKeyCopy);
             }
         }
 

@@ -36,10 +36,10 @@ namespace LibEmiddle.Crypto
         /// <exception cref="ArgumentException">If key or nonce have invalid lengths.</exception>
         /// <exception cref="CryptographicException">If encryption fails.</exception>
         public static byte[] AESEncrypt(
-            in ReadOnlySpan<byte> plaintext,
-            in ReadOnlySpan<byte> key,
-            in ReadOnlySpan<byte> nonce,
-            in ReadOnlySpan<byte> additionalData = default)
+            ReadOnlySpan<byte> plaintext,
+            ReadOnlySpan<byte> key,
+            ReadOnlySpan<byte> nonce,
+            ReadOnlySpan<byte> additionalData = default)
         {
             // --- Argument Validation ---
             // Check lengths first (avoids exceptions in AesGcm constructor/Encrypt)
@@ -90,10 +90,10 @@ namespace LibEmiddle.Crypto
         /// <param name="additionalData">Optional authenticated additional data</param>
         /// <returns>Decrypted data</returns>
         public static byte[] AESDecrypt(
-            in ReadOnlySpan<byte> ciphertextWithTag,
-            in ReadOnlySpan<byte> key,
-            in ReadOnlySpan<byte> nonce,
-            in ReadOnlySpan<byte> additionalData = default)
+            ReadOnlySpan<byte> ciphertextWithTag,
+            ReadOnlySpan<byte> key,
+            ReadOnlySpan<byte> nonce,
+            ReadOnlySpan<byte> additionalData = default)
         {
             if (ciphertextWithTag.IsEmpty)
                 throw new ArgumentException("Ciphertext cannot be empty", nameof(ciphertextWithTag));
@@ -119,11 +119,11 @@ namespace LibEmiddle.Crypto
             }
 
             // Prepare additional data if provided
-            ReadOnlySpan<byte> ad = additionalData;
+            byte[] ad = additionalData.ToArray();
 
             // Allocate output buffer for plaintext
             // Plaintext will be at most the size of ciphertext - authentication tag
-            ReadOnlySpan<byte> plaintext = new byte[ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE];
+            byte[] plaintext = SecureMemory.CreateSecureBuffer((uint)ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE);
 
             // Allocate unmanaged memory for the state (must be 16-byte aligned)
             nint state = nint.Zero;
@@ -139,10 +139,10 @@ namespace LibEmiddle.Crypto
 
                 // Decrypt using libsodium
                 result = Sodium.crypto_aead_aes256gcm_decrypt_afternm(
-                    plaintext.ToArray(), out ulong plaintextLength,
+                    plaintext, out ulong plaintextLength,
                     null, // nsec is always null for AES-GCM
                     ciphertextWithTag.ToArray(), (ulong)ciphertextWithTag.Length,
-                    ad.ToArray(), (ulong)ad.Length,
+                    ad, (ulong)ad.Length,
                     nonce.ToArray(),
                     state);
 
@@ -160,7 +160,7 @@ namespace LibEmiddle.Crypto
                     return resizedPlaintext;
                 }
 
-                return plaintext.ToArray();
+                return plaintext;
             }
             catch (DllNotFoundException)
             {
@@ -192,7 +192,7 @@ namespace LibEmiddle.Crypto
         /// <param name="message">Message to encrypt</param>
         /// <param name="key">AES-256 encryption key (32 bytes)</param>
         /// <returns>EncryptedMessage object containing ciphertext and nonce</returns>
-        public static EncryptedMessage Encrypt(string message, in ReadOnlySpan<byte> key)
+        public static EncryptedMessage Encrypt(string message, ReadOnlySpan<byte> key)
         {
             ArgumentException.ThrowIfNullOrEmpty(message, nameof(message));
             ArgumentNullException.ThrowIfNull(key.ToString(), nameof(key));
@@ -219,7 +219,7 @@ namespace LibEmiddle.Crypto
         /// <param name="encryptedMessage">EncryptedMessage object</param>
         /// <param name="key">Decryption key</param>
         /// <returns>Decrypted message string</returns>
-        public static string Decrypt(EncryptedMessage encryptedMessage, in ReadOnlySpan<byte> key)
+        public static string Decrypt(EncryptedMessage encryptedMessage, ReadOnlySpan<byte> key)
         {
             ArgumentNullException.ThrowIfNull(encryptedMessage, nameof(encryptedMessage));
             ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, "Ciphertext cannot be null");
@@ -269,10 +269,10 @@ namespace LibEmiddle.Crypto
         /// <returns>Encrypted data without authentication tag</returns>
         public static ReadOnlySpan<byte> AESEncryptDetached(
             ReadOnlySpan<byte> plaintext,
-            in ReadOnlySpan<byte> key,
-            in ReadOnlySpan<byte> nonce, 
+            ReadOnlySpan<byte> key,
+            ReadOnlySpan<byte> nonce, 
             out byte[] tag,
-            in ReadOnlySpan<byte> additionalData = default)
+            ReadOnlySpan<byte> additionalData = default)
         {
             ArgumentNullException.ThrowIfNull(plaintext.ToArray());
             ArgumentNullException.ThrowIfNull(key.ToArray());
@@ -357,11 +357,11 @@ namespace LibEmiddle.Crypto
         /// <param name="additionalData">Optional authenticated additional data</param>
         /// <returns>Decrypted data</returns>
         public static ReadOnlySpan<byte> AESDecryptDetached(
-            in ReadOnlySpan<byte> ciphertext, 
-            in ReadOnlySpan<byte> tag, 
-            in ReadOnlySpan<byte> key, 
-            in ReadOnlySpan<byte> nonce, 
-            in ReadOnlySpan<byte> additionalData = default)
+            ReadOnlySpan<byte> ciphertext, 
+            ReadOnlySpan<byte> tag, 
+            ReadOnlySpan<byte> key, 
+            ReadOnlySpan<byte> nonce, 
+            ReadOnlySpan<byte> additionalData = default)
         {
             ArgumentNullException.ThrowIfNull(ciphertext.ToArray());
             ArgumentNullException.ThrowIfNull(tag.ToArray());

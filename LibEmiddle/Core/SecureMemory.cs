@@ -10,9 +10,9 @@ namespace LibEmiddle.Core
     public static class SecureMemory
     {
         /// <summary>
-        /// Securely clears sensitive data from memory.
+        /// Securely clears a managed heap byte array.
         /// </summary>
-        /// <param name="data">Data to clear</param>
+        /// <param name="data">The byte array to securely clear.</param>
         public static void SecureClear(byte[]? data)
         {
             if (data == null || data.Length == 0)
@@ -33,89 +33,72 @@ namespace LibEmiddle.Core
             GC.KeepAlive(data);
         }
 
-        /// <summary>
-        /// Compares two byte arrays in constant time to prevent timing attacks.
-        /// </summary>
-        /// <param name="a">First byte array</param>
-        /// <param name="b">Second byte array</param>
-        /// <returns>True if arrays are equal, false otherwise</returns>
-        public static bool SecureCompare(byte[] a, byte[] b)
+        public static unsafe void SecureClear(Span<byte> data)
         {
-            // Handle null cases
-            if (a == null && b == null)
-                return true;
-            if (a == null || b == null)
+            if (data.Length == 0)
+                return;
+
+            fixed (byte* ptr = data)
+            {
+                Sodium.sodium_memzero((IntPtr)ptr, (UIntPtr)data.Length);
+            }
+        }
+
+        /// <summary>
+        /// Securely compares two byte spans using constant-time comparison.
+        /// </summary>
+        /// <param name="a">First byte span.</param>
+        /// <param name="b">Second byte span.</param>
+        /// <returns>True if the contents are equal and the lengths match; false otherwise.</returns>
+        public static bool SecureCompare(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
+        {
+            if (a.Length != b.Length)
+            {
+                // Compare up to the shortest length anyway to resist timing attacks
+                // Use a dummy buffer of equal size if needed
+                Span<byte> dummy = stackalloc byte[Math.Min(a.Length, b.Length)];
+                a.Slice(0, dummy.Length).CopyTo(dummy);
                 return false;
-
-            // If lengths differ, return false but still do a comparison with the shared length
-            // to ensure constant-time operation regardless of where arrays differ
-            int minLength = Math.Min(a.Length, b.Length);
-            int result;
-
-            // Pin both arrays to get stable memory addresses
-            GCHandle handleA = GCHandle.Alloc(a, GCHandleType.Pinned);
-            GCHandle handleB = GCHandle.Alloc(b, GCHandleType.Pinned);
-
-            try
-            {
-                // Compare only up to the minimum length to avoid buffer overruns
-                IntPtr ptrA = handleA.AddrOfPinnedObject();
-                IntPtr ptrB = handleB.AddrOfPinnedObject();
-
-                result = Sodium.sodium_memcmp(ptrA, ptrB, (UIntPtr)minLength);
-            }
-            finally
-            {
-                // Always release handles to avoid memory leaks
-                if (handleA.IsAllocated)
-                    handleA.Free();
-                if (handleB.IsAllocated)
-                    handleB.Free();
             }
 
-            // Return true only if the comparison succeeds AND lengths are identical
-            return result == 0 && a.Length == b.Length;
+            unsafe
+            {
+                fixed (byte* ptrA = a)
+                fixed (byte* ptrB = b)
+                {
+                    int result = Sodium.sodium_memcmp((IntPtr)ptrA, (IntPtr)ptrB, (UIntPtr)a.Length);
+                    return result == 0;
+                }
+            }
         }
 
         /// <summary>
-        /// Creates a secure copy of a byte array to prevent modification of the original data.
+        /// Performs a secure copy of the source span into a new byte array.
         /// </summary>
-        /// <param name="source">The source array to copy</param>
-        /// <returns>A new array containing a copy of the source data</returns>
-        public static byte[] SecureCopy(byte[] source)
+        /// <param name="source">The span to copy.</param>
+        /// <returns>A new byte array containing a copy of the source.</returns>
+        /// <exception cref="ArgumentException">If the span is empty.</exception>
+        public static byte[] SecureCopy(ReadOnlySpan<byte> source)
         {
-            ArgumentNullException.ThrowIfNull(source, nameof(source));
+            if (source.Length == 0)
+                throw new ArgumentException("Source span must not be empty.", nameof(source));
 
-            byte[] copy = Sodium.GenerateRandomBytes(source.Length);
-            source.AsSpan().CopyTo(copy.AsSpan());
+            byte[] copy = CreateSecureBuffer((uint)source.Length);
+            source.CopyTo(copy);
             return copy;
-        }
+        }      
 
         /// <summary>
         /// Creates a secure buffer using libsodium's protected memory allocation.
         /// </summary>
         /// <param name="size">Size of the buffer in bytes</param>
         /// <returns>A new secure buffer</returns>
-        public static byte[] CreateSecureBuffer(int size)
+        public static byte[] CreateSecureBuffer(uint size)
         {
-            if (size <= 0)
+            if (size == 0)
                 throw new ArgumentException("Buffer size must be positive", nameof(size));
 
-            // Allocate memory using sodium_malloc
-            IntPtr ptr = Sodium.sodium_malloc((UIntPtr)size);
-            if (ptr == IntPtr.Zero)
-                throw new OutOfMemoryException("Failed to allocate secure memory");
-
-            // Create a byte array from this memory
-            byte[] buffer = Sodium.GenerateRandomBytes(size);
-
-            // Copy the allocated memory to the managed array
-            Marshal.Copy(ptr, buffer, 0, size);
-
-            // Free the sodium_malloc memory - this is separate from the managed buffer
-            Sodium.sodium_free(ptr);
-
-            return buffer;
+            return Sodium.GenerateRandomBytes(size);
         }
 
         /// <summary>
@@ -138,80 +121,6 @@ namespace LibEmiddle.Core
 
             // Return to the pool
             ArrayPool<byte>.Shared.Return(buffer);
-        }
-
-        /// <summary>
-        /// Creates a buffer of the specified size, optionally using the array pool 
-        /// with secure handling for sensitive data.
-        /// </summary>
-        /// <param name="size">Size of the buffer in bytes</param>
-        /// <param name="usePool">Whether to use the shared buffer pool</param>
-        /// <param name="isSecure">Whether this buffer will contain sensitive data</param>
-        /// <returns>A new byte array of the requested size</returns>
-        public static byte[] CreateBuffer(int size, bool usePool = true, bool isSecure = false)
-        {
-            if (size <= 0)
-                throw new ArgumentException("Buffer size must be positive", nameof(size));
-
-            // For very large buffers, avoid the pool to prevent impact on other operations
-            if (!usePool || size > 1024 * 16)
-            {
-                return Sodium.GenerateRandomBytes(size);
-            }
-
-            // For smaller buffers, rent from the pool
-            byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(size);
-            try
-            {
-                // For secure buffers, clear the rented buffer first to avoid data leakage
-                if (isSecure)
-                {
-                    SecureClear(rentedBuffer);
-                }
-
-                // Create a properly sized result buffer
-                byte[] result = new byte[size];
-
-                // Only copy data from the rental buffer if needed (if we're reusing a larger buffer)
-                if (rentedBuffer.Length > size)
-                {
-                    rentedBuffer.AsSpan(0, size).CopyTo(result.AsSpan());
-                }
-                else
-                {
-                    // Direct buffer usage - optimization to avoid unnecessary copying
-                    // This is safe because we've ensured the exact size above
-                    return rentedBuffer;
-                }
-
-                return result;
-            }
-            catch
-            {
-                // Clear sensitive data on exceptions
-                if (isSecure)
-                {
-                    SecureClear(rentedBuffer);
-                }
-
-                // Return the buffer to the pool
-                ArrayPool<byte>.Shared.Return(rentedBuffer);
-                throw;
-            }
-            finally
-            {
-                // Only return the buffer if we made a copy (we didn't return the rented buffer directly)
-                if (rentedBuffer.Length > size)
-                {
-                    // Clear rented buffer before returning it if it might contain sensitive data
-                    if (isSecure)
-                    {
-                        SecureClear(rentedBuffer);
-                    }
-
-                    ArrayPool<byte>.Shared.Return(rentedBuffer);
-                }
-            }
         }
 
         /// <summary>

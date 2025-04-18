@@ -108,7 +108,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, identityKeyPair.PrivateKey);
 
             // Initialize Double Ratchet
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             // Create initial session
             string sessionId = Guid.NewGuid().ToString();
@@ -190,11 +190,11 @@ namespace LibEmiddle.Tests.Unit
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
 
             // Initialize Double Ratchet
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             // Act
             // First, perform a normal DH ratchet step
-            var (newRootKey1, newChainKey1) = DoubleRatchetExchange.DHRatchetStep(
+            var (newRootKey1, newChainKey1) = _cryptoProvider.DHRatchetStep(
                 rootKey,
                 sharedSecret
             );
@@ -202,7 +202,7 @@ namespace LibEmiddle.Tests.Unit
             // Then, perform another step with a different DH output
             // to simulate a key rotation with a new device or key
             byte[] newSharedSecret = X3DHExchange.PerformX25519DH(charlieKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (newRootKey2, newChainKey2) = DoubleRatchetExchange.DHRatchetStep(
+            var (newRootKey2, newChainKey2) = _cryptoProvider.DHRatchetStep(
                 newRootKey1,
                 newSharedSecret
             );
@@ -334,7 +334,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Create initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             string sessionId = Guid.NewGuid().ToString();
 
@@ -386,7 +386,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Exchange new DH key and update
             byte[] newSharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceNewKeyPair.PrivateKey);
-            var (newRootKey, newChainKey) = DoubleRatchetExchange.DHRatchetStep(currentAliceSession.RootKey, newSharedSecret);
+            var (newRootKey, newChainKey) = _cryptoProvider.DHRatchetStep(currentAliceSession.RootKey, newSharedSecret);
 
             // 3. Create a new session with the new key pair but preserve session state
             currentAliceSession = new DoubleRatchetSession(
@@ -457,7 +457,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Create initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             string sessionId = Guid.NewGuid().ToString();
 
@@ -544,7 +544,7 @@ namespace LibEmiddle.Tests.Unit
             );
 
             // Perform a DH ratchet step to upgrade the keys
-            var (newRootKey, newChainKey) = DoubleRatchetExchange.DHRatchetStep(
+            var (newRootKey, newChainKey) = _cryptoProvider.DHRatchetStep(
                 currentAliceSession.RootKey,
                 newSharedSecret
             );
@@ -671,7 +671,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Create shared secret and initialize Double Ratchet
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             // Create three sessions with different session IDs for testing different strategies
             var standardSession = new DoubleRatchetSession(

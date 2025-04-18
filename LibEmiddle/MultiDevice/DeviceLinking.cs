@@ -98,8 +98,11 @@ namespace LibEmiddle.MultiDevice
 
             // Convert main device's Ed25519 private key to X25519.
             byte[] mainDeviceX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey);
+
             // Compute the main device's X25519 public key.
-            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(mainDeviceX25519Private);
+            byte[] mainDeviceX25519Public = Array.Empty<byte>();
+            Sodium.ComputePublicKey(mainDeviceX25519Public, mainDeviceX25519Private);
+
             // Convert new device's Ed25519 public key to X25519.
             byte[] newDeviceX25519Public = KeyConversion.ConvertEd25519PublicKeyToX25519(newDevicePublicKey);
 

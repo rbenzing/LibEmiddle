@@ -41,7 +41,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             string sessionId = "resume-test-" + Guid.NewGuid().ToString();
 
@@ -91,7 +91,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             string sessionId = "resume-with-msgid-" + Guid.NewGuid().ToString();
 
@@ -261,7 +261,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             // Create a session ID that will be shared between Alice and Bob
             string sessionId = "error-recovery-test-" + Guid.NewGuid().ToString();
@@ -470,10 +470,12 @@ namespace LibEmiddle.Tests.Unit
 
             // Convert to X25519 keys
             byte[] mainDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey);
-            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(mainDeviceX25519Private);
+            byte[] mainDeviceX25519Public = SecureMemory.CreateSecureBuffer(32);
+            Sodium.ComputePublicKey(mainDeviceX25519Public, mainDeviceX25519Private);
 
             byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
-            byte[] secondDeviceX25519Public = Sodium.ScalarMultBase(secondDeviceX25519Private);
+            byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(32);
+            Sodium.ComputePublicKey(secondDeviceX25519Public, secondDeviceX25519Private);
 
             Trace.TraceWarning($"Main device X25519 public key: {Convert.ToBase64String(mainDeviceX25519Public)}");
             Trace.TraceWarning($"Second device X25519 public key: {Convert.ToBase64String(secondDeviceX25519Public)}");
@@ -645,7 +647,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             string sessionId = "cross-device-" + Guid.NewGuid().ToString();
 
@@ -682,7 +684,7 @@ namespace LibEmiddle.Tests.Unit
 
             // On the "new device", deserialize and resume the session
             var restoredSession = SessionPersistence.DeserializeSession(serializedSession, encryptionKey);
-            var resumedSession = DoubleRatchetExchange.ResumeSession(restoredSession);
+            var resumedSession = _cryptoProvider.ResumeSession(restoredSession);
 
             // Assert
             Assert.IsNotNull(resumedSession, "Session should be resumed successfully on new device");

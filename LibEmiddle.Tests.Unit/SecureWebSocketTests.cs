@@ -34,7 +34,7 @@ namespace LibEmiddle.Tests.Unit
             var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
             var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
             string sessionId = "test-session-" + Guid.NewGuid().ToString();
 
             _testSession = new DoubleRatchetSession(

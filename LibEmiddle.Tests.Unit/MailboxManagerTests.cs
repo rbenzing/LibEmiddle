@@ -427,8 +427,8 @@ namespace LibEmiddle.Tests.Unit
             string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
 
             // Generate encryption keys
-            byte[] correctKey = Sodium.GenerateRandomBytes(32);
-            byte[] wrongKey = Sodium.GenerateRandomBytes(32);
+            byte[] correctKey = SecureMemory.CreateSecureBuffer(32);
+            byte[] wrongKey = SecureMemory.CreateSecureBuffer(32);
 
             // Make sure keys are different
             wrongKey[0] = (byte)(correctKey[0] ^ 0xFF);
@@ -457,7 +457,7 @@ namespace LibEmiddle.Tests.Unit
         public void ExportSession_NonexistentRecipient_ShouldThrowException()
         {
             // Arrange
-            string nonExistentRecipientId = Convert.ToBase64String(Sodium.GenerateRandomBytes(32));
+            string nonExistentRecipientId = Convert.ToBase64String(SecureMemory.CreateSecureBuffer(32));
 
             using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
             {

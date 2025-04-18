@@ -2,10 +2,11 @@
 using System;
 using System.Text;
 using System.Security.Cryptography;
+using LibEmiddle.Abstractions;
 using LibEmiddle.API;
 using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Group;
-using LibEmiddle.Abstractions;
+using LibEmiddle.KeyExchange;
 using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Tests.Unit
@@ -180,12 +181,12 @@ namespace LibEmiddle.Tests.Unit
         public void Performance_DoubleRatchetMessageExchangeTest()
         {
             // Arrange - Set up Double Ratchet sessions
-            var aliceKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-            var bobKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
 
             // Initial shared secret
-            byte[] sharedSecret = KeyExchange.X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = KeyExchange.DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             // Create a session ID that will be shared between Alice and Bob
             string sessionId = "alice-bob-session-" + Guid.NewGuid().ToString();

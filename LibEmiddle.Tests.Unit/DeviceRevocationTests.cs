@@ -126,7 +126,9 @@ namespace LibEmiddle.Tests.Unit
             var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create X25519 key for the device to revoke
-            byte[] deviceToRevokeX25519Public = Sodium.ScalarMultBase(
+            byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
+            Sodium.ComputePublicKey(
+                deviceToRevokeX25519Public, 
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.PrivateKey));
 
             // Create a device manager and link a device
@@ -170,7 +172,9 @@ namespace LibEmiddle.Tests.Unit
             var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create X25519 key for the device to revoke
-            byte[] deviceToRevokeX25519Public = Sodium.ScalarMultBase(
+            byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
+            Sodium.ComputePublicKey(
+                deviceToRevokeX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.PrivateKey));
 
             // Create two device managers
@@ -202,7 +206,9 @@ namespace LibEmiddle.Tests.Unit
             var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create X25519 key for the device to revoke
-            byte[] deviceToRevokeX25519Public = Sodium.ScalarMultBase(
+            byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
+            Sodium.ComputePublicKey(
+                deviceToRevokeX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.PrivateKey));
 
             // Create two device managers
@@ -241,7 +247,9 @@ namespace LibEmiddle.Tests.Unit
             var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
 
             // Create X25519 key for the device to revoke
-            byte[] deviceToRevokeX25519Public = Sodium.ScalarMultBase(
+            byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
+            Sodium.ComputePublicKey(
+                deviceToRevokeX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.PrivateKey));
 
             // Create a device manager without linking the device

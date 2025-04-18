@@ -22,6 +22,7 @@ namespace LibEmiddle.Crypto
         private const byte CHAIN_KEY_SEED_BYTE = 0x02; // Seed byte for deriving next Chain Key via HMAC
         private static readonly byte[] MessageKeySeed = [MESSAGE_KEY_SEED_BYTE]; // Pre-allocate
         private static readonly byte[] ChainKeySeed = [CHAIN_KEY_SEED_BYTE]; // Pre-allocate
+        private static readonly Dictionary<string, int> SessionMessageCounters = new();
 
         // --- Session Locking (for async wrappers) ---
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionLocks = new();
@@ -38,7 +39,7 @@ namespace LibEmiddle.Crypto
         /// <returns>A tuple containing (rootKey, chainKey) used to initialize the Double Ratchet session.</returns>
         /// <exception cref="ArgumentException">Thrown when sharedKey is empty or has invalid length.</exception>
         /// <exception cref="CryptographicException">Thrown when key derivation fails.</exception>
-        public static (byte[] rootKey, byte[] chainKey) DerriveDoubleRatchet(in ReadOnlySpan<byte> sharedKey)
+        public static (byte[] rootKey, byte[] chainKey) DerriveDoubleRatchet(ReadOnlySpan<byte> sharedKey)
         {
             if (sharedKey.IsEmpty)
                 throw new ArgumentException("Shared key cannot be empty", nameof(sharedKey));
@@ -649,6 +650,147 @@ namespace LibEmiddle.Crypto
             }
         }
 
+        /// <summary>
+        /// Performs a Diffie-Hellman ratchet step with improved key derivation
+        /// </summary>
+        /// <param name="rootKey">Current root key</param>
+        /// <param name="dhOutput">Output from new Diffie-Hellman exchange</param>
+        /// <returns>New root key and chain key</returns>
+        public static (byte[] newRootKey, byte[] newChainKey) DHRatchetStep(ReadOnlySpan<byte> rootKey, ReadOnlySpan<byte> dhOutput)
+        {
+            ArgumentNullException.ThrowIfNull(rootKey.ToArray());
+            ArgumentNullException.ThrowIfNull(dhOutput.ToArray());
+
+            if (rootKey.Length != Constants.AES_KEY_SIZE)
+                throw new ArgumentException($"Root key must be {Constants.AES_KEY_SIZE} bytes", nameof(rootKey));
+
+            // Create secure copies to prevent accidental modification
+            byte[] rootKeyCopy = SecureMemory.CreateSecureBuffer((uint)rootKey.Length);
+            rootKey.ToArray().AsSpan().CopyTo(rootKeyCopy.AsSpan());
+
+            byte[] dhOutputCopy = SecureMemory.CreateSecureBuffer((uint)dhOutput.Length);
+            dhOutput.ToArray().AsSpan().CopyTo(dhOutputCopy.AsSpan());
+
+            try
+            {
+                byte[] prk = KeyConversion.HkdfDerive(
+                    rootKeyCopy,
+                    salt: dhOutputCopy,
+                    info: Encoding.UTF8.GetBytes("RootKeyDerivation")
+                );
+
+                byte[] newRootKey = KeyConversion.HkdfDerive(
+                    prk,
+                    info: Encoding.UTF8.GetBytes("NewRootKey")
+                );
+
+                byte[] newChainKey = KeyConversion.HkdfDerive(
+                    prk,
+                    info: Encoding.UTF8.GetBytes("NewChainKey")
+                );
+
+                // Securely clear the intermediate PRK value
+                SecureMemory.SecureClear(prk);
+
+                return (newRootKey, newChainKey);
+            }
+            finally
+            {
+                // Securely clear our copies
+                SecureMemory.SecureClear(rootKeyCopy);
+                SecureMemory.SecureClear(dhOutputCopy);
+            }
+        }
+
+        /// <summary>
+        /// Performs a step in the Double Ratchet to derive new keys
+        /// </summary>
+        /// <param name="chainKey">Current chain key</param>
+        /// <param name="sessionId">Optional session ID for tracking</param>
+        /// <param name="strategy">Key rotation strategy</param>
+        /// <returns>New chain key and message key</returns>
+        public static (byte[] newChainKey, byte[] messageKey) RatchetStep(
+            ReadOnlySpan<byte> chainKey,
+            string sessionId = "",
+            Enums.KeyRotationStrategy strategy = Enums.KeyRotationStrategy.Standard)
+        {
+            ArgumentNullException.ThrowIfNull(chainKey.ToArray(), nameof(chainKey));
+
+            if (chainKey.Length != Constants.AES_KEY_SIZE)
+                throw new ArgumentException($"Chain key must be {Constants.AES_KEY_SIZE} bytes", nameof(chainKey));
+
+            // Try to create a deep copy of the chain key to prevent accidental modification
+            byte[] chainKeyCopy = SecureMemory.CreateSecureBuffer((uint)chainKey.Length);
+            chainKey.ToArray().AsSpan().CopyTo(chainKeyCopy.AsSpan());
+
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                lock (SessionMessageCounters)
+                {
+                    if (!SessionMessageCounters.ContainsKey(sessionId))
+                        SessionMessageCounters[sessionId] = 0;
+
+                    SessionMessageCounters[sessionId]++;
+                }
+            }
+
+            try
+            {
+                // Derive new chain key using HKDF
+                byte[] newChainKey = KeyConversion.HkdfDerive(
+                    chainKeyCopy,
+                    info: Encoding.UTF8.GetBytes("DoubleRatchetNextChainKey"),
+                    outputLength: Constants.AES_KEY_SIZE
+                );
+
+                // Derive message key using HKDF
+                byte[] messageKey = KeyConversion.HkdfDerive(
+                    chainKeyCopy,
+                    info: Encoding.UTF8.GetBytes("DoubleRatchetMessageKey"),
+                    outputLength: Constants.AES_KEY_SIZE
+                );
+
+                if (ShouldRotateKey(sessionId, strategy))
+                {
+                    LoggingManager.LogInformation(
+                        nameof(DoubleRatchet),
+                        $"DH Key rotation triggered for session {sessionId} (Strategy: {strategy})"
+                    );
+                    // TODO: Additional DH key rotation logic would go here in a full implementation
+                }
+
+                return (newChainKey, messageKey);
+            }
+            finally
+            {
+                // Ensure we securely clear the chain key copy
+                SecureMemory.SecureClear(chainKeyCopy);
+            }
+        }
+
+        /// <summary>
+        /// Resumes a Double Ratchet session, optionally marking a previously processed message ID.
+        /// This is useful after deserializing a persisted session to ensure replay protection logic is maintained.
+        /// </summary>
+        /// <param name="session">The session to resume.</param>
+        /// <param name="lastProcessedMessageId">Optional last processed message ID to mark as processed.</param>
+        /// <returns>A new session instance with updated state.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if session is null.</exception>
+        public static DoubleRatchetSession ResumeSession(DoubleRatchetSession session, Guid? lastProcessedMessageId = null)
+        {
+            ArgumentNullException.ThrowIfNull(session, nameof(session));
+
+            // Create a new session with the same state but potentially marking a message as processed
+            if (lastProcessedMessageId.HasValue)
+            {
+                // Use the session's WithProcessedMessageId method to mark the message as processed
+                return session.WithProcessedMessageId(lastProcessedMessageId.Value);
+            }
+
+            // If no message ID to process, just return the session as is
+            return session;
+        }
+
         // --- Async Wrappers ---
         public static async Task<(DoubleRatchetSession? updatedSession, EncryptedMessage? encryptedMessage)>
             DoubleRatchetEncryptAsync(DoubleRatchetSession session, string message, Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
@@ -691,6 +833,28 @@ namespace LibEmiddle.Crypto
             if (messageKey == null || messageKey.Length != 32 || nextChainKey == null || nextChainKey.Length != 32)
                 throw new CryptographicException("KDF_CK: Invalid output length.");
             return (nextChainKey, messageKey);
+        }
+
+        private static bool ShouldRotateKey(string sessionId, Enums.KeyRotationStrategy strategy)
+        {
+            if (string.IsNullOrEmpty(sessionId))
+                return false;
+
+            lock (SessionMessageCounters)
+            {
+                if (!SessionMessageCounters.ContainsKey(sessionId))
+                    return false;
+
+                int count = SessionMessageCounters[sessionId];
+
+                return strategy switch
+                {
+                    Enums.KeyRotationStrategy.Standard => count % 20 == 0, // Change to rotate every 20 messages
+                    Enums.KeyRotationStrategy.Hourly => count % 1 == 0, // Change to rotate every 1 hour
+                    Enums.KeyRotationStrategy.Daily => count % 7 == 0, // Change to rotate every 7 days
+                    _ => false
+                };
+            }
         }
 
         // --- Session Locking Management & Helpers ---

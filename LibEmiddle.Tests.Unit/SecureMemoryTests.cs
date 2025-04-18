@@ -119,7 +119,7 @@ namespace LibEmiddle.Tests.Unit
             int bufferSize = 1024;
 
             // Act
-            byte[] buffer = SecureMemory.CreateSecureBuffer(bufferSize);
+            byte[] buffer = SecureMemory.CreateSecureBuffer((uint)bufferSize);
 
             // Assert
             Assert.IsNotNull(buffer, "Buffer should not be null");
@@ -153,22 +153,14 @@ namespace LibEmiddle.Tests.Unit
         public void CreateBuffer_WithLargeSize_ShouldBypassPool()
         {
             // Arrange - Create a very large buffer that should bypass the pool
-            int largeSize = 1024 * 1024 * 20; // 20MB
+            uint largeSize = 1024 * 1024 * 20; // 20MB
 
             // Act
-            byte[] largeBuffer = SecureMemory.CreateBuffer(largeSize, true, false);
+            byte[] largeBuffer = SecureMemory.CreateSecureBuffer(largeSize);
 
             // Assert
             Assert.IsNotNull(largeBuffer, "Large buffer should not be null");
             Assert.AreEqual(largeSize, largeBuffer.Length, "Large buffer should have the requested size");
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(ArgumentException))]
-        public void CreateBuffer_WithNegativeSize_ShouldThrowException()
-        {
-            // Act - should throw ArgumentException
-            SecureMemory.CreateBuffer(-1);
         }
 
         [TestMethod]
@@ -220,7 +212,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Test zero size buffer
             Assert.ThrowsException<ArgumentException>(() => {
-                SecureMemory.CreateBuffer(0);
+                SecureMemory.CreateSecureBuffer(0);
             }, "Creating a zero-sized buffer should throw ArgumentException");
 
             // Test returning null buffer

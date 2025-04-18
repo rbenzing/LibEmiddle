@@ -50,7 +50,7 @@ namespace LibEmiddle.MultiDevice
             );
 
             // Generate a random sync key with high entropy
-            _syncKey = Sodium.GenerateRandomBytes(Constants.AES_KEY_SIZE);
+            _syncKey = SecureMemory.CreateSecureBuffer(Constants.AES_KEY_SIZE);
             using (var rng = RandomNumberGenerator.Create())
             {
                 rng.GetBytes(_syncKey);
@@ -89,13 +89,12 @@ namespace LibEmiddle.MultiDevice
             }
 
             // Convert key to X25519 if needed
-            byte[] finalKey = devicePublicKey.Length == Constants.X25519_KEY_SIZE ?
-                devicePublicKey :
-                Sodium.ScalarMultBase(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
+            Span<byte> finalKey = null;
+            Sodium.ComputePublicKey(finalKey, KeyConversion.DeriveX25519PrivateKeyFromEd25519(devicePublicKey));
 
             // Create a deep copy of the key to prevent any external modification
-            byte[] keyCopy = Sodium.GenerateRandomBytes(finalKey.Length);
-            finalKey.AsSpan(0, finalKey.Length).CopyTo(keyCopy.AsSpan(0, finalKey.Length));
+            byte[] keyCopy = SecureMemory.CreateSecureBuffer((uint)finalKey.Length);
+            finalKey.CopyTo(keyCopy.AsSpan(0, finalKey.Length));
 
             // Add to dictionary using Base64 representation of the key as dictionary key to prevent duplicates
             string keyBase64 = Convert.ToBase64String(keyCopy);
@@ -115,9 +114,9 @@ namespace LibEmiddle.MultiDevice
                 throw new ArgumentNullException(nameof(devicePublicKey));
 
             // Convert key to X25519 if needed
-            byte[] finalKey = devicePublicKey.Length == Constants.X25519_KEY_SIZE ?
-                devicePublicKey :
-                Sodium.ScalarMultBase(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
+            Span<byte> finalKey = null;
+            
+            Sodium.ComputePublicKey(finalKey, KeyConversion.DeriveX25519PrivateKeyFromEd25519(devicePublicKey));
 
             // Use Base64 representation as dictionary key
             string keyBase64 = Convert.ToBase64String(finalKey);
@@ -157,13 +156,11 @@ namespace LibEmiddle.MultiDevice
             using (var secureSyncData = new SecureMemory.SecureArray<byte>(syncData))
             {
                 // Prepare the sender's private key in X25519 format
-                byte[]? senderX25519Private = null;
+                Span<byte> senderX25519Private = null;
 
                 try
                 {
-                    senderX25519Private = _deviceKeyPair.PrivateKey.Length != Constants.X25519_KEY_SIZE ?
-                        KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.PrivateKey) :
-                        SecureMemory.SecureCopy(_deviceKeyPair.PrivateKey) ?? Array.Empty<byte>();
+                    senderX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.PrivateKey);
 
                     // Thread safety for linked devices access
                     foreach (var deviceEntry in _linkedDevices)
@@ -173,7 +170,8 @@ namespace LibEmiddle.MultiDevice
                         try
                         {
                             // Ensure the device key is converted to a proper X25519 public key
-                            byte[] x25519PublicKey;
+                            Span<byte> x25519PublicKey = null;
+
                             if (deviceKey.Length == Constants.X25519_KEY_SIZE)
                             {
                                 // If already 32 bytes, validate it's a proper X25519 key
@@ -187,7 +185,8 @@ namespace LibEmiddle.MultiDevice
                             else if (deviceKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                             {
                                 // Convert Ed25519 public key to X25519
-                                x25519PublicKey = Sodium.ScalarMultBase(
+                                Sodium.ComputePublicKey(
+                                    x25519PublicKey,
                                     KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceKey)
                                 );
                             }
@@ -338,13 +337,11 @@ namespace LibEmiddle.MultiDevice
             try
             {
                 // Step 1: Prepare keys
-                byte[]? x25519Private = null;
+                Span<byte> x25519Private = null;
                 try
                 {
                     // Prepare receiver's private key (this device)
-                    x25519Private = _deviceKeyPair.PrivateKey.Length == Constants.X25519_KEY_SIZE
-                        ? _deviceKeyPair.PrivateKey.ToArray()
-                        : KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.PrivateKey);
+                    x25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.PrivateKey);
 
                     if (x25519Private == null || x25519Private.Length != Constants.X25519_KEY_SIZE)
                         return null;
@@ -415,7 +412,7 @@ namespace LibEmiddle.MultiDevice
         /// </summary>
         /// <param name="devicePublicKey">Public key of the device to check</param>
         /// <returns>True if the device is linked, false otherwise</returns>
-        public bool IsDeviceLinked(byte[] devicePublicKey)
+        public bool IsDeviceLinked(ReadOnlySpan<byte> devicePublicKey)
         {
             ThrowIfDisposed();
 
@@ -423,9 +420,9 @@ namespace LibEmiddle.MultiDevice
                 return false;
 
             // Convert key to X25519 format if needed
-            byte[] finalKey = devicePublicKey.Length == Constants.X25519_KEY_SIZE ?
-                devicePublicKey :
-                Sodium.ScalarMultBase(KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey));
+            Span<byte> finalKey = null;
+                
+            Sodium.ComputePublicKey(finalKey, KeyConversion.DeriveX25519PrivateKeyFromEd25519(devicePublicKey));
 
             string keyBase64 = Convert.ToBase64String(finalKey);
             return _linkedDevices.ContainsKey(keyBase64);
@@ -452,7 +449,7 @@ namespace LibEmiddle.MultiDevice
         /// </summary>
         /// <param name="deviceKeyToRevoke">The public key of the device to revoke</param>
         /// <returns>A signed revocation message</returns>
-        public DeviceRevocationMessage CreateRevocationMessage(byte[] deviceKeyToRevoke)
+        public DeviceRevocationMessage CreateRevocationMessage(Span<byte> deviceKeyToRevoke)
         {
             ThrowIfDisposed();
 
@@ -463,9 +460,9 @@ namespace LibEmiddle.MultiDevice
 
             // Combine device key and timestamp for signing
             byte[] timestampBytes = BitConverter.GetBytes(timestamp);
-            byte[] dataToSign = Sodium.GenerateRandomBytes(deviceKeyToRevoke.Length + timestampBytes.Length);
+            byte[] dataToSign = SecureMemory.CreateSecureBuffer((uint)deviceKeyToRevoke.Length + (uint)timestampBytes.Length);
 
-            deviceKeyToRevoke.AsSpan().CopyTo(dataToSign.AsSpan(0, deviceKeyToRevoke.Length));
+            deviceKeyToRevoke.CopyTo(dataToSign.AsSpan(0, deviceKeyToRevoke.Length));
             timestampBytes.AsSpan().CopyTo(dataToSign.AsSpan(deviceKeyToRevoke.Length, timestampBytes.Length));
 
             // Sign the combined data using _deviceKeyPair (not _identityKeyPair)
@@ -474,7 +471,7 @@ namespace LibEmiddle.MultiDevice
             // Create and return the revocation message
             return new DeviceRevocationMessage
             {
-                RevokedDeviceKey = deviceKeyToRevoke,
+                RevokedDeviceKey = deviceKeyToRevoke.ToArray(),
                 RevocationTimestamp = timestamp,
                 Signature = signature,
                 Version = ProtocolVersion.FULL_VERSION
@@ -486,7 +483,7 @@ namespace LibEmiddle.MultiDevice
         /// </summary>
         /// <param name="devicePublicKey">Public key of the device to revoke</param>
         /// <returns>A revocation message that should be distributed to other devices</returns>
-        public DeviceRevocationMessage RevokeLinkedDevice(byte[] devicePublicKey)
+        public DeviceRevocationMessage RevokeLinkedDevice(Span<byte> devicePublicKey)
         {
             ThrowIfDisposed();
 
@@ -494,9 +491,7 @@ namespace LibEmiddle.MultiDevice
                 throw new ArgumentNullException(nameof(devicePublicKey));
 
             // Convert key to X25519 format if needed
-            byte[] finalKey = devicePublicKey.Length != Constants.X25519_KEY_SIZE ?
-                KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey) :
-                devicePublicKey;
+            Span<byte> finalKey = KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey);
 
             // Use Base64 representation as dictionary key
             string deviceId = Convert.ToBase64String(finalKey);
@@ -598,7 +593,7 @@ namespace LibEmiddle.MultiDevice
             if (!string.IsNullOrEmpty(password))
             {
                 // Generate a salt
-                byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
+                byte[] salt = SecureMemory.CreateSecureBuffer(Constants.DEFAULT_SALT_SIZE);
                 using (var rng = RandomNumberGenerator.Create())
                 {
                     rng.GetBytes(salt);
@@ -613,7 +608,7 @@ namespace LibEmiddle.MultiDevice
                 SecureMemory.SecureClear(key);
 
                 // Combine salt, nonce, and ciphertext
-                byte[] result = Sodium.GenerateRandomBytes(salt.Length + nonce.Length + ciphertext.Length);
+                byte[] result = SecureMemory.CreateSecureBuffer((uint)salt.Length + (uint)nonce.Length + (uint)ciphertext.Length);
                 salt.AsSpan().CopyTo(result.AsSpan(0, salt.Length));
                 nonce.AsSpan().CopyTo(result.AsSpan(salt.Length, nonce.Length));
                 ciphertext.AsSpan().CopyTo(result.AsSpan(salt.Length + nonce.Length, ciphertext.Length));
@@ -649,8 +644,8 @@ namespace LibEmiddle.MultiDevice
                     if (data.Length < Constants.DEFAULT_SALT_SIZE + Constants.NONCE_SIZE + 16)
                         throw new ArgumentException("Data is too short to be valid encrypted export", nameof(data));
 
-                    byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
-                    byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
+                    byte[] salt = SecureMemory.CreateSecureBuffer(Constants.DEFAULT_SALT_SIZE);
+                    byte[] nonce = SecureMemory.CreateSecureBuffer(Constants.NONCE_SIZE);
 
                     // Copy salt from data
                     data.AsSpan(0, salt.Length).CopyTo(salt.AsSpan());
@@ -660,7 +655,7 @@ namespace LibEmiddle.MultiDevice
 
                     // Extract ciphertext
                     int ciphertextLength = data.Length - salt.Length - nonce.Length;
-                    byte[] ciphertext = Sodium.GenerateRandomBytes(ciphertextLength);
+                    byte[] ciphertext = SecureMemory.CreateSecureBuffer((uint)ciphertextLength);
 
                     // Copy ciphertext from data
                     data.AsSpan(salt.Length + nonce.Length, ciphertextLength).CopyTo(ciphertext.AsSpan());

@@ -27,14 +27,16 @@ namespace LibEmiddle.Tests.Unit
             _cryptoProvider = new CryptoProvider();
 
             // Generate proper key pairs for Alice and Bob
-            _aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            _bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            _aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            _bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+
+            byte[] _alicePrivateKey = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(_aliceKeyPair.PrivateKey);
 
             // Create a shared secret (simulating X3DH)
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(_aliceKeyPair.PrivateKey, _bobKeyPair.PublicKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(_alicePrivateKey, _bobKeyPair.PublicKey);
 
             // Initialize Double Ratchet
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             string sessionId = Guid.NewGuid().ToString();
 

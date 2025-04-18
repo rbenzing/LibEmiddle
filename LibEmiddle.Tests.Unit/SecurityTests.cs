@@ -33,7 +33,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             // Create a session ID to be used consistently
             string sessionId = "forward-secrecy-test-" + Guid.NewGuid().ToString();
@@ -218,7 +218,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             // Create a session ID
             string sessionId = "tamper-detection-test-" + Guid.NewGuid().ToString();
@@ -425,7 +425,7 @@ namespace LibEmiddle.Tests.Unit
             const int steps = 100;
             for (int i = 0; i < steps; i++)
             {
-                var (newChainKey, messageKey) = DoubleRatchetExchange.RatchetStep(currentKey);
+                var (newChainKey, messageKey) = _cryptoProvider.RatchetStep(currentKey);
                 currentKey = newChainKey;
 
                 // Store message key

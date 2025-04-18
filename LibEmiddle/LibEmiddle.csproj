@@ -8,6 +8,7 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<UseSystemRuntimeInteropServicesLibraryImportGenerator></UseSystemRuntimeInteropServicesLibraryImportGenerator>
 
 		<!-- NuGet package metadata -->
 		<PackageId>LibEmiddle</PackageId>

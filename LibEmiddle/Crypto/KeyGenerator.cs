@@ -15,7 +15,7 @@ namespace LibEmiddle.Crypto
         /// <returns>Random sender key</returns>
         public static byte[] GenerateInitialChainKey()
         {
-            byte[] senderKey = Sodium.GenerateRandomBytes(Constants.AES_KEY_SIZE);
+            byte[] senderKey = SecureMemory.CreateSecureBuffer(Constants.AES_KEY_SIZE);
             RandomNumberGenerator.Fill(senderKey);
             return senderKey;
         }
@@ -26,7 +26,7 @@ namespace LibEmiddle.Crypto
         /// <param name="existingSharedKey">The shared key (32 bytes required).</param>
         /// <param name="normalizedPublicKey">The data to be HMACed.</param>
         /// <returns>The 32-byte HMAC-SHA256 result.</returns>
-        public static byte[] GenerateHmacSha256(in ReadOnlySpan<byte> existingSharedKey, in ReadOnlySpan<byte> normalizedPublicKey)
+        public static byte[] GenerateHmacSha256(ReadOnlySpan<byte> existingSharedKey, ReadOnlySpan<byte> normalizedPublicKey)
         {
             // Ensure the existingSharedKey is of the required length.
             if (existingSharedKey.Length != Constants.AES_KEY_SIZE)
@@ -58,8 +58,8 @@ namespace LibEmiddle.Crypto
         {
             Sodium.Initialize();
 
-            byte[] publicKey = Sodium.GenerateRandomBytes(32);
-            byte[] privateKey = Sodium.GenerateRandomBytes(64);
+            byte[] publicKey = SecureMemory.CreateSecureBuffer(32);
+            byte[] privateKey = SecureMemory.CreateSecureBuffer(64);
 
             int result = Sodium.crypto_sign_ed25519_keypair(publicKey, privateKey);
             if (result != 0)
@@ -73,17 +73,17 @@ namespace LibEmiddle.Crypto
         /// Deterministically generates an Ed25519 key pair from a 32-byte seed.
         /// This method is useful for edge-case testing with minimal or maximal entropy.
         /// </summary>
-        public static KeyPair GenerateEd25519KeyPairFromSeed(byte[] seed)
+        public static KeyPair GenerateEd25519KeyPairFromSeed(ReadOnlySpan<byte> seed)
         {
-            if (seed == null || seed.Length != 32)
+            if (seed == null || seed.Length != Constants.DEFAULT_SALT_SIZE)
                 throw new ArgumentException("Seed must be 32 bytes.", nameof(seed));
 
-            byte[] publicKey = Sodium.GenerateRandomBytes(32);
-            byte[] privateKey = Sodium.GenerateRandomBytes(64);
+            byte[] publicKey = SecureMemory.CreateSecureBuffer(Constants.ED25519_PUBLIC_KEY_SIZE);
+            byte[] privateKey = SecureMemory.CreateSecureBuffer(Constants.ED25519_PRIVATE_KEY_SIZE);
 
             Sodium.Initialize();
 
-            int result = Sodium.crypto_sign_ed25519_seed_keypair(publicKey, privateKey, seed);
+            int result = Sodium.crypto_sign_ed25519_seed_keypair(publicKey, privateKey, seed.ToArray());
             if (result != 0)
                 throw new InvalidOperationException("Ed25519 seeded key pair generation failed.");
 
@@ -97,8 +97,8 @@ namespace LibEmiddle.Crypto
         {
             Sodium.Initialize();
 
-            byte[] publicKey = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
-            byte[] privateKey = Sodium.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
+            byte[] publicKey = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
+            byte[] privateKey = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
 
             Sodium.Initialize();
 

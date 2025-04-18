@@ -33,7 +33,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Create initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             // Create session ID
             string sessionId = "test-session-" + Guid.NewGuid().ToString();

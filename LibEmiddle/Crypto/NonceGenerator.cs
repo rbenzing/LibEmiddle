@@ -10,7 +10,7 @@ namespace LibEmiddle.Crypto
     internal static class NonceGenerator
     {
         private static readonly object _nonceLock = new object();
-        private static long _nonceCounter = 0;
+        private static nuint _nonceCounter = 0;
         private static byte[]? _noncePrefix = null;
 
         /// <summary>
@@ -19,7 +19,7 @@ namespace LibEmiddle.Crypto
         /// </summary>
         /// <param name="size">Size of the nonce in bytes (defaults to the standard AES-GCM nonce size)</param>
         /// <returns>Secure nonce</returns>
-        public static byte[] GenerateNonce(int size = Constants.NONCE_SIZE)
+        public static byte[] GenerateNonce(uint size = Constants.NONCE_SIZE)
         {
             if (size <= 0)
                 throw new ArgumentException("Nonce size must be positive", nameof(size));
@@ -28,16 +28,14 @@ namespace LibEmiddle.Crypto
             Sodium.Initialize();
 
             // Generate a completely random nonce using libsodium's secure CSPRNG
-            byte[] nonce = new byte[size];
-            Sodium.RandomBytes(nonce);
+            byte[] nonce = SecureMemory.CreateSecureBuffer(size);
 
             lock (_nonceLock)
             {
                 // Initialize nonce prefix if it hasn't been done yet
                 if (_noncePrefix == null)
                 {
-                    _noncePrefix = new byte[4];
-                    Sodium.RandomBytes(_noncePrefix);
+                    _noncePrefix = SecureMemory.CreateSecureBuffer(4);
                 }
 
                 // Increment counter to ensure uniqueness even if random generation produces duplicates
@@ -46,7 +44,7 @@ namespace LibEmiddle.Crypto
                 // Rotate prefix if counter wraps around to maintain uniqueness across restarts
                 if (_nonceCounter == 0)
                 {
-                    Sodium.RandomBytes(_noncePrefix);
+                    _noncePrefix = SecureMemory.CreateSecureBuffer(4);
                 }
 
                 // If we have room, mix in counter and prefix to ensure uniqueness

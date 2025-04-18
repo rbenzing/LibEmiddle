@@ -104,10 +104,10 @@ namespace LibEmiddle.Messaging.Group
             }
 
             if (distribution.Signature == null ||
-                distribution.Signature.Length != Constants.ED25519_SIGNATURE_SIZE)
+                distribution.Signature.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
             {
                 LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Invalid signature length: {distribution.Signature?.Length ?? 0}, expected {Constants.ED25519_SIGNATURE_SIZE}");
+                    $"Invalid signature length: {distribution.Signature?.Length ?? 0}, expected {Constants.ED25519_PRIVATE_KEY_SIZE}");
                 return false;
             }
 

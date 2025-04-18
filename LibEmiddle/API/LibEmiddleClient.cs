@@ -539,7 +539,7 @@ namespace LibEmiddle.API
         /// <returns>A session ready for continued communication, or null if resumption isn't possible</returns>
         public static DoubleRatchetSession ResumeDoubleRatchetSession(DoubleRatchetSession session, Guid? lastProcessedMessageId = null)
         {
-            return DoubleRatchetExchange.ResumeSession(session, lastProcessedMessageId);
+            return DoubleRatchet.ResumeSession(session, lastProcessedMessageId);
         }
 
         /// <summary>
@@ -580,7 +580,7 @@ namespace LibEmiddle.API
 
             // Combine device key and timestamp for signing
             byte[] timestampBytes = BitConverter.GetBytes(timestamp);
-            byte[] dataToSign = Sodium.GenerateRandomBytes(revokedDeviceKey.Length + timestampBytes.Length);
+            byte[] dataToSign = SecureMemory.CreateSecureBuffer((uint)revokedDeviceKey.Length + (uint)timestampBytes.Length);
 
             revokedDeviceKey.AsSpan().CopyTo(dataToSign.AsSpan(0, revokedDeviceKey.Length));
             timestampBytes.AsSpan().CopyTo(dataToSign.AsSpan(revokedDeviceKey.Length));

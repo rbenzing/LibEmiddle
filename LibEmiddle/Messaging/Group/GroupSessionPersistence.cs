@@ -128,7 +128,7 @@ namespace LibEmiddle.Messaging.Group
             if (!string.IsNullOrEmpty(password))
             {
                 // Generate salt and nonce
-                byte[] salt = Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE);
+                byte[] salt = SecureMemory.CreateSecureBuffer(Constants.DEFAULT_SALT_SIZE);
                 byte[] nonce = NonceGenerator.GenerateNonce();
 
                 // Derive key from password

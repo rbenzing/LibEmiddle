@@ -213,7 +213,7 @@ namespace LibEmiddle.Tests.Unit
             // Perform several ratchet steps
             for (int i = 0; i < 5; i++)
             {
-                var (newChainKey, messageKey) = DoubleRatchetExchange.RatchetStep(currentChainKey);
+                var (newChainKey, messageKey) = _cryptoProvider.RatchetStep(currentChainKey);
                 messageKeys.Add(messageKey);
                 currentChainKey = newChainKey;
 
@@ -222,7 +222,7 @@ namespace LibEmiddle.Tests.Unit
                 {
                     var ephemeralKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
                     var dh = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, ephemeralKeyPair.PrivateKey);
-                    var (newRootKey, nextChainKey) = DoubleRatchetExchange.DHRatchetStep(currentRootKey, dh);
+                    var (newRootKey, nextChainKey) = _cryptoProvider.DHRatchetStep(currentRootKey, dh);
 
                     currentRootKey = newRootKey;
                     currentChainKey = nextChainKey;
@@ -234,7 +234,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] compromisedChainKey = currentChainKey;
 
             // Try to derive earlier message keys from compromised keys
-            var (_, attemptedMessageKey) = DoubleRatchetExchange.RatchetStep(compromisedChainKey);
+            var (_, attemptedMessageKey) = _cryptoProvider.RatchetStep(compromisedChainKey);
 
             // Assert
             // If forward secrecy is maintained, the derived message key should not match any previous keys
@@ -271,13 +271,10 @@ namespace LibEmiddle.Tests.Unit
 
             // --- Signature Verification ---
             // Verify the signature on the signed pre-key using the identity (Ed25519) public key.
-            int verifyResult = Sodium.crypto_sign_ed25519_verify_detached(
+            bool validSignature = Sodium.VerifyDetached(
                  bundle.SignedPreKeySignature,
                  bundle.SignedPreKey,
-                 (ulong)bundle.SignedPreKey.Length,
                  bundle.IdentityKey);
-
-            bool validSignature = (verifyResult == 0);
             Assert.IsTrue(validSignature, "Signature should be valid");
 
             // Test that clearing private keys works.

@@ -37,7 +37,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = DoubleRatchetExchange.InitializeDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             // Create a session ID
             string sessionId = "test-session-" + Guid.NewGuid().ToString();
@@ -100,7 +100,7 @@ namespace LibEmiddle.Tests.Unit
                 // Store the previous chain key for comparison
                 previousChainKey = currentChainKey;
 
-                var (newChainKey, messageKey) = DoubleRatchetExchange.RatchetStep(currentChainKey);
+                var (newChainKey, messageKey) = _cryptoProvider.RatchetStep(currentChainKey);
 
                 // Convert key to string for hashset comparison
                 string messageKeyStr = Convert.ToBase64String(messageKey);

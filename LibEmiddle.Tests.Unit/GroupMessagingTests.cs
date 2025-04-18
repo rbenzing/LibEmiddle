@@ -7,6 +7,7 @@ using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Messaging.Group;
+using LibEmiddle.Domain;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -252,7 +253,7 @@ namespace LibEmiddle.Tests.Unit
         public void GenerateSenderKey_ShouldReturnValidKey()
         {
             // Act
-            byte[] senderKey = _cryptoProvider.GenerateSymmetricKey();
+            byte[] senderKey = SecureMemory.CreateSecureBuffer(Constants.AES_KEY_SIZE);
 
             // Assert
             Assert.IsNotNull(senderKey);
@@ -265,7 +266,7 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             string message = "This is a group message";
             string groupId = $"test-group-{Guid.NewGuid()}";
-            byte[] senderKey = _cryptoProvider.GenerateSymmetricKey();
+            byte[] senderKey = SecureMemory.CreateSecureBuffer(Constants.AES_KEY_SIZE);
 
             // Create identity key pair for signing
             var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
