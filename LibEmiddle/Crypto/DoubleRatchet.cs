@@ -210,7 +210,7 @@ namespace LibEmiddle.Crypto
             {
                 byte[] rootKey1 = sharedKeyFromX3DH;
 
-                senderRatchetKeyPair = KeyGenerator.GenerateX25519KeyPair();
+                senderRatchetKeyPair = Sodium.GenerateX25519KeyPair();
                 if (senderRatchetKeyPair?.PrivateKey == null || senderRatchetKeyPair?.PublicKey == null)
                     throw new CryptographicException("Failed to generate sender's initial DH ratchet key pair.");
                 // Optional: Add size checks for generated keys if KeyGenerator isn't trusted
@@ -334,10 +334,21 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        // --- Core Double Ratchet Encrypt/Decrypt ---
 
-        public static (DoubleRatchetSession updatedSession, EncryptedMessage encryptedMessage)
-            DoubleRatchetEncrypt(DoubleRatchetSession session, string message, Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
+        /// <summary>
+        /// Encrypts a message using the Double Ratchet algorithm. Handles DH ratchet steps and skipped messages.
+        /// </summary>
+        /// <param name="session"></param>
+        /// <param name="message"></param>
+        /// <param name="rotationStrategy"></param>
+        /// <returns></returns>
+        /// <exception cref="ArgumentException"></exception>
+        /// <exception cref="InvalidOperationException"></exception>
+        /// <exception cref="CryptographicException"></exception>
+        public static (DoubleRatchetSession updatedSession, EncryptedMessage encryptedMessage) DoubleRatchetEncrypt(
+            DoubleRatchetSession session, 
+            string message, 
+            Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
         {
             // --- Argument and State Validation ---
             ArgumentNullException.ThrowIfNull(session);
@@ -459,7 +470,7 @@ namespace LibEmiddle.Crypto
                     if (currentSessionState.DHRatchetKeyPair.PrivateKey == null) throw new InvalidOperationException("Missing own private key for DH ratchet.");
                     dhOutput = X3DHExchange.PerformX25519DH(currentSessionState.DHRatchetKeyPair.PrivateKey, encryptedMessage.SenderDHKey);
                     var (newRootKey, newReceivingChainKey) = KdfRootKey(currentSessionState.RootKey, dhOutput);
-                    newKeyPair = KeyGenerator.GenerateX25519KeyPair(); // Generate our new DHs
+                    newKeyPair = Sodium.GenerateX25519KeyPair(); // Generate our new DHs
 
                     // Update local working state variable
                     currentSessionState = currentSessionState.WithUpdatedParameters(
@@ -620,8 +631,8 @@ namespace LibEmiddle.Crypto
                     return false;
 
                 // Validate X25519 public keys
-                if (!KeyValidation.ValidateX25519PublicKey(session.DHRatchetKeyPair.PublicKey) ||
-                    !KeyValidation.ValidateX25519PublicKey(session.RemoteDHRatchetKey))
+                if (!Sodium.ValidateX25519PublicKey(session.DHRatchetKeyPair.PublicKey) ||
+                    !Sodium.ValidateX25519PublicKey(session.RemoteDHRatchetKey))
                     return false;
 
                 // SessionId should not be null or empty
@@ -719,10 +730,6 @@ namespace LibEmiddle.Crypto
             if (chainKey.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Chain key must be {Constants.AES_KEY_SIZE} bytes", nameof(chainKey));
 
-            // Try to create a deep copy of the chain key to prevent accidental modification
-            byte[] chainKeyCopy = SecureMemory.CreateSecureBuffer((uint)chainKey.Length);
-            chainKey.ToArray().AsSpan().CopyTo(chainKeyCopy.AsSpan());
-
             if (!string.IsNullOrEmpty(sessionId))
             {
                 lock (SessionMessageCounters)
@@ -734,38 +741,32 @@ namespace LibEmiddle.Crypto
                 }
             }
 
-            try
+            // Derive new chain key using HKDF
+            byte[] newChainKey = Sodium.HkdfDerive(
+                chainKey,
+                salt: Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE),
+                info: Encoding.UTF8.GetBytes("EmiddleKDFChain"),
+                outputLength: Constants.AES_KEY_SIZE
+            );
+
+            // Derive message key using HKDF
+            byte[] messageKey = Sodium.HkdfDerive(
+                chainKey,
+                salt: Sodium.GenerateRandomBytes(Constants.DEFAULT_SALT_SIZE),
+                info: Encoding.UTF8.GetBytes("EmiddleKDFMsgKey"),
+                outputLength: Constants.AES_KEY_SIZE
+            );
+
+            if (ShouldRotateKey(sessionId, strategy))
             {
-                // Derive new chain key using HKDF
-                byte[] newChainKey = KeyConversion.HkdfDerive(
-                    chainKeyCopy,
-                    info: Encoding.UTF8.GetBytes("DoubleRatchetNextChainKey"),
-                    outputLength: Constants.AES_KEY_SIZE
+                LoggingManager.LogInformation(
+                    nameof(DoubleRatchet),
+                    $"DH Key rotation triggered for session {sessionId} (Strategy: {strategy})"
                 );
-
-                // Derive message key using HKDF
-                byte[] messageKey = KeyConversion.HkdfDerive(
-                    chainKeyCopy,
-                    info: Encoding.UTF8.GetBytes("DoubleRatchetMessageKey"),
-                    outputLength: Constants.AES_KEY_SIZE
-                );
-
-                if (ShouldRotateKey(sessionId, strategy))
-                {
-                    LoggingManager.LogInformation(
-                        nameof(DoubleRatchet),
-                        $"DH Key rotation triggered for session {sessionId} (Strategy: {strategy})"
-                    );
-                    // TODO: Additional DH key rotation logic would go here in a full implementation
-                }
-
-                return (newChainKey, messageKey);
+                // TODO: Additional DH key rotation logic would go here for full implementation
             }
-            finally
-            {
-                // Ensure we securely clear the chain key copy
-                SecureMemory.SecureClear(chainKeyCopy);
-            }
+
+            return (newChainKey, messageKey);
         }
 
         /// <summary>
@@ -817,7 +818,7 @@ namespace LibEmiddle.Crypto
         private static (byte[] newRootKey, byte[] newChainKey) KdfRootKey(byte[] rootKey, byte[] dhOutput)
         {
             // Assumes KeyConversion.HkdfDerive implements HKDF-Expand(salt, ikm, info, L) correctly (e.g., using HMAC-SHA256)
-            byte[] hkdfOutput = KeyConversion.HkdfDerive(salt: rootKey, inputKeyMaterial: dhOutput, info: InfoRootKeyUpdate, outputLength: 64);
+            byte[] hkdfOutput = Sodium.HkdfDerive(salt: rootKey, inputKeyMaterial: dhOutput, info: InfoRootKeyUpdate, outputLength: 64);
             if (hkdfOutput == null || hkdfOutput.Length != 64) throw new CryptographicException("KDF_RK: Invalid output length.");
             byte[] newRootKey = hkdfOutput.Take(32).ToArray();
             byte[] newChainKey = hkdfOutput.Skip(32).Take(32).ToArray();
@@ -827,9 +828,8 @@ namespace LibEmiddle.Crypto
 
         private static (byte[] nextChainKey, byte[] messageKey) KdfChainKey(byte[] chainKey)
         {
-            // Assumes KeyGenerator.GenerateHmacSha256(key, data) computes HMAC-SHA256 correctly
-            byte[] messageKey = KeyGenerator.GenerateHmacSha256(chainKey, MessageKeySeed);
-            byte[] nextChainKey = KeyGenerator.GenerateHmacSha256(chainKey, ChainKeySeed);
+            byte[] messageKey = Sodium.GenerateHmacSha256(MessageKeySeed, chainKey);
+            byte[] nextChainKey = Sodium.GenerateHmacSha256(ChainKeySeed, chainKey);
             if (messageKey == null || messageKey.Length != 32 || nextChainKey == null || nextChainKey.Length != 32)
                 throw new CryptographicException("KDF_CK: Invalid output length.");
             return (nextChainKey, messageKey);

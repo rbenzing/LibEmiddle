@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Cryptography;
+﻿using System.Collections.Concurrent;
 using System.Text;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
@@ -402,105 +398,66 @@ namespace LibEmiddle.Messaging.Group
 
             // Ratchet Forward or Derive Current
             byte[] currentChainKey = (byte[])currentState.ChainKey.Clone();
-            uint nextIteration = currentState.Iteration;
+            uint currentIteration = currentState.Iteration;
             byte[]? derivedMessageKey = null;
+            ReceivedSenderKeyState newState;
 
             try
             {
-                // Ratchet forward if message iteration is ahead
-                while (nextIteration < messageIteration)
+                // Ratchet forward efficiently if needed
+                if (currentIteration < messageIteration)
                 {
-                    // Derive message key and next chain key for 'nextIteration'
-                    byte[] skippedMessageKey = KeyGenerator.GenerateHmacSha256(currentChainKey, [MESSAGE_KEY_SEED_BYTE]);
-                    byte[] nextChainKeyTemp = KeyGenerator.GenerateHmacSha256(currentChainKey, [CHAIN_KEY_SEED_BYTE]);
-
-                    // Store the skipped message key
-                    skippedKeyCache.StoreSkippedMessageKey(
-                        encryptedMessage.GroupId,
-                        encryptedMessage.SenderIdentityKey,
-                        nextIteration,
-                        skippedMessageKey);
-
-                    LoggingManager.LogDebug(nameof(SenderKeyDistribution),
-                        $"Stored skipped key for iteration {nextIteration}.");
-
-                    // Advance to the next chain key and iteration
-                    SecureMemory.SecureClear(currentChainKey);
-                    currentChainKey = nextChainKeyTemp;
-                    nextIteration++;
-                }
-
-                // Now, nextIteration == messageIteration. Derive the target message key.
-                derivedMessageKey = KeyGenerator.GenerateHmacSha256(currentChainKey, [MESSAGE_KEY_SEED_BYTE]);
-
-                // Atomically update the stored state if we ratcheted forward
-                if (nextIteration > currentState.Iteration)
-                {
-                    ReceivedSenderKeyState newState = new ReceivedSenderKeyState
+                    // Store intermediate keys while ratcheting
+                    for (; currentIteration < messageIteration; currentIteration++)
                     {
-                        ChainKey = currentChainKey,
-                        Iteration = nextIteration
+                        byte[] skippedMessageKey = Sodium.GenerateHmacSha256([MESSAGE_KEY_SEED_BYTE], currentChainKey);
+                        byte[] nextChainKey = Sodium.GenerateHmacSha256([CHAIN_KEY_SEED_BYTE], currentChainKey);
+
+                        // Store the skipped message key
+                        skippedKeyCache.StoreSkippedMessageKey(
+                            encryptedMessage.GroupId,
+                            encryptedMessage.SenderIdentityKey,
+                            currentIteration,
+                            skippedMessageKey);
+
+                        // Update chain key for next iteration
+                        SecureMemory.SecureClear(currentChainKey);
+                        currentChainKey = nextChainKey;
+                    }
+
+                    // Create new state to update storage
+                    newState = new ReceivedSenderKeyState
+                    {
+                        ChainKey = (byte[])currentChainKey.Clone(),
+                        Iteration = messageIteration
                     };
 
-                    bool updated = false;
-                    do
+                    // Try to update state atomically
+                    if (!_receivedStates.TryUpdate(storageKey, newState, currentState))
                     {
-                        // Re-fetch current state in case it changed during ratcheting
-                        if (!_receivedStates.TryGetValue(storageKey, out ReceivedSenderKeyState? stateBeforeUpdate))
-                        {
-                            newState.Clear();
-                            throw new InvalidOperationException("Sender key state disappeared during ratchet update.");
-                        }
-
-                        // Only update if our new state is still ahead of what's now stored
-                        if (newState.Iteration > stateBeforeUpdate.Iteration)
-                        {
-                            if (_receivedStates.TryUpdate(storageKey, newState, stateBeforeUpdate))
-                            {
-                                stateBeforeUpdate.Clear();
-                                updated = true;
-                                LoggingManager.LogDebug(nameof(SenderKeyDistribution),
-                                    $"Advanced sender state for {storageKey} to iteration {newState.Iteration}.");
-
-                                // Empty out reference to avoid double clear
-                                currentChainKey = Array.Empty<byte>();
-                            }
-                        }
-                        else
-                        {
-                            // State was updated by another thread with an even newer key
-                            newState.Clear();
-                            updated = true;
-                            derivedMessageKey = null;
-                            LoggingManager.LogWarning(nameof(SenderKeyDistribution),
-                                $"Sender state updated concurrently for {storageKey}.");
-                            return null;
-                        }
-                    } while (!updated);
+                        // If update fails due to concurrent modification, don't throw - just proceed
+                        // with current key for this message and let next message trigger the update
+                        LoggingManager.LogWarning(nameof(SenderKeyDistribution),
+                            $"Concurrent state update detected for {storageKey}");
+                        newState.Clear();
+                    }
                 }
-                else
-                {
-                    // If we didn't ratchet forward, clear the temporary key
-                    SecureMemory.SecureClear(currentChainKey);
-                }
+
+                // Derive the message key for the current iteration
+                derivedMessageKey = Sodium.GenerateHmacSha256([MESSAGE_KEY_SEED_BYTE], currentChainKey);
 
                 return derivedMessageKey;
             }
             catch (Exception ex)
             {
                 LoggingManager.LogError(nameof(SenderKeyDistribution),
-                    $"Error during key derivation for {storageKey}: {ex.Message}");
-
-                if (derivedMessageKey != null)
-                    SecureMemory.SecureClear(derivedMessageKey);
-
-                throw;
+                    $"Error deriving key for {storageKey}: {ex.Message}");
+                return null;
             }
             finally
             {
                 // Clear any remaining sensitive data
-                if (currentChainKey != null && currentChainKey.Length > 0)
-                    SecureMemory.SecureClear(currentChainKey);
+                SecureMemory.SecureClear(currentChainKey);
             }
         }
 

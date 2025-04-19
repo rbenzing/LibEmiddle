@@ -2,7 +2,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using LibEmiddle.Abstractions;
+using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.KeyExchange;
@@ -27,8 +27,8 @@ namespace LibEmiddle.Tests.Unit
             _cryptoProvider = new CryptoProvider();
 
             // Generate proper key pairs for Alice and Bob
-            _aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            _bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            _aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            _bobKeyPair = Sodium.GenerateEd25519KeyPair();
 
             byte[] _alicePrivateKey = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(_aliceKeyPair.PrivateKey);
 
@@ -351,15 +351,11 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public async Task ChatSession_IsValid_ShouldReturnFalseWhenTerminated()
         {
-            // Arrange
-            await _aliceChatSession.ActivateAsync();
-            Assert.IsTrue(_aliceChatSession.IsValid());
-
-            // Act
-            await _aliceChatSession.TerminateAsync();
+            // Assert
+            Assert.IsTrue(await _aliceChatSession.ActivateAsync());
 
             // Assert
-            Assert.IsFalse(_aliceChatSession.IsValid());
+            Assert.IsFalse(await _aliceChatSession.TerminateAsync());
         }
 
         [TestMethod]

@@ -83,14 +83,14 @@ namespace LibEmiddle.MultiDevice
 
             // Validate X25519 public key if it's that length
             if (devicePublicKey.Length == Constants.X25519_KEY_SIZE &&
-                !KeyValidation.ValidateX25519PublicKey(devicePublicKey))
+                !Sodium.ValidateX25519PublicKey(devicePublicKey))
             {
                 throw new ArgumentException("Invalid X25519 public key", nameof(devicePublicKey));
             }
 
             // Convert key to X25519 if needed
             Span<byte> finalKey = null;
-            Sodium.ComputePublicKey(finalKey, KeyConversion.DeriveX25519PrivateKeyFromEd25519(devicePublicKey));
+            Sodium.ComputePublicKey(finalKey, Sodium.ConvertEd25519PrivateKeyToX25519(devicePublicKey));
 
             // Create a deep copy of the key to prevent any external modification
             byte[] keyCopy = SecureMemory.CreateSecureBuffer((uint)finalKey.Length);
@@ -116,7 +116,7 @@ namespace LibEmiddle.MultiDevice
             // Convert key to X25519 if needed
             Span<byte> finalKey = null;
             
-            Sodium.ComputePublicKey(finalKey, KeyConversion.DeriveX25519PrivateKeyFromEd25519(devicePublicKey));
+            Sodium.ComputePublicKey(finalKey, Sodium.ConvertEd25519PrivateKeyToX25519(devicePublicKey));
 
             // Use Base64 representation as dictionary key
             string keyBase64 = Convert.ToBase64String(finalKey);
@@ -160,7 +160,7 @@ namespace LibEmiddle.MultiDevice
 
                 try
                 {
-                    senderX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.PrivateKey);
+                    senderX25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(_deviceKeyPair.PrivateKey);
 
                     // Thread safety for linked devices access
                     foreach (var deviceEntry in _linkedDevices)
@@ -175,7 +175,7 @@ namespace LibEmiddle.MultiDevice
                             if (deviceKey.Length == Constants.X25519_KEY_SIZE)
                             {
                                 // If already 32 bytes, validate it's a proper X25519 key
-                                if (!KeyValidation.ValidateX25519PublicKey(deviceKey))
+                                if (!Sodium.ValidateX25519PublicKey(deviceKey))
                                 {
                                     LoggingManager.LogWarning(nameof(DeviceManager), "Skipping invalid X25519 public key");
                                     continue;
@@ -187,7 +187,7 @@ namespace LibEmiddle.MultiDevice
                                 // Convert Ed25519 public key to X25519
                                 Sodium.ComputePublicKey(
                                     x25519PublicKey,
-                                    KeyConversion.DeriveX25519PrivateKeyFromEd25519(deviceKey)
+                                    Sodium.ConvertEd25519PrivateKeyToX25519(deviceKey)
                                 );
                             }
                             else
@@ -341,7 +341,7 @@ namespace LibEmiddle.MultiDevice
                 try
                 {
                     // Prepare receiver's private key (this device)
-                    x25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(_deviceKeyPair.PrivateKey);
+                    x25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(_deviceKeyPair.PrivateKey);
 
                     if (x25519Private == null || x25519Private.Length != Constants.X25519_KEY_SIZE)
                         return null;
@@ -422,7 +422,7 @@ namespace LibEmiddle.MultiDevice
             // Convert key to X25519 format if needed
             Span<byte> finalKey = null;
                 
-            Sodium.ComputePublicKey(finalKey, KeyConversion.DeriveX25519PrivateKeyFromEd25519(devicePublicKey));
+            Sodium.ComputePublicKey(finalKey, Sodium.ConvertEd25519PrivateKeyToX25519(devicePublicKey));
 
             string keyBase64 = Convert.ToBase64String(finalKey);
             return _linkedDevices.ContainsKey(keyBase64);
@@ -481,7 +481,7 @@ namespace LibEmiddle.MultiDevice
         /// <summary>
         /// Revokes a linked device and creates a revocation message.
         /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to revoke</param>
+        /// <param name="devicePublicKey">Ed25519 Public key of the device to revoke</param>
         /// <returns>A revocation message that should be distributed to other devices</returns>
         public DeviceRevocationMessage RevokeLinkedDevice(Span<byte> devicePublicKey)
         {
@@ -491,7 +491,7 @@ namespace LibEmiddle.MultiDevice
                 throw new ArgumentNullException(nameof(devicePublicKey));
 
             // Convert key to X25519 format if needed
-            Span<byte> finalKey = KeyConversion.DeriveX25519PublicKeyFromEd25519(devicePublicKey);
+            Span<byte> finalKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
 
             // Use Base64 representation as dictionary key
             string deviceId = Convert.ToBase64String(finalKey);

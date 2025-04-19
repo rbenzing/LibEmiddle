@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 
@@ -43,7 +44,7 @@ namespace LibEmiddle.Messaging.Transport
             ArgumentNullException.ThrowIfNull(publicKey.ToArray(), nameof(publicKey));
 
             // Use Ed25519 validation here.
-            if (!KeyValidation.ValidateEd25519PublicKey(publicKey))
+            if (!Sodium.ValidateEd25519PublicKey(publicKey))
             {
                 throw new ArgumentException("Invalid public key.", nameof(publicKey));
             }

@@ -1,11 +1,9 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Linq;
+﻿using System.Collections.Concurrent;
 using System.Security.Cryptography;
-using System.Text; // Likely needed for DeriveSubkey info
+using System.Text;
 using LibEmiddle.Core;
-using LibEmiddle.Crypto; // For CryptoHMAC, KeyConversion, SecureMemory
-using LibEmiddle.Domain; // For Constants
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 
 namespace LibEmiddle.Messaging.Group
 {
@@ -105,8 +103,8 @@ namespace LibEmiddle.Messaging.Group
                 uint currentIteration = currentState.Iteration;
 
                 // Derive keys using the existing HMAC function
-                messageKey = KeyGenerator.GenerateHmacSha256(currentChainKey, new byte[] { MESSAGE_KEY_SEED_BYTE });
-                nextChainKey = KeyGenerator.GenerateHmacSha256(currentChainKey, new byte[] { CHAIN_KEY_SEED_BYTE });
+                messageKey = Sodium.GenerateHmacSha256([MESSAGE_KEY_SEED_BYTE], currentChainKey);
+                nextChainKey = Sodium.GenerateHmacSha256([CHAIN_KEY_SEED_BYTE], currentChainKey);
 
                 // Validation of output length happens inside GenerateHmacSha256 now (or should)
                 // If not, add checks here:

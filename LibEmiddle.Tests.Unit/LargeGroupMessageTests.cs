@@ -33,7 +33,7 @@ namespace LibEmiddle.Tests.Unit
 
             for (int i = 0; i < memberCount; i++)
             {
-                var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+                var keyPair = Sodium.GenerateEd25519KeyPair();
                 memberKeyPairs.Add(keyPair);
                 groupManagers.Add(new GroupChatManager(keyPair));
             }
@@ -140,10 +140,10 @@ namespace LibEmiddle.Tests.Unit
         public void GroupMember_RemovalSimulation_ShouldNotReceiveNewMessages()
         {
             // Arrange - Create a group with some members
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var charlieKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var daveKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobKeyPair = Sodium.GenerateEd25519KeyPair();
+            var charlieKeyPair = Sodium.GenerateEd25519KeyPair();
+            var daveKeyPair = Sodium.GenerateEd25519KeyPair();
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -275,8 +275,8 @@ namespace LibEmiddle.Tests.Unit
         public void ConcurrentGroupAccess_ShouldHandleThreadSafely()
         {
             // Arrange - Create a group with multiple members
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobKeyPair = Sodium.GenerateEd25519KeyPair();
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);

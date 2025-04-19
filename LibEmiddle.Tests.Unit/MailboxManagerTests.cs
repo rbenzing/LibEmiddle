@@ -32,7 +32,7 @@ namespace LibEmiddle.Tests.Unit
             _cryptoProvider = new CryptoProvider();
 
             // Create test identity key pair
-            _testIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            _testIdentityKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Setup mock transport
             _mockTransport = new Mock<IMailboxTransport>();
@@ -44,7 +44,7 @@ namespace LibEmiddle.Tests.Unit
                 {
                     MessageId = Guid.NewGuid().ToString(),
                     RecipientKey = _testIdentityKeyPair.PublicKey,
-                    SenderKey = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey,
+                    SenderKey = Sodium.GenerateEd25519KeyPair().PublicKey,
                     IsRead = false,
                     Type = Enums.MessageType.Chat,
                     EncryptedPayload = new EncryptedMessage
@@ -62,7 +62,7 @@ namespace LibEmiddle.Tests.Unit
                 {
                     MessageId = Guid.NewGuid().ToString(),
                     RecipientKey = _testIdentityKeyPair.PublicKey,
-                    SenderKey = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey,
+                    SenderKey = Sodium.GenerateEd25519KeyPair().PublicKey,
                     IsRead = true,
                     Type = Enums.MessageType.DeviceSync,
                     EncryptedPayload = new EncryptedMessage
@@ -136,7 +136,7 @@ namespace LibEmiddle.Tests.Unit
                 })
                 .ReturnsAsync(true);
 
-            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create testable mailbox manager
             var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object);
@@ -327,7 +327,7 @@ namespace LibEmiddle.Tests.Unit
                 }
 
                 // Send a few messages to populate outgoing queue
-                var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+                var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
                 for (int i = 0; i < 3; i++)
                 {
                     mailboxManager.SendMessage(
@@ -374,7 +374,7 @@ namespace LibEmiddle.Tests.Unit
         public void ImportExportSession_ShouldWorkCorrectly()
         {
             // Arrange
-            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
             string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
 
             using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
@@ -405,7 +405,7 @@ namespace LibEmiddle.Tests.Unit
         public void ImportSession_WithInvalidData_ShouldReturnFalse()
         {
             // Arrange
-            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
             string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
             byte[] invalidSessionData = Encoding.UTF8.GetBytes("This is not valid session data");
 
@@ -423,7 +423,7 @@ namespace LibEmiddle.Tests.Unit
         public void ImportEncryptedSession_WithWrongKey_ShouldReturnFalse()
         {
             // Arrange
-            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
             string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
 
             // Generate encryption keys
@@ -478,7 +478,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 MessageId = Guid.NewGuid().ToString(),
                 RecipientKey = _testIdentityKeyPair.PublicKey,
-                SenderKey = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey,
+                SenderKey = Sodium.GenerateEd25519KeyPair().PublicKey,
                 EncryptedPayload = new EncryptedMessage
                 {
                     Ciphertext = new byte[16], // Must be non-empty 
@@ -497,7 +497,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 MessageId = Guid.NewGuid().ToString(),
                 RecipientKey = _testIdentityKeyPair.PublicKey,
-                SenderKey = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey,
+                SenderKey = Sodium.GenerateEd25519KeyPair().PublicKey,
                 EncryptedPayload = new EncryptedMessage
                 {
                     Ciphertext = new byte[16], // Must be non-empty

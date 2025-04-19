@@ -1,7 +1,7 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Security.Cryptography;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using LibEmiddle.Domain;
-using System.Threading;
 
 namespace LibEmiddle.Core
 {
@@ -270,10 +270,13 @@ namespace LibEmiddle.Core
         [LibraryImport(LibraryName, EntryPoint = "crypto_aead_aes256gcm_decrypt_afternm")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static partial int crypto_aead_aes256gcm_decrypt_afternm(
-            Span<byte> message, out ulong messageLength,
+            Span<byte> message, 
+            out ulong messageLength,
             Span<byte> nsec, // Always null for AES-GCM
-            ReadOnlySpan<byte> cipher, ulong cipherLength,
-            ReadOnlySpan<byte> additionalData, ulong additionalDataLength,
+            ReadOnlySpan<byte> cipher, 
+            ulong cipherLength,
+            ReadOnlySpan<byte> additionalData, 
+            ulong additionalDataLength,
             ReadOnlySpan<byte> nonce,
             IntPtr state);
 
@@ -283,27 +286,33 @@ namespace LibEmiddle.Core
         [LibraryImport(LibraryName, EntryPoint = "crypto_aead_aes256gcm_encrypt_detached_afternm")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static partial int crypto_aead_aes256gcm_encrypt_detached_afternm(
-            Span<byte> cipher,
-            Span<byte> tag, out ulong tagLength,
-            ReadOnlySpan<byte> message, ulong messageLength,
-            ReadOnlySpan<byte> additionalData, ulong additionalDataLength,
-            Span<byte> nsec, // Always null for AES-GCM
-            ReadOnlySpan<byte> nonce,
-            IntPtr state);
+            Span<byte> c,          // unsigned char *c
+            Span<byte> mac,        // unsigned char *mac
+            out ulong maclen_p,   // unsigned long long *maclen_p
+            ReadOnlySpan<byte> m,          // const unsigned char *m
+            ulong mlen,       // unsigned long long mlen
+            ReadOnlySpan<byte> ad,         // const unsigned char *ad
+            ulong adlen,      // unsigned long long adlen
+            ReadOnlySpan<byte> nsec,       // const unsigned char *nsec (always null)
+            ReadOnlySpan<byte> npub,       // const unsigned char *npub (nonce)
+            IntPtr ctx);         // const crypto_aead_aes256gcm_state *ctx
 
         /// <summary>
-        /// Decrypts a message using a previously initialized AES-GCM context with detached authentication tag.
+        /// Encrypts a message using a previously initialized AES-GCM context with detached authentication tag.
         /// </summary>
         [LibraryImport(LibraryName, EntryPoint = "crypto_aead_aes256gcm_decrypt_detached_afternm")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static partial int crypto_aead_aes256gcm_decrypt_detached_afternm(
-            Span<byte> message,
-            Span<byte> nsec, // Always null for AES-GCM
-            ReadOnlySpan<byte> cipher, ulong cipherLength,
-            ReadOnlySpan<byte> tag,
-            ReadOnlySpan<byte> additionalData, ulong additionalDataLength,
-            ReadOnlySpan<byte> nonce,
-            IntPtr state);
+            Span<byte> m,          // unsigned char *m
+            out ulong mlen_p,     // unsigned long long *mlen_p
+            Span<byte> nsec,       // unsigned char *nsec (always null)
+            ReadOnlySpan<byte> c,          // const unsigned char *c
+            ulong clen,       // unsigned long long clen
+            ReadOnlySpan<byte> mac,        // const unsigned char *mac
+            ReadOnlySpan<byte> ad,         // const unsigned char *ad
+            ulong adlen,      // unsigned long long adlen
+            ReadOnlySpan<byte> npub,       // const unsigned char *npub (nonce)
+            IntPtr ctx);         // const crypto_aead_aes256gcm_state *ctx
 
         #endregion
 
@@ -399,20 +408,27 @@ namespace LibEmiddle.Core
         /// <param name="message">The message to authenticate.</param>
         /// <param name="key">The key to use (32 bytes recommended).</param>
         /// <returns>The 32-byte HMAC output.</returns>
-        public static byte[] ComputeHmacSha256(ReadOnlySpan<byte> message, ReadOnlySpan<byte> key)
+        public static byte[] GenerateHmacSha256(ReadOnlySpan<byte> message, ReadOnlySpan<byte> key)
         {
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long.", nameof(key));
 
             Initialize();
-
+            
             byte[] output = new byte[Constants.AES_KEY_SIZE]; // SHA256 hash is 32 bytes
-            int result = crypto_auth_hmacsha256(output, message, (nuint)message.Length, key);
 
-            if (result != 0)
-                throw new InvalidOperationException("HMAC computation failed.");
+            try
+            {
+                int result = crypto_auth_hmacsha256(output, message, (nuint)message.Length, key);
+                if (result != 0)
+                    throw new InvalidOperationException("HMAC computation failed.");
 
-            return output;
+                return output;
+            }
+            finally
+            {
+                SecureMemory.SecureClear(output);
+            }
         }
 
         /// <summary>
@@ -431,7 +447,7 @@ namespace LibEmiddle.Core
         /// <param name="salt">Optional salt (can be null).</param>
         /// <param name="inputKeyMaterial">Input keying material.</param>
         /// <returns>32-byte PRK (pseudorandom key).</returns>
-        public static byte[] HkdfExtract(ReadOnlySpan<byte> salt, ReadOnlySpan<byte> inputKeyMaterial)
+        private static byte[] HkdfExtract(ReadOnlySpan<byte> salt, ReadOnlySpan<byte> inputKeyMaterial)
         {
             Initialize();
 
@@ -473,7 +489,10 @@ namespace LibEmiddle.Core
         /// <param name="info">Optional context and application information.</param>
         /// <param name="outputLength">Desired output length.</param>
         /// <returns>Output key material of the specified length.</returns>
-        public static byte[] HkdfExpand(ReadOnlySpan<byte> prk, ReadOnlySpan<byte> info, int outputLength)
+        private static byte[] HkdfExpand(
+            ReadOnlySpan<byte> prk, 
+            ReadOnlySpan<byte> info, 
+            int outputLength)
         {
             if (outputLength <= 0)
                 throw new ArgumentException("Output length must be positive", nameof(outputLength));
@@ -500,7 +519,11 @@ namespace LibEmiddle.Core
         /// <param name="info">Optional context and application information.</param>
         /// <param name="outputLength">Desired output length.</param>
         /// <returns>Derived key of the specified length.</returns>
-        public static byte[] HkdfDerive(ReadOnlySpan<byte> inputKeyMaterial, ReadOnlySpan<byte> salt, ReadOnlySpan<byte> info, int outputLength = 32)
+        public static byte[] HkdfDerive(
+            ReadOnlySpan<byte> inputKeyMaterial, 
+            ReadOnlySpan<byte> salt = default, 
+            ReadOnlySpan<byte> info = default, 
+            int outputLength = 32)
         {
             byte[] prk = HkdfExtract(salt, inputKeyMaterial);
             try
@@ -827,6 +850,47 @@ namespace LibEmiddle.Core
         }
 
         /// <summary>
+        /// Validates an X25519 public key to ensure it's not an invalid or dangerous value
+        /// </summary>
+        /// <param name="publicKey">X25519 public key to validate</param>
+        /// <returns>True if the key is valid.</returns>
+        // In KeyValidation.cs
+        public static bool ValidateX25519PublicKey(byte[] publicKey)
+        {
+            if (publicKey == null)
+            {
+                return false;
+            }
+
+            if (publicKey.Length != Constants.X25519_KEY_SIZE)
+            {
+                return false;
+            }
+
+            // Check for all-zero key, which is invalid for X25519
+            bool allZeros = true;
+            for (int i = 0; i < publicKey.Length; i++)
+            {
+                if (publicKey[i] != 0)
+                {
+                    allZeros = false;
+                    break;
+                }
+            }
+
+            if (allZeros)
+            {
+                return false;
+            }
+
+            // For X25519, we don't need to do extensive validation as the algorithm 
+            // itself handles many edge cases. The key check above is sufficient
+            // for basic validation purposes.
+
+            return true;
+        }
+
+        /// <summary>
         /// Signs a message using Ed25519.
         /// </summary>
         [LibraryImport(LibraryName, EntryPoint = "crypto_sign_ed25519_detached")]
@@ -927,15 +991,17 @@ namespace LibEmiddle.Core
         /// <param name="privateKey">The private key to derive from (32 bytes).</param>
         public static void ComputePublicKey(Span<byte> output, ReadOnlySpan<byte> privateKey)
         {
-            const int KeySize = Constants.X25519_KEY_SIZE;
+            try
+            {
+                int result = Sodium.crypto_scalarmult_curve25519_base(output, privateKey);
 
-            if (output.Length != KeySize || privateKey.Length != KeySize)
-                throw new ArgumentException($"Both buffers must be exactly {KeySize} bytes.");
-
-            int result = Sodium.crypto_scalarmult_curve25519_base(output, privateKey);
-
-            if (result != 0)
-                throw new InvalidOperationException("Failed to compute X25519 public key.");
+                if (result != 0)
+                    throw new InvalidOperationException("Failed to compute X25519 public key.");
+            }
+            catch (Exception e)
+            {
+                throw new CryptographicException(e.Message, nameof(Sodium));
+            }
         }
 
         /// <summary>

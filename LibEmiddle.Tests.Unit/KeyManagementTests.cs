@@ -2,9 +2,9 @@
 using System.IO;
 using System.Security.Cryptography;
 using LibEmiddle.API;
-using LibEmiddle.Domain;
-using LibEmiddle.Abstractions;
+using LibEmiddle.Core;
 using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -199,7 +199,7 @@ namespace LibEmiddle.Tests.Unit
         public void DeriveX25519PrivateKeyFromEd25519_ShouldProduceValidKey()
         {
             // Arrange
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
             byte[] x25519PrivateKey = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(_identityKeyPair.PrivateKey);

@@ -40,7 +40,7 @@ namespace LibEmiddle.Tests.Unit
                 rng.GetBytes(existingSharedKey);
             }
 
-            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
             byte[] derivedKey1 = DeviceLinking.DeriveSharedKeyForNewDevice(
@@ -57,8 +57,8 @@ namespace LibEmiddle.Tests.Unit
         public void CreateDeviceLinkMessage_ShouldCreateValidMessage()
         {
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
             var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
@@ -75,8 +75,8 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             // Generate key pairs for main device and new device
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create a device link message from the main device to the new device
             var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
@@ -100,9 +100,9 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             // Generate key pairs for main device and new device
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var unrelatedKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519); // For tampering
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var unrelatedKeyPair = Sodium.GenerateEd25519KeyPair(); // For tampering
 
             // Create a device link message from the main device to the new device
             var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
@@ -136,8 +136,8 @@ namespace LibEmiddle.Tests.Unit
         public void ProcessDeviceLinkMessage_WithNullMessage_ShouldThrowException()
         {
             // Arrange
-            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act & Assert - Should throw ArgumentNullException
             Assert.ThrowsException<ArgumentNullException>(() => {
@@ -153,8 +153,8 @@ namespace LibEmiddle.Tests.Unit
         public void MultiDeviceManager_ShouldCreateValidSyncMessages()
         {
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Derive X25519 keys for the second device
             byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
@@ -192,7 +192,7 @@ namespace LibEmiddle.Tests.Unit
         public void MultiDeviceManager_AddLinkedDevice_WithNull_ShouldThrowException()
         {
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
             var manager = new DeviceManager(mainDeviceKeyPair);
 
             // Act & Assert - Should throw ArgumentNullException
@@ -206,8 +206,8 @@ namespace LibEmiddle.Tests.Unit
 
             // 1. Generate key pairs: main device uses an Ed25519 key pair for signing;
             // second device can use X25519 for key agreement.
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateX25519KeyPair();
 
             Trace.TraceWarning($"Generated keys - Main device pub key length: {mainDeviceKeyPair.PublicKey.Length}, Second device pub key length: {secondDeviceKeyPair.PublicKey.Length}");
 
@@ -332,8 +332,8 @@ namespace LibEmiddle.Tests.Unit
         public void MultiDeviceManager_ProcessSyncMessage_WithTamperedMessage_ShouldReturnNull()
         {
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Convert to X25519 keys
             byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
@@ -379,10 +379,10 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_MultipleLinkedDevices_ShouldCreateMessagesForAll()
         {
             // Arrange - Create a main device and multiple secondary devices
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var thirdDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var fourthDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var thirdDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var fourthDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create X25519 keys for each device for linking
             byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
@@ -440,9 +440,9 @@ namespace LibEmiddle.Tests.Unit
             // messages wouldn't be created for them
 
             // Arrange - Create devices
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var thirdDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var thirdDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create X25519 keys for each device for linking
             byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 
@@ -492,8 +492,8 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_ExpiredSyncMessage_ShouldReturnNull()
         {
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Convert to X25519 keys
             byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
@@ -559,8 +559,8 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_AddSameDeviceMultipleTimes_ShouldOnlyAddOnce()
         {
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create X25519 keys
             byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE); 

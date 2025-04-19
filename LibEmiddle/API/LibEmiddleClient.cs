@@ -29,7 +29,7 @@ namespace LibEmiddle.API
         public LibEmiddleClient()
         {
             // Generate an X25519 identity key pair for this client
-            _identityKeyPair = KeyGenerator.GenerateX25519KeyPair();
+            _identityKeyPair = Sodium.GenerateX25519KeyPair();
             _groupChatManager = new GroupChatManager(_identityKeyPair);
             _deviceManager = new DeviceManager(_identityKeyPair);
             _chatSessionManager = new ChatSessionManager(_identityKeyPair);
@@ -55,7 +55,7 @@ namespace LibEmiddle.API
         /// <returns>Random sender key suitable for group encryption</returns>
         public static byte[] GenerateInitialChainKey()
         {
-            return KeyGenerator.GenerateInitialChainKey();
+            return SecureMemory.CreateSecureBuffer(Constants.AES_KEY_SIZE);
         }
 
         /// <summary>
@@ -64,7 +64,7 @@ namespace LibEmiddle.API
         /// <returns>Tuple containing (publicKey, privateKey)</returns>
         public static KeyPair GenerateSignatureKeyPair()
         {
-            return KeyGenerator.GenerateEd25519KeyPair();
+            return Sodium.GenerateEd25519KeyPair();
         }
 
         /// <summary>
@@ -73,7 +73,7 @@ namespace LibEmiddle.API
         /// <returns>Tuple containing (publicKey, privateKey)</returns>
         public static KeyPair GenerateKeyExchangeKeyPair()
         {
-            return KeyGenerator.GenerateX25519KeyPair();
+            return Sodium.GenerateX25519KeyPair();
         }
 
         /// <summary>

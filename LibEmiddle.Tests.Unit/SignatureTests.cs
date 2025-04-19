@@ -26,7 +26,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             byte[] message = Encoding.UTF8.GetBytes("This is a message to be signed");
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
             var privateKey = _identityKeyPair.PrivateKey;
 
@@ -44,7 +44,7 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             byte[] originalMessage = Encoding.UTF8.GetBytes("This is a message to be signed");
             byte[] tamperedMessage = Encoding.UTF8.GetBytes("This is a tampered message");
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
             var privateKey = _identityKeyPair.PrivateKey;
 
@@ -61,7 +61,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string message = "This is a text message to be signed";
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
             var privateKey = _identityKeyPair.PrivateKey;
 
@@ -89,7 +89,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string message = "Test message";
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
             string invalidBase64 = "not valid base64!@#$";
 
@@ -106,7 +106,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             byte[] message = Encoding.UTF8.GetBytes("Message to sign with X25519 key");
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var privateKey = _identityKeyPair.PrivateKey;
 
             // Act
@@ -121,7 +121,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] mediumMessage = SecureMemory.CreateSecureBuffer(1024); // 1KB
             byte[] largeMessage = SecureMemory.CreateSecureBuffer(1024 * 10); // 10KB
 
-            KeyPair _signIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair _signIdentityKeyPair = Sodium.GenerateEd25519KeyPair();
             var publicKey = _signIdentityKeyPair.PublicKey;
             var privateKey = _signIdentityKeyPair.PrivateKey;
 
@@ -168,9 +168,9 @@ namespace LibEmiddle.Tests.Unit
         public void LongTermCryptographicIdentity_ShouldBeSecure()
         {
             // Generate multiple key pairs
-            KeyPair _signIdentityKeyPair1 = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            KeyPair _signIdentityKeyPair2 = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            KeyPair _signIdentityKeyPair3 = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair _signIdentityKeyPair1 = Sodium.GenerateEd25519KeyPair();
+            KeyPair _signIdentityKeyPair2 = Sodium.GenerateEd25519KeyPair();
+            KeyPair _signIdentityKeyPair3 = Sodium.GenerateEd25519KeyPair();
 
 
             // Ensure keys meet minimum security requirements

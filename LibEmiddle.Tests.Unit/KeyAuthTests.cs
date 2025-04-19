@@ -32,7 +32,7 @@ namespace LibEmiddle.Tests.Unit
 
             Parallel.For(0, ITERATIONS, _ =>
             {
-                var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+                var keyPair = Sodium.GenerateX25519KeyPair();
                 lock (lockObject)
                 {
                     keyPairs.Add(keyPair);
@@ -60,7 +60,7 @@ namespace LibEmiddle.Tests.Unit
         public void SignAndVerify_WithLargeMessage_ShouldWorkCorrectly()
         {
             // Arrange
-            var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var keyPair = Sodium.GenerateEd25519KeyPair();
             var largeMessage = SecureMemory.CreateSecureBuffer(1024 * 1024); // 1MB message
 
             // Act
@@ -87,7 +87,7 @@ namespace LibEmiddle.Tests.Unit
         public void VerifyDetached_TamperedSignature_ShouldReturnFalse()
         {
             // Arrange
-            var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var keyPair = Sodium.GenerateEd25519KeyPair();
             var message = Encoding.UTF8.GetBytes("Test message");
             var signature = _cryptoProvider.Sign(message, keyPair.PrivateKey);
 

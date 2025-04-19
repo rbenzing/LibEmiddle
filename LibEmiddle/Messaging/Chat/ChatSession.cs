@@ -35,7 +35,6 @@ namespace LibEmiddle.Messaging.Chat
         public Enums.KeyRotationStrategy RotationStrategy { get; set; } = Enums.KeyRotationStrategy.Standard;
         public Dictionary<string, string> Metadata { get; } = new Dictionary<string, string>();
 
-        // --- Message History ---
         // ConcurrentQueue is generally thread-safe for Enqueue/Dequeue, but access for Get might need care if combined with state changes.
         private readonly ConcurrentQueue<MessageRecord> _messageHistory = new();
 
@@ -84,8 +83,6 @@ namespace LibEmiddle.Messaging.Chat
                 throw new InvalidOperationException("Cryptographic session state is not available (session may be terminated).");
             return currentSession;
         }
-
-        // --- State Management ---
 
         /// <summary>
         /// Activates the session if it's currently Initialized or Suspended.
@@ -182,8 +179,6 @@ namespace LibEmiddle.Messaging.Chat
             }
         }
 
-        // --- Encrypt / Decrypt ---
-
         /// <summary>
         /// Encrypts a message using the current Double Ratchet state. Handles state updates.
         /// Automatically activates the session if it's Initialized.
@@ -197,6 +192,7 @@ namespace LibEmiddle.Messaging.Chat
         public async Task<EncryptedMessage?> EncryptAsync(string message)
         {
             ThrowIfDisposed();
+
             if (string.IsNullOrEmpty(message))
                 throw new ArgumentException("Message cannot be null or empty.", nameof(message));
 
@@ -212,18 +208,15 @@ namespace LibEmiddle.Messaging.Chat
                 // Auto-activate if needed
                 if (State == Enums.ChatSessionState.Initialized)
                 {
-                    var previousState = State;
                     State = Enums.ChatSessionState.Active;
                     LastActivatedAt = DateTime.UtcNow;
-                    SuspensionReason = null;
-                    OnStateChanged(previousState, State);
+                    OnStateChanged(Enums.ChatSessionState.Initialized, State);
                     LoggingManager.LogDebug(nameof(ChatSession), $"Session {SessionId} auto-activated by sending.");
                 }
 
                 var currentCryptoSession = _cryptoSession; // Read current state reference
-                if (currentCryptoSession == null) // Should not happen if not terminated, but check
+                if (currentCryptoSession == null)
                     throw new InvalidOperationException("Cannot encrypt: Cryptographic session state is missing.");
-
 
                 // --- Perform Double Ratchet Encryption ---
                 var (updatedSession, encryptedMessage) = await DoubleRatchet.DoubleRatchetEncryptAsync(
@@ -232,10 +225,8 @@ namespace LibEmiddle.Messaging.Chat
                 // --- Update State ---
                 if (updatedSession == null || encryptedMessage == null)
                 {
-                    // Encryption failed in DoubleRatchet layer (error should have been logged there)
-                    // Optionally transition session to an error state here? Or just return null.
                     LoggingManager.LogError(nameof(ChatSession), $"Encryption failed for session {SessionId}. DoubleRatchet returned null.");
-                    return null; // Indicate failure
+                    return null;
                 }
 
                 // IMPORTANT: Update the internal state reference to the new immutable object
@@ -244,19 +235,20 @@ namespace LibEmiddle.Messaging.Chat
                 // Track message send time
                 LastMessageSentAt = DateTime.UtcNow;
 
-                // Add to message history (optional)
-                _messageHistory.Enqueue(new MessageRecord
+                // Add to message history if applicable
+                if (_messageHistory.Count < Constants.MAX_TRACKED_MESSAGE_IDS)
                 {
-                    IsOutgoing = true,
-                    Timestamp = DateTime.UtcNow, // Consider using timestamp from encryptedMessage if needed
-                    Content = message, // Store plaintext for local history
-                    EncryptedMessage = encryptedMessage // Store ciphertext details
-                });
+                    _messageHistory.Enqueue(new MessageRecord
+                    {
+                        IsOutgoing = true,
+                        Timestamp = DateTime.UtcNow,
+                        Content = message,
+                        EncryptedMessage = encryptedMessage
+                    });
+                }
 
                 return encryptedMessage;
             }
-            // Catch specific expected exceptions if necessary
-            // catch (CryptographicException cex) { ... }
             finally
             {
                 _sessionLock.Release();
@@ -276,14 +268,17 @@ namespace LibEmiddle.Messaging.Chat
         public async Task<string?> DecryptAsync(EncryptedMessage encryptedMessage)
         {
             ThrowIfDisposed();
+
             ArgumentNullException.ThrowIfNull(encryptedMessage, nameof(encryptedMessage));
-            // Validate incoming message structure minimally
+
+            // Basic validation before acquiring lock
             if (encryptedMessage.Ciphertext == null || encryptedMessage.Nonce == null || encryptedMessage.SenderDHKey == null)
                 throw new ArgumentException("Encrypted message is missing required fields for decryption.", nameof(encryptedMessage));
+
             if (encryptedMessage.SessionId != this.SessionId)
             {
-                LoggingManager.LogWarning(nameof(ChatSession), $"Message Session ID '{encryptedMessage.SessionId}' does not match current session '{this.SessionId}'. Discarding.");
-                return null; // Message not for this session
+                LoggingManager.LogWarning(nameof(ChatSession), $"Message Session ID '{encryptedMessage.SessionId}' does not match current session '{this.SessionId}'");
+                return null;
             }
 
             await _sessionLock.WaitAsync();
@@ -293,19 +288,16 @@ namespace LibEmiddle.Messaging.Chat
                 if (State == Enums.ChatSessionState.Terminated)
                     throw new InvalidOperationException("Cannot decrypt: Session is terminated.");
 
-                // Allow decryption even if Suspended, but don't auto-activate
                 // Auto-activate if needed and NOT suspended
                 if (State == Enums.ChatSessionState.Initialized)
                 {
-                    var previousState = State;
                     State = Enums.ChatSessionState.Active;
                     LastActivatedAt = DateTime.UtcNow;
-                    SuspensionReason = null;
-                    OnStateChanged(previousState, State);
+                    OnStateChanged(Enums.ChatSessionState.Initialized, State);
                     LoggingManager.LogDebug(nameof(ChatSession), $"Session {SessionId} auto-activated by receiving.");
                 }
 
-                var currentCryptoSession = _cryptoSession; // Read current state reference
+                var currentCryptoSession = _cryptoSession;
                 if (currentCryptoSession == null)
                     throw new InvalidOperationException("Cannot decrypt: Cryptographic session state is missing.");
 
@@ -313,44 +305,36 @@ namespace LibEmiddle.Messaging.Chat
                 var (updatedSession, decryptedMessage) = await DoubleRatchet.DoubleRatchetDecryptAsync(
                     currentCryptoSession, encryptedMessage);
 
-
                 // --- Update State ---
                 if (updatedSession == null)
                 {
-                    // Decryption failed (e.g., bad MAC, replay, out-of-order beyond handling)
-                    // DoubleRatchet layer should have logged the reason.
-                    // Do NOT update the crypto session state on failure.
-                    LoggingManager.LogWarning(nameof(ChatSession), $"Decryption failed for message {encryptedMessage.MessageId} in session {SessionId}.");
+                    LoggingManager.LogWarning(nameof(ChatSession), $"Decryption failed for message {encryptedMessage.MessageId}");
                     return null;
                 }
 
-                // Decryption SUCCESSFUL
-                // IMPORTANT: Update the internal state reference
+                // Decryption SUCCESSFUL - update the session state
                 _cryptoSession = updatedSession;
-
-                // Track message receive time
                 LastMessageReceivedAt = DateTime.UtcNow;
 
-                // Add to message history (optional)
-                _messageHistory.Enqueue(new MessageRecord
+                // Add to message history if applicable
+                if (_messageHistory.Count < Constants.MAX_TRACKED_MESSAGE_IDS && decryptedMessage != null)
                 {
-                    IsOutgoing = false,
-                    Timestamp = DateTime.UtcNow, // Or use timestamp from message?
-                    Content = decryptedMessage, // Store plaintext
-                    EncryptedMessage = encryptedMessage // Store original encrypted form
-                });
+                    _messageHistory.Enqueue(new MessageRecord
+                    {
+                        IsOutgoing = false,
+                        Timestamp = DateTime.UtcNow,
+                        Content = decryptedMessage,
+                        EncryptedMessage = encryptedMessage
+                    });
+                }
 
-                return decryptedMessage; // Return plaintext
+                return decryptedMessage;
             }
-            // Catch specific expected exceptions if necessary
-            // catch (CryptographicException cex) { ... }
             finally
             {
                 _sessionLock.Release();
             }
         }
-
-        // --- Other Methods ---
 
         /// <summary>
         /// Checks if the session is valid and not terminated or disposed.
@@ -362,9 +346,8 @@ namespace LibEmiddle.Messaging.Chat
 
             // No lock needed for reading volatile references and immutable state parts
             var currentCryptoSession = _cryptoSession; // Read reference
-            var currentState = State; // Read current state
 
-            return currentState != Enums.ChatSessionState.Terminated &&
+            return State != Enums.ChatSessionState.Terminated &&
                    currentCryptoSession != null &&
                    // Basic checks on the immutable session state
                    currentCryptoSession.RootKey?.Length == Constants.AES_KEY_SIZE &&

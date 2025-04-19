@@ -2,12 +2,12 @@
 using System;
 using System.Text;
 using System.Security.Cryptography;
-using LibEmiddle.Abstractions;
 using LibEmiddle.API;
-using LibEmiddle.Domain;
-using LibEmiddle.Messaging.Group;
-using LibEmiddle.KeyExchange;
+using LibEmiddle.Core;
 using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Messaging.Group;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -181,8 +181,8 @@ namespace LibEmiddle.Tests.Unit
         public void Performance_DoubleRatchetMessageExchangeTest()
         {
             // Arrange - Set up Double Ratchet sessions
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);

@@ -16,9 +16,6 @@ namespace LibEmiddle.KeyExchange
     /// </summary>
     public sealed class X3DHExchange
     {
-        // Current protocol version
-        private const string PROTOCOL_VERSION = "1.0";
-
         // Recommended rotation period for signed pre-keys (7 days in milliseconds)
         private const long SIGNED_PREKEY_ROTATION_MS = 7 * 24 * 60 * 60 * 1000L;
 
@@ -56,7 +53,7 @@ namespace LibEmiddle.KeyExchange
             // --- 1. Identity Key ---
             try
             {
-                localIdentityKeyPair = identityKeyPair ?? KeyGenerator.GenerateEd25519KeyPair();
+                localIdentityKeyPair = identityKeyPair ?? Sodium.GenerateEd25519KeyPair();
 
                 // Validate the identity key pair format/size
                 if (localIdentityKeyPair.PublicKey == null || localIdentityKeyPair.PrivateKey == null ||
@@ -76,12 +73,12 @@ namespace LibEmiddle.KeyExchange
             try // Wrap remaining crypto operations
             {
                 // --- 2. Signed PreKey ---
-                signedPreKeyPair = KeyGenerator.GenerateX25519KeyPair();
+                signedPreKeyPair = Sodium.GenerateX25519KeyPair();
                 if (signedPreKeyPair.PublicKey == null || signedPreKeyPair.PrivateKey == null ||
                     signedPreKeyPair.PublicKey.Length != Constants.X25519_KEY_SIZE || signedPreKeyPair.PrivateKey.Length != Constants.X25519_KEY_SIZE)
                 { throw new CryptographicException("Generated signed pre-key pair has invalid size."); }
                 // Optional: Validate generated X25519 public key
-                if (!KeyValidation.ValidateX25519PublicKey(signedPreKeyPair.PublicKey))
+                if (!Sodium.ValidateX25519PublicKey(signedPreKeyPair.PublicKey))
                 { throw new CryptographicException("Generated signed pre-key public key failed validation."); }
                  LoggingManager.LogDebug(nameof(X3DHExchange), "Signed PreKey generated/validated.");
 
@@ -103,13 +100,13 @@ namespace LibEmiddle.KeyExchange
                 {
                     try
                     {
-                        var opkPair = KeyGenerator.GenerateX25519KeyPair();
+                        var opkPair = Sodium.GenerateX25519KeyPair();
                         if (opkPair.PublicKey == null || opkPair.PrivateKey == null ||
                             opkPair.PublicKey.Length != Constants.X25519_KEY_SIZE || opkPair.PrivateKey.Length != Constants.X25519_KEY_SIZE)
                         { LoggingManager.LogWarning(nameof(X3DHExchange), "Generated invalid OPK size, retrying..."); i--; continue; }
 
                         // Validate the generated key (recommended)
-                        if (KeyValidation.ValidateX25519PublicKey(opkPair.PublicKey))
+                        if (Sodium.ValidateX25519PublicKey(opkPair.PublicKey))
                         {
                             uint opkId = GenerateSecureRandomId();
                             // Store public key and ID
@@ -151,7 +148,7 @@ namespace LibEmiddle.KeyExchange
                     SignedPreKeyId = signedPreKeyId,
                     OneTimePreKeyIds = oneTimePreKeyIds,
                     // Meta
-                    ProtocolVersion = PROTOCOL_VERSION,
+                    ProtocolVersion = $"{ProtocolVersion.MAJOR_VERSION}.{ProtocolVersion.MINOR_VERSION}",
                     CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() // Or use bundle constructor's time
                 };
 
@@ -217,12 +214,12 @@ namespace LibEmiddle.KeyExchange
                 }
 
                 // Validate Key formats (replace with actual validation calls)
-                if (!KeyValidation.ValidateEd25519PublicKey(bundle.IdentityKey))
+                if (!Sodium.ValidateEd25519PublicKey(bundle.IdentityKey))
                 {
                     LoggingManager.LogWarning(nameof(X3DHExchange), "Invalid Ed25519 Identity Key format/value.");
                     return false;
                 }
-                if (!KeyValidation.ValidateX25519PublicKey(bundle.SignedPreKey))
+                if (!Sodium.ValidateX25519PublicKey(bundle.SignedPreKey))
                 {
                     LoggingManager.LogWarning(nameof(X3DHExchange), "Invalid X25519 Signed PreKey format/value.");
                     return false;
@@ -239,7 +236,7 @@ namespace LibEmiddle.KeyExchange
                     for (int i = 0; i < bundle.OneTimePreKeys.Count; ++i)
                     {
                         if (bundle.OneTimePreKeys[i]?.Length != Constants.X25519_KEY_SIZE ||
-                            !KeyValidation.ValidateX25519PublicKey(bundle.OneTimePreKeys[i]) ||
+                            !Sodium.ValidateX25519PublicKey(bundle.OneTimePreKeys[i]) ||
                              bundle.OneTimePreKeyIds[i] == 0) // ID must be non-zero
                         {
                             LoggingManager.LogWarning(nameof(X3DHExchange), $"Invalid OneTimePreKey at index {i}.");
@@ -309,9 +306,9 @@ namespace LibEmiddle.KeyExchange
                 }
 
                 // Use HKDF for key derivation with protocol-specific info
-                return KeyConversion.HkdfDerive(
+                return Sodium.HkdfDerive(
                     combinedInput,
-                    info: Encoding.UTF8.GetBytes($"X3DH-v{PROTOCOL_VERSION}"),
+                    info: Encoding.UTF8.GetBytes($"{ProtocolVersion.PROTOCOL_ID}-v{ProtocolVersion.MAJOR_VERSION}.{ProtocolVersion.MINOR_VERSION}"),
                     outputLength: Constants.AES_KEY_SIZE);
             }
             catch (Exception ex)
@@ -356,7 +353,7 @@ namespace LibEmiddle.KeyExchange
                     // Convert Ed25519 identity key to X25519 format if needed
                     if (senderIdentityKeyPair.PrivateKey.Length == Constants.ED25519_PRIVATE_KEY_SIZE)
                     {
-                        senderX25519Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(
+                        senderX25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(
                             senderIdentityKeyPair.PrivateKey);
                     }
                     else if (senderIdentityKeyPair.PrivateKey.Length == Constants.X25519_KEY_SIZE)
@@ -375,7 +372,7 @@ namespace LibEmiddle.KeyExchange
                     byte[] recipientX25519Public;
                     if (recipientBundle.IdentityKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                     {
-                        recipientX25519Public = KeyConversion.ConvertEd25519PublicKeyToX25519(
+                        recipientX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(
                             recipientBundle.IdentityKey);
                     }
                     else if (recipientBundle.IdentityKey.Length == Constants.X25519_KEY_SIZE)
@@ -390,14 +387,14 @@ namespace LibEmiddle.KeyExchange
                     }
 
                     // Validate recipient's signed pre-key
-                    if (!KeyValidation.ValidateX25519PublicKey(recipientBundle.SignedPreKey))
+                    if (!Sodium.ValidateX25519PublicKey(recipientBundle.SignedPreKey))
                     {
                         throw new ArgumentException("Invalid recipient signed pre-key",
                             nameof(recipientBundle));
                     }
 
                     // Generate ephemeral key pair for this session
-                    var ephemeralKeyPair = KeyGenerator.GenerateX25519KeyPair();
+                    var ephemeralKeyPair = Sodium.GenerateX25519KeyPair();
 
                     // Select a one-time pre-key if available
                     byte[]? oneTimePreKey = null;
@@ -422,7 +419,7 @@ namespace LibEmiddle.KeyExchange
                         }
 
                         // Validate the selected one-time pre-key
-                        if (!KeyValidation.ValidateX25519PublicKey(oneTimePreKey))
+                        if (!Sodium.ValidateX25519PublicKey(oneTimePreKey))
                         {
                             // Try to find a valid key instead
                             oneTimePreKey = null;
@@ -430,7 +427,7 @@ namespace LibEmiddle.KeyExchange
 
                             for (int i = 0; i < recipientBundle.OneTimePreKeys.Count; i++)
                             {
-                                if (KeyValidation.ValidateX25519PublicKey(recipientBundle.OneTimePreKeys[i]))
+                                if (Sodium.ValidateX25519PublicKey(recipientBundle.OneTimePreKeys[i]))
                                 {
                                     oneTimePreKey = recipientBundle.OneTimePreKeys[i];
                                     oneTimePreKeyIndex = i;
@@ -564,11 +561,11 @@ namespace LibEmiddle.KeyExchange
             try
             {
                 // 1. Convert Keys
-                senderIK_X25519_Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(senderIdentityKeyPair.PrivateKey);
-                recipientIK_X25519_Public = KeyConversion.ConvertEd25519PublicKeyToX25519(recipientBundle.IdentityKey);
+                senderIK_X25519_Private = Sodium.ConvertEd25519PrivateKeyToX25519(senderIdentityKeyPair.PrivateKey);
+                recipientIK_X25519_Public = Sodium.ConvertEd25519PublicKeyToX25519(recipientBundle.IdentityKey);
 
                 // 2. Generate Ephemeral Key Pair (EK)
-                KeyPair ephemeralKeyPairGen = KeyGenerator.GenerateX25519KeyPair(); // Generate into temp var
+                KeyPair ephemeralKeyPairGen = Sodium.GenerateX25519KeyPair(); // Generate into temp var
 
                 // Validate the generated pair immediately and robustly
                 if (ephemeralKeyPairGen.PrivateKey == null || ephemeralKeyPairGen.PublicKey == null ||
@@ -598,7 +595,7 @@ namespace LibEmiddle.KeyExchange
                         byte[]? candidateKey = recipientBundle.OneTimePreKeys[currentIndex];
                         // Ensure ID list exists and matches count before accessing
                         if (candidateKey != null &&
-                           KeyValidation.ValidateX25519PublicKey(candidateKey) &&
+                           Sodium.ValidateX25519PublicKey(candidateKey) &&
                            recipientBundle.OneTimePreKeyIds != null &&
                            recipientBundle.OneTimePreKeyIds.Count == count)
                         {
@@ -725,11 +722,11 @@ namespace LibEmiddle.KeyExchange
                 }
 
                 // 2. Convert Keys
-                receiverIK_X25519_Private = KeyConversion.DeriveX25519PrivateKeyFromEd25519(receiverIK_Ed_Private);
-                senderIK_X25519_Public = KeyConversion.ConvertEd25519PublicKeyToX25519(initialMessage.SenderIdentityKeyPublic);
+                receiverIK_X25519_Private = Sodium.ConvertEd25519PrivateKeyToX25519(receiverIK_Ed_Private);
+                senderIK_X25519_Public = Sodium.ConvertEd25519PublicKeyToX25519(initialMessage.SenderIdentityKeyPublic);
 
                 // Validate sender public keys from message
-                if (!KeyValidation.ValidateX25519PublicKey(senderIK_X25519_Public) || !KeyValidation.ValidateX25519PublicKey(initialMessage.SenderEphemeralKeyPublic))
+                if (!Sodium.ValidateX25519PublicKey(senderIK_X25519_Public) || !Sodium.ValidateX25519PublicKey(initialMessage.SenderEphemeralKeyPublic))
                     throw new ArgumentException("Invalid public key format received from sender.", nameof(initialMessage));
 
                 // 3. Perform DH Calculations
@@ -797,9 +794,9 @@ namespace LibEmiddle.KeyExchange
                 }
 
                 // Generate new SPK pair
-                newSignedPreKeyPair = KeyGenerator.GenerateX25519KeyPair();
+                newSignedPreKeyPair = Sodium.GenerateX25519KeyPair();
                 if (newSignedPreKeyPair.PublicKey == null || newSignedPreKeyPair.PrivateKey == null ||
-                    !KeyValidation.ValidateX25519PublicKey(newSignedPreKeyPair.PublicKey)) // Validate new key
+                    !Sodium.ValidateX25519PublicKey(newSignedPreKeyPair.PublicKey)) // Validate new key
                 {
                     throw new CryptographicException("Failed to generate a valid new signed pre-key pair.");
                 }
@@ -863,28 +860,35 @@ namespace LibEmiddle.KeyExchange
             if (privateKey.Length != Constants.X25519_KEY_SIZE || publicKey.Length != Constants.X25519_KEY_SIZE)
                 throw new ArgumentException($"Both keys must be {Constants.X25519_KEY_SIZE} bytes for X25519 DH.");
 
-            if (!KeyValidation.ValidateX25519PublicKey(publicKey.ToArray()))
+            // Validate the public key (optional security check)
+            if (!Sodium.ValidateX25519PublicKey(publicKey.ToArray()))
                 throw new ArgumentException("Invalid peer public key provided for DH.", nameof(publicKey));
 
+            // Create result array
             byte[] sharedOutput = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
+            // Create a secure copy of the private key to avoid modification
             byte[] privateKeyCopy = SecureMemory.SecureCopy(privateKey.ToArray());
+
             try
             {
+                // Perform the DH calculation
                 Sodium.ComputeSharedSecret(sharedOutput, privateKeyCopy, publicKey.ToArray());
 
-                if (sharedOutput == null || sharedOutput.Length != Constants.X25519_KEY_SIZE)
-                {
-                    throw new CryptographicException("X25519 scalar multiplication returned invalid result.");
-                }
+                // Ensure we got a valid result
+                if (sharedOutput.Length != Constants.X25519_KEY_SIZE)
+                    throw new CryptographicException("X25519 scalar multiplication returned invalid result size.");
 
-                return sharedOutput.ToArray();
+                return sharedOutput;
             }
             catch (Exception ex)
             {
+                // Clean up on failure
+                SecureMemory.SecureClear(sharedOutput);
                 throw new CryptographicException("X25519 scalar multiplication failed.", ex);
             }
             finally
             {
+                // Always clear the private key copy
                 SecureMemory.SecureClear(privateKeyCopy);
             }
         }

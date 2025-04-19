@@ -257,15 +257,6 @@ namespace LibEmiddle.Messaging.Group
                 // For Hourly or Daily strategies, check if the key rotation time threshold has passed.
                 CheckAndRotateKeyIfNeeded(groupId);
             }
-            else
-            {
-                // For Standard strategy, you might choose to rotate only once at group creation.
-                // If you currently rotate on every message, comment this out:
-                // if (_memberManager.HasKeyRotationPermission(groupId, _identityKeyPair.PublicKey))
-                // {
-                //     RotateGroupKey(groupId);
-                // }
-            }
 
             // Synchronize access for the specific group.
             lock (GetGroupLock(groupId))
@@ -278,7 +269,6 @@ namespace LibEmiddle.Messaging.Group
                 }
 
                 // Get the message key and iteration number from the key manager.
-                // The key manager is expected to return a tuple: (messageKey, iteration).
                 var (messageKey, iteration) = _keyManager.GetSenderMessageKey(groupId);
                 try
                 {

@@ -34,7 +34,7 @@ namespace LibEmiddle.Tests.Unit
                 var _cryptoProvider = new CryptoProvider();
 
                 // Then verify key generation works via E2EEClient
-                var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+                var keyPair = Sodium.GenerateX25519KeyPair();
                 if (keyPair.PublicKey != null && keyPair.PrivateKey != null)
                 {
                     Trace.TraceInformation($"Sodium library initialized successfully. Generated key sizes: Public={keyPair.PublicKey.Length}, Private={keyPair.PrivateKey.Length}");

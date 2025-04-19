@@ -1,18 +1,19 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
-using System.Threading.Tasks;
-using System.Net.WebSockets;
-using System.Text;
 using System.Collections.Generic;
-using System.Threading;
+using System.Net.WebSockets;
 using System.Security;
+using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using LibEmiddle.Abstractions;
-using LibEmiddle.KeyExchange;
-using LibEmiddle.Domain;
-using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Core;
 using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
+using LibEmiddle.KeyExchange;
+using LibEmiddle.Messaging.Transport;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -31,8 +32,8 @@ namespace LibEmiddle.Tests.Unit
             _cryptoProvider = new CryptoProvider();
 
             // Create a test session simulating key exchange and session initialization
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
             string sessionId = "test-session-" + Guid.NewGuid().ToString();

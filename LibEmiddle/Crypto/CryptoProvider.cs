@@ -68,7 +68,7 @@ namespace LibEmiddle.Crypto
             }
             else if (keyType == KeyType.X25519)
             {
-                return KeyGenerator.GenerateX25519KeyPair();
+                return Sodium.GenerateX25519KeyPair();
             }
             else
             {
@@ -83,11 +83,6 @@ namespace LibEmiddle.Crypto
         {
             ArgumentNullException.ThrowIfNullOrEmpty(size.ToString(), nameof(size));
 
-            if (size <= 12)
-            {
-                throw new ArgumentException("Size must be 12 or greater.", nameof(size));
-            }
-
             Initialize();
             return NonceGenerator.GenerateNonce(size);
         }
@@ -95,16 +90,13 @@ namespace LibEmiddle.Crypto
         /// <summary>
         /// HMAC-SHA256 on the input data (normalizedPublicKey) using the provided key (existingSharedKey).
         /// </summary>
-        /// <param name="existingSharedKey"></param>
         /// <param name="normalizedPublicKey"></param>
+        /// <param name="existingSharedKey"></param>
         /// <returns></returns>
-        public byte[] GenerateHmacSha256(byte[] existingSharedKey, byte[] normalizedPublicKey)
+        public byte[] GenerateHmacSha256(byte[] normalizedPublicKey, byte[] existingSharedKey)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(existingSharedKey.ToString(), nameof(existingSharedKey));
-            ArgumentNullException.ThrowIfNullOrEmpty(normalizedPublicKey.ToString(), nameof(normalizedPublicKey));
-
             Initialize();
-            return KeyGenerator.GenerateHmacSha256(existingSharedKey, normalizedPublicKey);
+            return Sodium.GenerateHmacSha256(normalizedPublicKey, existingSharedKey);
         }
 
         /// <summary>
@@ -119,7 +111,7 @@ namespace LibEmiddle.Crypto
             ArgumentNullException.ThrowIfNullOrEmpty(ikm.ToString(), nameof(ikm));
 
             Initialize();
-            return KeyConversion.HkdfDerive(ikm, salt, info, length);
+            return Sodium.HkdfDerive(ikm, salt, info, length);
         }
 
         /// <summary>
@@ -130,7 +122,7 @@ namespace LibEmiddle.Crypto
             ArgumentNullException.ThrowIfNullOrEmpty(privateKey.ToString(), nameof(privateKey));
 
             Initialize();
-            return KeyAuth.SignDetached(message, privateKey);
+            return Sodium.SignDetached(message, privateKey);
         }
 
         /// <summary>
@@ -142,7 +134,7 @@ namespace LibEmiddle.Crypto
             ArgumentNullException.ThrowIfNullOrEmpty(publicKey.ToString(), nameof(publicKey));
 
             Initialize();
-            return KeyAuth.VerifyDetached(signature, message, publicKey);
+            return Sodium.VerifyDetached(signature, message, publicKey);
         }
 
         /// <summary>
@@ -153,7 +145,7 @@ namespace LibEmiddle.Crypto
             ArgumentNullException.ThrowIfNullOrEmpty(ed25519PublicKey.ToString(), nameof(ed25519PublicKey));
 
             Initialize();
-            return KeyConversion.ConvertEd25519PublicKeyToX25519(ed25519PublicKey);
+            return Sodium.ConvertEd25519PublicKeyToX25519(ed25519PublicKey);
         }
 
         /// <summary>
@@ -164,7 +156,7 @@ namespace LibEmiddle.Crypto
             ArgumentNullException.ThrowIfNullOrEmpty(ed25519PrivateKey.ToString(), nameof(ed25519PrivateKey));
 
             Initialize();
-            return KeyConversion.DeriveX25519PrivateKeyFromEd25519(ed25519PrivateKey);
+            return Sodium.ConvertEd25519PrivateKeyToX25519(ed25519PrivateKey);
         }
 
         /// <summary>
@@ -177,7 +169,7 @@ namespace LibEmiddle.Crypto
             ArgumentNullException.ThrowIfNullOrEmpty(seed.ToString(), nameof(seed));
 
             Initialize();
-            return KeyGenerator.GenerateEd25519KeyPairFromSeed(seed);
+            return Sodium.GenerateEd25519KeyPairFromSeed(seed);
         }
 
         /// <summary>
@@ -365,7 +357,7 @@ namespace LibEmiddle.Crypto
         /// <returns></returns>
         public bool ValidateX25519PublicKey(byte[] publicKey)
         {
-            return KeyValidation.ValidateX25519PublicKey(publicKey);
+            return Sodium.ValidateX25519PublicKey(publicKey);
         }
 
         /// <summary>

@@ -2,10 +2,9 @@
 using System;
 using System.IO;
 using System.Security.Cryptography;
-using LibEmiddle.API;
-using LibEmiddle.Domain;
-using LibEmiddle.Abstractions;
+using LibEmiddle.Core;
 using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -33,7 +32,7 @@ namespace LibEmiddle.Tests.Unit
         public void LoadKeyFromFile_WrongPassword_ShouldThrowCryptographicException()
         {
             // Arrange
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string correctPassword = "CorrectP@ssw0rd";
@@ -92,7 +91,7 @@ namespace LibEmiddle.Tests.Unit
         public void KeyStorage_SaltRotation_ShouldUpdateFile()
         {
             // Arrange
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "TestP@ssw0rd";

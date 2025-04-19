@@ -60,36 +60,24 @@ namespace LibEmiddle.KeyExchange
                 };
 
                 // --- 2. Serialize DTO to JSON ---
-                // Use options for potentially cleaner output if desired
                 string json = JsonSerializer.Serialize(sessionDto, new JsonSerializerOptions { WriteIndented = false });
                 serializedData = System.Text.Encoding.UTF8.GetBytes(json);
 
                 // --- 3. Encrypt if Key Provided ---
                 if (encryptionKey != null)
                 {
-                    byte[] nonce = NonceGenerator.GenerateNonce(); // Must be unique per encryption with the same key
-                    byte[] encryptedData = AES.AESEncrypt(serializedData, encryptionKey, nonce); // Assumes AES-GCM or similar AEAD
+                    byte[] nonce = NonceGenerator.GenerateNonce();
+                    byte[] encryptedData = AES.AESEncrypt(serializedData, encryptionKey, nonce);
 
-                    // Combine nonce + ciphertext (common pattern)
+                    // Combine nonce + ciphertext in a more efficient manner
                     byte[] result = new byte[nonce.Length + encryptedData.Length];
-                    Buffer.BlockCopy(nonce, 0, result, 0, nonce.Length);
-                    Buffer.BlockCopy(encryptedData, 0, result, nonce.Length, encryptedData.Length);
+                    nonce.AsSpan().CopyTo(result.AsSpan(0, nonce.Length));
+                    encryptedData.AsSpan().CopyTo(result.AsSpan(nonce.Length));
 
-                    // Return encrypted blob
                     return result;
                 }
-                else
-                {
-                    // Return plain JSON bytes
-                    // Note: Storing unencrypted private keys is a major security risk!
-                    if (sessionDto.DHRatchetPrivateKey != null)
-                    {
-                        LoggingManager.LogSecurityEvent(nameof(SessionPersistence), "SECURITY WARNING: Saving session with unencrypted private key!");
-                    }
-                    byte[] result = serializedData;
-                    serializedData = null; // Prevent clearing in finally block as we are returning it
-                    return result;
-                }
+
+                return serializedData;
             }
             catch (Exception ex) when (ex is CryptographicException || ex is JsonException || ex is ArgumentException)
             {
@@ -104,7 +92,7 @@ namespace LibEmiddle.KeyExchange
             finally
             {
                 // Securely clear the intermediate JSON bytes if they weren't returned directly
-                if (serializedData != null)
+                if (serializedData != null && encryptionKey != null)
                     SecureMemory.SecureClear(serializedData);
             }
         }

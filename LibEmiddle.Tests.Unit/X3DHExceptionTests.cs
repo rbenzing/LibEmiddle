@@ -27,7 +27,7 @@ namespace LibEmiddle.Tests.Unit
         public void X3DHKeyExchange_NullRecipientKey_ShouldThrowException()
         {
             // Arrange
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var senderPrivate = _identityKeyPair.PrivateKey;
 
             // Act - should throw ArgumentNullException
@@ -39,7 +39,7 @@ namespace LibEmiddle.Tests.Unit
         public void X3DHKeyExchange_NullSenderKey_ShouldThrowException()
         {
             // Arrange
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var recipientPublic = _identityKeyPair.PublicKey;
 
             // Act - should throw ArgumentNullException
@@ -51,7 +51,7 @@ namespace LibEmiddle.Tests.Unit
         public void X3DHKeyExchange_InvalidRecipientKeyLength_ShouldThrowException()
         {
             // Arrange
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var senderPrivate = _identityKeyPair.PrivateKey;
             byte[] invalidLengthKey = new byte[16]; // Invalid length (should be 32)
 
@@ -64,7 +64,7 @@ namespace LibEmiddle.Tests.Unit
         public void X3DHKeyExchange_InvalidSenderKeyLength_ShouldThrowException()
         {
             // Arrange
-            KeyPair _identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var recipientPublic = _identityKeyPair.PublicKey;
             byte[] invalidLengthKey = new byte[16]; // Invalid length (should be 32)
 
@@ -78,7 +78,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
             var alicePublic = _aliceIdentityKeyPair.PublicKey;
             var alicePrivate = _aliceIdentityKeyPair.PrivateKey;
 
@@ -101,7 +101,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create a bundle with invalid public key
             var invalidBundle = new X3DHPublicBundle
@@ -121,7 +121,7 @@ namespace LibEmiddle.Tests.Unit
         public void InitiateX3DHSession_MissingRequiredKeys_ShouldThrowException()
         {
             // Arrange
-            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create a bundle with missing keys
             var invalidBundle = new X3DHPublicBundle
@@ -139,7 +139,7 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public void InitiateX3DHSession_InvalidOneTimePreKeys_ShouldSkipInvalidKeys()
         {
-            KeyPair _bobSignKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair _bobSignKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle(_bobSignKeyPair);
@@ -220,7 +220,7 @@ namespace LibEmiddle.Tests.Unit
                 // Periodically perform DH ratchet step
                 if (i % 2 == 1)
                 {
-                    var ephemeralKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+                    var ephemeralKeyPair = Sodium.GenerateX25519KeyPair();
                     var dh = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, ephemeralKeyPair.PrivateKey);
                     var (newRootKey, nextChainKey) = _cryptoProvider.DHRatchetStep(currentRootKey, dh);
 
@@ -252,7 +252,7 @@ namespace LibEmiddle.Tests.Unit
             _cryptoProvider.Initialize();
 
             // Generate an Ed25519 key pair for the identity (used for signing).
-            KeyPair identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair identityKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act: Create the X3DH bundle.
             var bundle = X3DHExchange.CreateX3DHKeyBundle(identityKeyPair);

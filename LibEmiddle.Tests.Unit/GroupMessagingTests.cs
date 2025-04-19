@@ -26,7 +26,7 @@ namespace LibEmiddle.Tests.Unit
         public void RotateGroupKey_ShouldGenerateNewKey()
         {
             // Arrange
-            var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var keyPair = Sodium.GenerateEd25519KeyPair();
             var groupManager = new GroupChatManager(keyPair);
             string groupId = $"test-key-{Guid.NewGuid()}";
             byte[] originalKey = groupManager.CreateGroup(groupId);
@@ -53,8 +53,8 @@ namespace LibEmiddle.Tests.Unit
         public void AddGroupMember_ShouldAddMemberToAuthorizedList()
         {
             // Arrange
-            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var adminKeyPair = Sodium.GenerateEd25519KeyPair();
+            var memberKeyPair = Sodium.GenerateEd25519KeyPair();
             var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = $"test-authorization-{Guid.NewGuid()}";
             groupManager.CreateGroup(groupId);
@@ -78,8 +78,8 @@ namespace LibEmiddle.Tests.Unit
         public void RemoveGroupMember_ShouldRemoveMemberAndRotateKey()
         {
             // Arrange
-            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var adminKeyPair = Sodium.GenerateEd25519KeyPair();
+            var memberKeyPair = Sodium.GenerateEd25519KeyPair();
             var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = $"test-revocation-{Guid.NewGuid()}";
             groupManager.CreateGroup(groupId);
@@ -117,7 +117,7 @@ namespace LibEmiddle.Tests.Unit
         public void DecryptGroupMessage_ShouldRejectReplayedMessage()
         {
             // Arrange
-            var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var keyPair = Sodium.GenerateEd25519KeyPair();
             var groupManager = new GroupChatManager(keyPair);
             string groupId = $"test-replay-protection-{Guid.NewGuid()}";
             byte[] senderKey = groupManager.CreateGroup(groupId);
@@ -163,8 +163,8 @@ namespace LibEmiddle.Tests.Unit
         public void ForwardSecrecy_RemovedMemberCannotDecryptNewMessages()
         {
             // Arrange
-            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var adminKeyPair = Sodium.GenerateEd25519KeyPair();
+            var memberKeyPair = Sodium.GenerateEd25519KeyPair();
             var adminManager = new GroupChatManager(adminKeyPair);
             var memberManager = new GroupChatManager(memberKeyPair);
 
@@ -214,9 +214,9 @@ namespace LibEmiddle.Tests.Unit
         public void ProcessSenderKeyDistribution_ShouldRejectUntrustedSenders()
         {
             // Arrange
-            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var untrustedKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var adminKeyPair = Sodium.GenerateEd25519KeyPair();
+            var memberKeyPair = Sodium.GenerateEd25519KeyPair();
+            var untrustedKeyPair = Sodium.GenerateEd25519KeyPair();
 
             var adminManager = new GroupChatManager(adminKeyPair);
             var memberManager = new GroupChatManager(memberKeyPair);
@@ -269,7 +269,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] senderKey = SecureMemory.CreateSecureBuffer(Constants.AES_KEY_SIZE);
 
             // Create identity key pair for signing
-            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create an instance of GroupMessageCrypto
             var messageCrypto = new GroupMessageCrypto();
@@ -287,7 +287,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string groupId = $"test-group-{Guid.NewGuid()}";
-            var senderKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var senderKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create an instance of GroupChatManager
             var groupChatManager = new GroupChatManager(senderKeyPair);
@@ -327,8 +327,8 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string groupId = $"test-group-{Guid.NewGuid()}";
-            var senderKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var senderKeyPair = Sodium.GenerateEd25519KeyPair();
+            var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create an instance of GroupChatManager
             var groupChatManager = new GroupChatManager(senderKeyPair);
@@ -356,8 +356,8 @@ namespace LibEmiddle.Tests.Unit
         public void GroupChatManager_ShouldHandleMessageExchange()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobKeyPair = Sodium.GenerateEd25519KeyPair();
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -396,7 +396,7 @@ namespace LibEmiddle.Tests.Unit
         public void GroupChatManager_CreateDistribution_WithNonExistentGroup_ShouldThrowException()
         {
             // Arrange
-            var keyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var keyPair = Sodium.GenerateEd25519KeyPair();
             var manager = new GroupChatManager(keyPair);
 
             // Act & Assert - Should throw InvalidOperationException
@@ -407,9 +407,9 @@ namespace LibEmiddle.Tests.Unit
         public void GroupMultiSenderDeduplication_ShouldHandleSimultaneousMessages()
         {
             // Arrange - Create three participants
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var charlieKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobKeyPair = Sodium.GenerateEd25519KeyPair();
+            var charlieKeyPair = Sodium.GenerateEd25519KeyPair();
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -484,9 +484,9 @@ namespace LibEmiddle.Tests.Unit
             string groupId = $"member-addition-test-group-{Guid.NewGuid()}";
 
             // Create test participants
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var daveKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobKeyPair = Sodium.GenerateEd25519KeyPair();
+            var daveKeyPair = Sodium.GenerateEd25519KeyPair();
 
             var aliceManager = new GroupChatManager(aliceKeyPair);
             var bobManager = new GroupChatManager(bobKeyPair);
@@ -587,9 +587,9 @@ namespace LibEmiddle.Tests.Unit
             // This test simulates a group chat between Alice, Bob, and Charlie
 
             // Step 1: Generate identity keys for the participants
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var charlieKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobKeyPair = Sodium.GenerateEd25519KeyPair();
+            var charlieKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Step 2: Create group chat managers for each participant
             var aliceManager = new GroupChatManager(aliceKeyPair);
@@ -667,8 +667,8 @@ namespace LibEmiddle.Tests.Unit
         public void DeleteGroup_ShouldWorkCorrectly()
         {
             // Arrange
-            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var adminKeyPair = Sodium.GenerateEd25519KeyPair();
+            var memberKeyPair = Sodium.GenerateEd25519KeyPair();
 
             var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = $"test-delete-{Guid.NewGuid()}";

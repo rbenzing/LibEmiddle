@@ -32,11 +32,13 @@ namespace LibEmiddle.Tests.Unit
         private (DoubleRatchetSession aliceSession, DoubleRatchetSession bobSession, string sessionId) CreateTestSessions()
         {
             var _cryptoProvider = new CryptoProvider();
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobKeyPair = Sodium.GenerateEd25519KeyPair();
+
+            var alicePrivateKey = Sodium.ConvertEd25519PrivateKeyToX25519(aliceKeyPair.PrivateKey);
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, alicePrivateKey);
             var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
 
             // Create a session ID

@@ -1,13 +1,12 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Collections.Generic;
 using System.Security;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-using LibEmiddle.MultiDevice;
-using LibEmiddle.Models;
-using LibEmiddle.Core;
 using LibEmiddle.API;
-using LibEmiddle.Abstractions;
+using LibEmiddle.Core;
 using LibEmiddle.Crypto;
+using LibEmiddle.Models;
+using LibEmiddle.MultiDevice;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -26,8 +25,8 @@ namespace LibEmiddle.Tests.Unit
         public void CreateDeviceRevocationMessage_ShouldCreateValidMessage()
         {
             // Arrange
-            var authorityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var authorityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
             var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
@@ -53,8 +52,8 @@ namespace LibEmiddle.Tests.Unit
         public void ValidateDeviceRevocationMessage_WithValidMessage_ShouldReturnTrue()
         {
             // Arrange
-            var authorityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var authorityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
                 deviceToRevokeKeyPair.PublicKey,
@@ -73,9 +72,9 @@ namespace LibEmiddle.Tests.Unit
         public void ValidateDeviceRevocationMessage_WithWrongSigningKey_ShouldReturnFalse()
         {
             // Arrange
-            var authorityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var differentKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var authorityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var differentKeyPair = Sodium.GenerateEd25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
                 deviceToRevokeKeyPair.PublicKey,
@@ -94,8 +93,8 @@ namespace LibEmiddle.Tests.Unit
         public void ValidateDeviceRevocationMessage_WithTamperedMessage_ShouldReturnFalse()
         {
             // Arrange
-            var authorityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var authorityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
                 deviceToRevokeKeyPair.PublicKey,
@@ -122,8 +121,8 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_RevokeLinkedDevice_ShouldCreateValidRevocationAndRemoveDevice()
         {
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create X25519 key for the device to revoke
             byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
@@ -167,9 +166,9 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_ProcessRevocationMessage_ShouldRemoveLinkedDevice()
         {
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var otherDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var otherDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create X25519 key for the device to revoke
             byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
@@ -201,9 +200,9 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_ProcessRevocationMessage_WithInvalidSignature_ShouldReturnFalse()
         {
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var otherDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var otherDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create X25519 key for the device to revoke
             byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
@@ -243,8 +242,8 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_RevokeLinkedDevice_UnknownDevice_ShouldThrowException()
         {
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create X25519 key for the device to revoke
             byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
@@ -263,7 +262,7 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceRevocationMessage_Validate_WithNullFields_ShouldReturnFalse()
         {
             // Arrange
-            var authorityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var authorityKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create invalid revocation messages
             var nullKeyMessage = new DeviceRevocationMessage
@@ -302,8 +301,8 @@ namespace LibEmiddle.Tests.Unit
         public void E2EEClient_CreateDeviceRevocationMessage_CombinesDataCorrectly()
         {
             // Arrange
-            var authorityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var authorityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
             var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
@@ -328,9 +327,9 @@ namespace LibEmiddle.Tests.Unit
         public void RevokedDevice_ShouldNotBeAddedAgain()
         {
             // Arrange
-            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var deviceManager = new DeviceManager(identityKeyPair);
-            var deviceKey = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey;
+            var deviceKey = Sodium.GenerateEd25519KeyPair().PublicKey;
 
             // Act
             deviceManager.AddLinkedDevice(deviceKey);
@@ -360,10 +359,10 @@ namespace LibEmiddle.Tests.Unit
         public void RevokedDevices_ShouldBeTracked_EvenAfterRestart()
         {
             // Arrange
-            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var deviceManager = new DeviceManager(identityKeyPair);
-            var device1 = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey;
-            var device2 = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519).PublicKey;
+            var device1 = Sodium.GenerateEd25519KeyPair().PublicKey;
+            var device2 = Sodium.GenerateEd25519KeyPair().PublicKey;
 
             // Act - Add and revoke device1
             deviceManager.AddLinkedDevice(device1);

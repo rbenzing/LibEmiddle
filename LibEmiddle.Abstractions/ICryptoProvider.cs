@@ -20,7 +20,7 @@ namespace LibEmiddle.Abstractions
         KeyPair GenerateKeyPair(KeyType keyType);
         KeyPair GenerateEd25519KeyPairFromSeed(byte[] seed);
         byte[] GenerateNonce(uint size = 12);
-        byte[] GenerateHmacSha256(byte[] existingSharedKey, byte[] normalizedPublicKey);
+        byte[] GenerateHmacSha256(byte[] normalizedPublicKey, byte[] existingSharedKey);
 
         // Key derivation
         byte[] DeriveKey(byte[] ikm, byte[]? salt = null, byte[]? info = null, int length = 32);

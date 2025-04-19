@@ -99,7 +99,7 @@ namespace LibEmiddle.Messaging.Chat
             if (_disposed) throw new InvalidOperationException("ChatSessionManager has been disposed.");
             ArgumentNullException.ThrowIfNull(recipientIdentityPublicKey, nameof(recipientIdentityPublicKey));
             // Basic validation of recipient key
-            if (!KeyValidation.ValidateEd25519PublicKey(recipientIdentityPublicKey)) // Assuming validation exists
+            if (!Sodium.ValidateEd25519PublicKey(recipientIdentityPublicKey)) // Assuming validation exists
                 throw new ArgumentException("Invalid recipient public identity key.", nameof(recipientIdentityPublicKey));
 
 

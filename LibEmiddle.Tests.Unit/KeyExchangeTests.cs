@@ -2,13 +2,11 @@
 using System;
 using System.Text;
 using System.Security.Cryptography;
-using LibEmiddle.API;
+using LibEmiddle.Core;
+using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 using LibEmiddle.KeyExchange;
 using LibEmiddle.Models;
-using LibEmiddle.Domain;
-using LibEmiddle.Abstractions;
-using LibEmiddle.Crypto;
-using LibEmiddle.Messaging.Transport;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -27,11 +25,11 @@ namespace LibEmiddle.Tests.Unit
         public void X3DHKeyExchange_ShouldProduceSameKeyForBothParties()
         {
             // Arrange
-            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
             var alicePublic = _aliceIdentityKeyPair.PublicKey;
             var alicePrivate = _aliceIdentityKeyPair.PrivateKey;
 
-            KeyPair _bobIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _bobIdentityKeyPair = Sodium.GenerateX25519KeyPair();
             var bobPublic = _bobIdentityKeyPair.PublicKey;
             var bobPrivate = _bobIdentityKeyPair.PrivateKey;
 
@@ -79,7 +77,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
             var alicePublic = _aliceIdentityKeyPair.PublicKey;
             var alicePrivate = _aliceIdentityKeyPair.PrivateKey;
 
@@ -107,7 +105,7 @@ namespace LibEmiddle.Tests.Unit
         public void InitiateX3DHSession_WithNullBundle_ShouldThrowException()
         {
             // Arrange
-            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
             
             // Act & Assert - Should throw ArgumentNullException
             X3DHExchange.InitiateX3DHSession(null, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
@@ -118,7 +116,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
 
             var bobPublicBundle = new X3DHPublicBundle
             {
@@ -144,7 +142,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create a bundle with invalid signed pre-key (all zeros)
             var bobPublicBundle = new X3DHPublicBundle
@@ -165,7 +163,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
-            KeyPair _aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Tamper with the signature
             byte[] tamperedSignature = new byte[bobBundle.SignedPreKeySignature.Length];

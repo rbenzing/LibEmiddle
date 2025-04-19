@@ -5,7 +5,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using LibEmiddle.Abstractions;
-using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Models;
@@ -215,6 +214,8 @@ namespace LibEmiddle.Messaging.Transport
                 }
 
                 // Parse message - only use the bytes we actually received
+                using var memoryStream = new MemoryStream(buffer, 0, result.Count, false);
+
                 string json = Encoding.UTF8.GetString(buffer, 0, result.Count);
 
                 // Use our standardized JSON deserialization with case-insensitive option for backward compatibility

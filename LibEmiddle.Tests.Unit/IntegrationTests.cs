@@ -28,8 +28,8 @@ namespace LibEmiddle.Tests.Unit
             // This test simulates a full conversation flow between Alice and Bob
 
             // Step 1: Generate identity keys for Alice and Bob
-            var aliceIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var bobIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var aliceIdentityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobIdentityKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Step 2: Bob creates his key bundle and uploads to server
             var bobKeyBundle = X3DHExchange.CreateX3DHKeyBundle(bobIdentityKeyPair);
@@ -51,7 +51,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Create Alice's initial session using the root key and chain key from initialization
             aliceDRSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: _cryptoProvider.GenerateKeyPair(KeyType.X25519),
+                dhRatchetKeyPair: Sodium.GenerateX25519KeyPair(),
                 remoteDHRatchetKey: bobKeyBundle.SignedPreKey,
                 rootKey: aliceDRSession.RootKey,
                 sendingChainKey: aliceDRSession.SendingChainKey,

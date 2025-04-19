@@ -1,13 +1,13 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using LibEmiddle.KeyExchange;
 using LibEmiddle.API;
-using LibEmiddle.Abstractions;
-using LibEmiddle.Domain;
+using LibEmiddle.Core;
 using LibEmiddle.Crypto;
+using LibEmiddle.Domain;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -28,8 +28,8 @@ namespace LibEmiddle.Tests.Unit
         public void ForwardSecrecy_CompromisedKeyDoesNotAffectPastMessages()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
@@ -213,8 +213,8 @@ namespace LibEmiddle.Tests.Unit
         public void DoubleRatchet_ShouldDetectTamperedMessage()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
@@ -512,7 +512,7 @@ namespace LibEmiddle.Tests.Unit
             }, "Should throw for null nonce");
 
             // Test input validation for signature methods
-            KeyPair _signIdentityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            KeyPair _signIdentityKeyPair = Sodium.GenerateEd25519KeyPair();
             var publicKey = _signIdentityKeyPair.PublicKey;
             var privateKey = _signIdentityKeyPair.PrivateKey;
 

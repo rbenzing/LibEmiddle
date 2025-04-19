@@ -10,85 +10,6 @@ namespace LibEmiddle.Crypto
     internal static class KeyConversion
     {
         /// <summary>
-        /// Converts an Ed25519 public key to an X25519 public key using libsodium's cryptographically secure conversion.
-        /// </summary>
-        /// <param name="ed25519PublicKey">Ed25519 public key to convert (32 bytes)</param>
-        /// <returns>Converted X25519 public key (32 bytes)</returns>
-        /// <exception cref="ArgumentNullException">Thrown when input key is null</exception>
-        /// <exception cref="ArgumentException">Thrown when input key has an invalid length</exception>
-        /// <exception cref="CryptographicException">Thrown when key conversion fails</exception>
-        public static byte[] ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey)
-        {
-            // Null check with descriptive message
-            ArgumentNullException.ThrowIfNull(nameof(ed25519PublicKey),
-                "Ed25519 public key cannot be null.");
-
-            // Validate key length explicitly
-            if (ed25519PublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
-            {
-                throw new ArgumentException(
-                    $"Invalid Ed25519 public key length. " +
-                    $"Expected {Constants.ED25519_PUBLIC_KEY_SIZE} bytes, " +
-                    $"got {ed25519PublicKey.Length} bytes.",
-                    nameof(ed25519PublicKey));
-            }
-
-            Sodium.Initialize();
-
-            try
-            {
-                // Use libsodium's secure conversion method
-                byte[] x25519PublicKey = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
-                int conversionResult = Sodium.crypto_sign_ed25519_pk_to_curve25519(x25519PublicKey, ed25519PublicKey.ToArray());
-
-                if (conversionResult != 0)
-                {
-                    throw new CryptographicException("Failed to convert Ed25519 public key to X25519.");
-                }
-
-                // Additional validation of converted key
-                if (!KeyValidation.ValidateX25519PublicKey(x25519PublicKey))
-                {
-                    throw new CryptographicException("Converted X25519 public key failed validation.");
-                }
-
-                return x25519PublicKey;
-            }
-            catch (DllNotFoundException ex)
-            {
-                throw new PlatformNotSupportedException(
-                    "Libsodium library is not available for key conversion.",
-                    ex);
-            }
-        }
-
-        /// <summary>
-        /// Derives a public X25519 key from an Ed25519 private key.
-        /// </summary>
-        /// <param name="ed25519PrivateKey">Ed25519 private key (32 or 64 bytes)</param>
-        /// <returns>Derived X25519 public key (32 bytes)</returns>
-        public static byte[] DeriveX25519PublicKeyFromEd25519(ReadOnlySpan<byte> ed25519PrivateKey)
-        {
-            Span<byte> x25519PrivateKey = DeriveX25519PrivateKeyFromEd25519(ed25519PrivateKey);
-
-            try
-            {
-                Span<byte> publicKey = [];
-                Sodium.ComputePublicKey(publicKey, x25519PrivateKey);
-
-                if (publicKey.Length != Constants.X25519_KEY_SIZE)
-                    throw new ArgumentException($"PublicKey must be exactly {Constants.X25519_KEY_SIZE} bytes.");
-
-                return publicKey.ToArray();
-            }
-            finally
-            {
-                // Securely clear the temporary private key
-                SecureMemory.SecureClear(x25519PrivateKey);
-            }
-        }
-
-        /// <summary>
         /// Derives an X25519 private key from an Ed25519 private key using secure cryptographic methods.
         /// </summary>
         /// <param name="ed25519PrivateKey">Ed25519 private key (32 or 64 bytes)</param>
@@ -167,20 +88,14 @@ namespace LibEmiddle.Crypto
             ReadOnlySpan<byte> info = default,
             int outputLength = 32)
         {
-            // Use empty byte array if salt is null
-            ReadOnlySpan<byte> saltSpan = salt;
-
-            // Use empty byte array if info is null
-            ReadOnlySpan<byte> infoSpan = info;
-
             // Allocate buffer for PRK (pseudorandom key)
             byte[] prk = SecureMemory.CreateSecureBuffer(32);
 
             // Extract step
             int extractResult = Sodium.crypto_kdf_hkdf_sha256_extract(
                 prk,
-                saltSpan.IsEmpty ? null : saltSpan.ToArray(),
-                (uint)saltSpan.Length,
+                salt.IsEmpty ? null : salt.ToArray(),
+                (uint)salt.Length,
                 inputKeyMaterial.ToArray(),
                 (uint)inputKeyMaterial.Length
             );

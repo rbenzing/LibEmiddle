@@ -342,12 +342,12 @@ namespace LibEmiddle.Messaging.Transport
 
             // Convert to X25519 for key exchange if needed
             byte[] x25519PrivateKey = _identityKeyPair.PrivateKey.Length != Constants.X25519_KEY_SIZE ?
-                KeyConversion.DeriveX25519PrivateKeyFromEd25519(_identityKeyPair.PrivateKey) :
+                Sodium.ConvertEd25519PrivateKeyToX25519(_identityKeyPair.PrivateKey) :
                 _identityKeyPair.PrivateKey;
 
             // Ensure contact key is in X25519 format
             byte[] contactX25519Key = contactKey.Length != Constants.X25519_KEY_SIZE ?
-                KeyConversion.DeriveX25519PublicKeyFromEd25519(contactKey) :
+                Sodium.ConvertEd25519PublicKeyToX25519(contactKey) :
                 contactKey;
 
             // Perform key exchange  

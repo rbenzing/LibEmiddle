@@ -250,7 +250,7 @@ namespace LibEmiddle.Domain
                 orderedDict["sessionId"] = SessionId;
             }
 
-            // Use invariant culture to ensure consistent number formatting globally
+            // Use JsonSerializer directly with optimized options
             return JsonSerializer.Serialize(orderedDict, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -270,13 +270,20 @@ namespace LibEmiddle.Domain
 
             try
             {
-                // For backward compatibility, use case-insensitive deserialization
+                // Use case-insensitive deserialization for backward compatibility
                 var dict = JsonSerialization.DeserializeInsensitive<Dictionary<string, JsonElement>>(json);
 
                 ArgumentNullException.ThrowIfNull(dict);
 
-                ValidateRequiredJsonFields(dict);
+                // Fast validation of required fields
+                string[] requiredFields = { "ciphertext", "nonce", "messageNumber", "senderDHKey" };
+                foreach (var field in requiredFields)
+                {
+                    if (!dict.ContainsKey(field))
+                        throw new FormatException($"Required field '{field}' is missing");
+                }
 
+                // Create message object with extracted data
                 var message = new EncryptedMessage
                 {
                     Ciphertext = Helpers.GetBytesFromBase64(dict, "ciphertext"),
@@ -287,7 +294,7 @@ namespace LibEmiddle.Domain
                     MessageId = Helpers.GetGuidValue(dict, "messageId", Guid.NewGuid())
                 };
 
-                // Handle optional fields
+                // Handle optional fields efficiently
                 if (dict.TryGetValue("sessionId", out JsonElement sessionIdElement) &&
                     sessionIdElement.ValueKind == JsonValueKind.String)
                 {

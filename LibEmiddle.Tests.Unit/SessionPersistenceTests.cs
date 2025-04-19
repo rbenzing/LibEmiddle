@@ -28,8 +28,8 @@ namespace LibEmiddle.Tests.Unit
         private DoubleRatchetSession CreateTestSession()
         {
             // Generate key pairs for Alice and Bob
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);

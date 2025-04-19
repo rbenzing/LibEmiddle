@@ -29,7 +29,7 @@ namespace LibEmiddle.Tests.Unit
         public void GroupKey_ShouldRotate_AfterConfiguredPeriod()
         {
             // Arrange
-            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var groupChatManager = new GroupChatManager(identityKeyPair);
             var groupId = "testGroup" + Guid.NewGuid().ToString("N").Substring(0, 8);
 
@@ -70,8 +70,8 @@ namespace LibEmiddle.Tests.Unit
         public void KeyRotation_ShouldHappen_AfterMemberRemoval()
         {
             // Arrange
-            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var memberKeyPair = Sodium.GenerateEd25519KeyPair();
             var groupChatManager = new GroupChatManager(identityKeyPair);
             var groupId = "testGroup" + Guid.NewGuid().ToString("N").Substring(0, 8);
 
@@ -101,8 +101,8 @@ namespace LibEmiddle.Tests.Unit
         public void AutomaticKeyRotation_ShouldRotateKeys_BasedOnMessageCount()
         {
             // Arrange
-            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create a shared secret (simulating X3DH)
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, identityKeyPair.PrivateKey);
@@ -182,9 +182,9 @@ namespace LibEmiddle.Tests.Unit
         public void DHRatchetStep_ShouldProduceNewKeys_WhenRemoteDHKeyChanges()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var charlieKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519); // Third key pair to simulate rotation
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
+            var charlieKeyPair = Sodium.GenerateX25519KeyPair(); // Third key pair to simulate rotation
 
             // Create a shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
@@ -237,8 +237,8 @@ namespace LibEmiddle.Tests.Unit
         public void GroupKey_ManualRotation_ShouldGenerateNewDistributionMessages()
         {
             // Arrange
-            var adminKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var memberKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var adminKeyPair = Sodium.GenerateEd25519KeyPair();
+            var memberKeyPair = Sodium.GenerateEd25519KeyPair();
             var groupChatManager = new GroupChatManager(adminKeyPair);
             var groupId = "testGroup" + Guid.NewGuid().ToString("N").Substring(0, 8);
 
@@ -274,7 +274,7 @@ namespace LibEmiddle.Tests.Unit
         public void GroupChatManager_TimeBasedRotation_ShouldRespectConfiguredInterval()
         {
             // Arrange
-            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var groupChatManager = new GroupChatManager(identityKeyPair);
             var groupId = "testGroup" + Guid.NewGuid().ToString("N")[..8];
 
@@ -329,8 +329,8 @@ namespace LibEmiddle.Tests.Unit
         public void ConcurrentDeviceRotation_ShouldMaintainMessageIntegrity()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
@@ -382,7 +382,7 @@ namespace LibEmiddle.Tests.Unit
             }
 
             // 2. Generate a new key pair for Alice (simulating device change)
-            var aliceNewKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceNewKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Exchange new DH key and update
             byte[] newSharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceNewKeyPair.PrivateKey);
@@ -452,8 +452,8 @@ namespace LibEmiddle.Tests.Unit
         public void KeyRotation_ShouldProvideForwardSecrecy_AfterCompromise()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
@@ -511,8 +511,8 @@ namespace LibEmiddle.Tests.Unit
             var compromisedBobSession = CreateSessionCopy(currentBobSession);
 
             // Phase 3: Key rotation occurs - both parties generate new key pairs and perform a DH ratchet step
-            var aliceNewKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobNewKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceNewKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobNewKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Generate new shared secret with new keys
             byte[] newSharedSecret = X3DHExchange.PerformX25519DH(bobNewKeyPair.PublicKey, aliceNewKeyPair.PrivateKey);
@@ -622,8 +622,8 @@ namespace LibEmiddle.Tests.Unit
             // due to possible implementation issues in the library
 
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create test data
             byte[] sensitiveData = SecureMemory.CreateSecureBuffer(32);
@@ -666,8 +666,8 @@ namespace LibEmiddle.Tests.Unit
         public void DHRatchet_WithDifferentRotationStrategies_ShouldBehaveDifferently()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create shared secret and initialize Double Ratchet
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);

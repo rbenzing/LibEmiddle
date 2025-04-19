@@ -36,8 +36,8 @@ namespace LibEmiddle.Tests.Unit
         public void DoubleRatchetExchange_ResumeSession_WithValidSession_ShouldReturn()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
@@ -86,8 +86,8 @@ namespace LibEmiddle.Tests.Unit
         public void DoubleRatchetExchange_ResumeSession_WithLastProcessedMessageId_ShouldAddToProcessedIds()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
@@ -148,8 +148,8 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var mockTransport = new Mock<IMailboxTransport>();
-            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var senderKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
+            var senderKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Use a counter for attempts
             int attemptCount = 0;
@@ -256,8 +256,8 @@ namespace LibEmiddle.Tests.Unit
         public void DecryptionFailure_ShouldNotAffectSubsequentDecryption()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
@@ -406,8 +406,8 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var mockTransport = new Mock<IMailboxTransport>();
-            var identityKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var recipientKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create a stateful flag that can be accessed from the mock
             bool[] firstAttempt = { true }; // Using array to enable modification from lambda
@@ -460,8 +460,8 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning("==== Starting MultiDeviceSynchronization_ShouldRecoverFromMessageLoss ====");
 
             // Arrange
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             Trace.TraceWarning($"Main device key pair - Public: {Convert.ToBase64String(mainDeviceKeyPair.PublicKey)}, " +
                              $"Private: {Convert.ToBase64String(mainDeviceKeyPair.PrivateKey).Substring(0, 10)}...");
@@ -470,11 +470,11 @@ namespace LibEmiddle.Tests.Unit
 
             // Convert to X25519 keys
             byte[] mainDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey);
-            byte[] mainDeviceX25519Public = SecureMemory.CreateSecureBuffer(32);
+            byte[] mainDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
             Sodium.ComputePublicKey(mainDeviceX25519Public, mainDeviceX25519Private);
 
             byte[] secondDeviceX25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(secondDeviceKeyPair.PrivateKey);
-            byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(32);
+            byte[] secondDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
             Sodium.ComputePublicKey(secondDeviceX25519Public, secondDeviceX25519Private);
 
             Trace.TraceWarning($"Main device X25519 public key: {Convert.ToBase64String(mainDeviceX25519Public)}");
@@ -642,8 +642,8 @@ namespace LibEmiddle.Tests.Unit
         public void CrossDeviceSessionRestoration_ShouldWorkCorrectly()
         {
             // Arrange
-            var aliceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
-            var bobKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);

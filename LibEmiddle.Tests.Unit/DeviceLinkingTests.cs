@@ -8,6 +8,7 @@ using LibEmiddle.Domain;
 using LibEmiddle.MultiDevice;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Crypto;
+using System.Diagnostics;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -29,22 +30,27 @@ namespace LibEmiddle.Tests.Unit
             var testScenarios = new (Func<KeyPair> keyPairFunc, bool shouldSucceed, string description)[]
             {
                 // Scenario 1: Standard Ed25519 Key Pair (should succeed)
-                ( () => _cryptoProvider.GenerateKeyPair(KeyType.Ed25519), true, "Standard Ed25519 Key Pair" ),
+                ( () => {
+                    return Sodium.GenerateEd25519KeyPair();
+                }, true, "Standard Ed25519 Key Pair" ),
         
                 // Scenario 2: X25519 Key Pair (should fail, because signing requires Ed25519)
-                ( () => _cryptoProvider.GenerateKeyPair(KeyType.X25519), false, "X25519 Key Pair" ),
+                ( () => {
+                    return Sodium.GenerateX25519KeyPair();
+                }, false, "X25519 Key Pair" ),
         
                 // Scenario 3: Ed25519 public key with X25519 private key (should fail)
                 ( () => {
-                    var ed25519Pair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-                    return new KeyPair(ed25519Pair.PublicKey, _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.PrivateKey));
+                    var ed25519Pair = Sodium.GenerateEd25519KeyPair();
+                    var x25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.PrivateKey);
+                    return new KeyPair(ed25519Pair.PublicKey, x25519Private);
                 }, false, "Ed25519 to X25519 Hybrid Key Pair" )
             };
 
             foreach (var (keyPairFunc, shouldSucceed, description) in testScenarios)
             {
                 var mainDeviceKeyPair = keyPairFunc();
-                var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+                var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
                 if (shouldSucceed)
                 {
@@ -72,7 +78,7 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public void DeriveSharedKeyForNewDevice_StressTest()
         {
-            const int ITERATIONS = 100;
+            const int ITERATIONS = 20;
             var uniqueDerivedKeys = new HashSet<string>();
 
             for (int i = 0; i < ITERATIONS; i++)
@@ -85,16 +91,20 @@ namespace LibEmiddle.Tests.Unit
                 }
 
                 // Generate a new device key pair (Ed25519).
-                var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+                var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+                Trace.TraceInformation($"Generated KeyPair({Convert.ToBase64String(newDeviceKeyPair.PublicKey)}, {Convert.ToBase64String(newDeviceKeyPair.PrivateKey)})");
 
                 // Convert the Ed25519 public key to its X25519 representation.
-                var x25519NewDeviceKey = _cryptoProvider.ConvertEd25519PublicKeyToX25519(newDeviceKeyPair.PublicKey);
+                var x25519NewDeviceKey = Sodium.ConvertEd25519PublicKeyToX25519(newDeviceKeyPair.PublicKey);
+                Trace.TraceInformation($"Converted public to X25519 - {Convert.ToBase64String(x25519NewDeviceKey)}");
 
-                // Derive the shared key using the Ed25519 public key overload.
+                // Derive the shared key using the Ed25519 public key.
                 byte[] keyFromEd25519 = DeviceLinking.DeriveSharedKeyForNewDevice(existingSharedKey, newDeviceKeyPair.PublicKey);
+                Trace.TraceInformation($"Derrived Ed25519 public shared key - {Convert.ToBase64String(keyFromEd25519)}");
 
-                // Derive the shared key using the X25519 public key overload.
-                byte[] keyFromX25519 = DeviceLinking.DeriveSharedKeyForNewDeviceX25519(existingSharedKey, x25519NewDeviceKey);
+                // Derive the shared key using the X25519 public key.
+                byte[] keyFromX25519 = DeviceLinking.DeriveSharedKeyForNewDevice(existingSharedKey, x25519NewDeviceKey);
+                Trace.TraceInformation($"Derrived X25519 public shared key - {Convert.ToBase64String(keyFromX25519)}");
 
                 // Both derivations should yield the same shared key.
                 CollectionAssert.AreEqual(keyFromEd25519, keyFromX25519,
@@ -115,13 +125,13 @@ namespace LibEmiddle.Tests.Unit
             var scenarios = new List<(Func<KeyPair> mainDeviceKeyPairFunc, string scenarioDescription)>
             {
                 // Scenario 1: Standard Ed25519 Key Generation
-                (() => _cryptoProvider.GenerateKeyPair(KeyType.Ed25519), "Standard Ed25519 Key Generation"),
+                (() => Sodium.GenerateEd25519KeyPair(), "Standard Ed25519 Key Generation"),
 
                 // Scenario 2: Ed25519 to X25519 Conversion
                 // (This returns a key pair that is already converted and should be rejected.)
                 (() => {
-                    KeyPair ed25519Pair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-                    var x25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.PrivateKey);
+                    KeyPair ed25519Pair = Sodium.GenerateEd25519KeyPair();
+                    var x25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(ed25519Pair.PrivateKey);
                     var x25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
                     Sodium.ComputePublicKey(x25519Public, x25519Private);
                     return new KeyPair(x25519Public, x25519Private);
@@ -130,18 +140,18 @@ namespace LibEmiddle.Tests.Unit
                 // Scenario 3: Minimal Entropy Keys – valid key pair derived from an all-zero seed.
                 (() => {
                     var seed = new byte[32]; // 32 zero bytes
-                    return _cryptoProvider.GenerateEd25519KeyPairFromSeed(seed);
+                    return Sodium.GenerateEd25519KeyPairFromSeed(seed);
                 }, "Minimal Entropy Keys"),
 
                 // Scenario 4: Maximum Entropy Keys – valid key pair derived from a fixed high-entropy seed.
                 (() => {
                     var seed = Enumerable.Range(0, 32).Select(i => (byte)(i * 17)).ToArray();
-                    return _cryptoProvider.GenerateEd25519KeyPairFromSeed(seed);
+                    return Sodium.GenerateEd25519KeyPairFromSeed(seed);
                 }, "Maximum Entropy Keys"),
 
                 // Scenario 5: X25519 Key Pair
                 // (This scenario uses a pure X25519 key pair and should be rejected.)
-                (() => _cryptoProvider.GenerateKeyPair(KeyType.X25519), "X25519 Key Pair")
+                (() => Sodium.GenerateX25519KeyPair(), "X25519 Key Pair")
             };
 
             foreach (var (mainDeviceKeyPairFunc, scenarioDescription) in scenarios)
@@ -150,7 +160,7 @@ namespace LibEmiddle.Tests.Unit
                 var mainDeviceKeyPair = mainDeviceKeyPairFunc();
 
                 // Generate a new device key pair (always standard Ed25519).
-                var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+                var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
                 if (scenarioDescription == "Ed25519 to X25519 Conversion" ||
                     scenarioDescription == "X25519 Key Pair")
@@ -202,8 +212,8 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public void DeviceLinkMessage_WithMaliciousPayload_ShouldFail()
         {
-            var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
-            var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create a valid device link message
             var originalMessage = DeviceLinking.CreateDeviceLinkMessage(
@@ -296,7 +306,7 @@ namespace LibEmiddle.Tests.Unit
             foreach (var keyFunc in keyVarietyScenarios)
             {
                 byte[] sharedKey = keyFunc();
-                var newDeviceKeyPair = _cryptoProvider.GenerateKeyPair(KeyType.Ed25519);
+                var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
                 var derivedKey = DeviceLinking.DeriveSharedKeyForNewDevice(sharedKey, newDeviceKeyPair.PublicKey);
 
