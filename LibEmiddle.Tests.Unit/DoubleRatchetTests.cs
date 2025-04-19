@@ -96,13 +96,15 @@ namespace LibEmiddle.Tests.Unit
             byte[] currentChainKey = initialChainKey;
             byte[] previousChainKey = null;
 
+            var sessionId = $"session-{Guid.NewGuid()}";
+
             const int iterations = 100;
             for (int i = 0; i < iterations; i++)
             {
                 // Store the previous chain key for comparison
                 previousChainKey = currentChainKey;
 
-                var (newChainKey, messageKey) = _cryptoProvider.RatchetStep(currentChainKey);
+                var (newChainKey, messageKey) = _cryptoProvider.RatchetStep(currentChainKey, sessionId);
 
                 // Convert key to string for hashset comparison
                 string messageKeyStr = Convert.ToBase64String(messageKey);
@@ -566,11 +568,10 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void BrokenMessageNumber_ShouldHandleGracefully()
+        public void MaxMessageNumber_ShouldHandleGracefully()
         {
             // Arrange
             var (aliceSession, bobSession, sessionId) = CreateTestSessions();
-
             string message = "Message with extreme message number";
             var (_, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(aliceSession, message);
             AddSecurityFields(encrypted, sessionId);
