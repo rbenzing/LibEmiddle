@@ -108,8 +108,6 @@ namespace LibEmiddle.Crypto
             byte[]? info = null, 
             int length = 32)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(ikm.ToString(), nameof(ikm));
-
             Initialize();
             return Sodium.HkdfDerive(ikm, salt, info, length);
         }
@@ -119,8 +117,6 @@ namespace LibEmiddle.Crypto
         /// </summary>
         public byte[] Sign(byte[] message, byte[] privateKey)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(privateKey.ToString(), nameof(privateKey));
-
             Initialize();
             return Sodium.SignDetached(message, privateKey);
         }
@@ -130,9 +126,6 @@ namespace LibEmiddle.Crypto
         /// </summary>
         public bool Verify(byte[] message, byte[] signature, byte[] publicKey)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(signature.ToString(), nameof(signature));
-            ArgumentNullException.ThrowIfNullOrEmpty(publicKey.ToString(), nameof(publicKey));
-
             Initialize();
             return Sodium.VerifyDetached(signature, message, publicKey);
         }
@@ -142,8 +135,6 @@ namespace LibEmiddle.Crypto
         /// </summary>
         public byte[] ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(ed25519PublicKey.ToString(), nameof(ed25519PublicKey));
-
             Initialize();
             return Sodium.ConvertEd25519PublicKeyToX25519(ed25519PublicKey);
         }
@@ -153,10 +144,8 @@ namespace LibEmiddle.Crypto
         /// </summary>
         public byte[] DeriveX25519PrivateKeyFromEd25519(ReadOnlySpan<byte> ed25519PrivateKey)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(ed25519PrivateKey.ToString(), nameof(ed25519PrivateKey));
-
             Initialize();
-            return Sodium.ConvertEd25519PrivateKeyToX25519(ed25519PrivateKey);
+            return KeyConversion.DeriveX25519PrivateKeyFromEd25519(ed25519PrivateKey);
         }
 
         /// <summary>
@@ -166,8 +155,6 @@ namespace LibEmiddle.Crypto
         /// <returns></returns>
         public KeyPair GenerateEd25519KeyPairFromSeed(byte[] seed)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(seed.ToString(), nameof(seed));
-
             Initialize();
             return Sodium.GenerateEd25519KeyPairFromSeed(seed);
         }
@@ -180,9 +167,10 @@ namespace LibEmiddle.Crypto
         /// <returns>A tuple containing (rootKey, chainKey) used to initialize the Double Ratchet session.</returns>
         /// <exception cref="ArgumentException">Thrown when sharedKey is empty or has invalid length.</exception>
         /// <exception cref="CryptographicException">Thrown when key derivation fails.</exception>
-        public (byte[] rootKey, byte[] chainKey) DerriveDoubleRatchet(byte[] sharedKey)
+        public (byte[] rootKey, byte[] chainKey) DeriveDoubleRatchet(byte[] sharedKey)
         {
-            return DoubleRatchet.DerriveDoubleRatchet(sharedKey);
+            Initialize();
+            return DoubleRatchet.DeriveDoubleRatchet(sharedKey);
         }
 
         /// <summary>
@@ -200,11 +188,7 @@ namespace LibEmiddle.Crypto
             byte[] recipientSignedPreKeyPublic,
             string sessionId)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(sharedKeyFromX3DH.ToString(), nameof(sharedKeyFromX3DH));
-            ArgumentNullException.ThrowIfNullOrEmpty(senderIdentityKeyPair.ToString(), nameof(senderIdentityKeyPair));
-            ArgumentNullException.ThrowIfNullOrEmpty(recipientSignedPreKeyPublic.ToString(), nameof(recipientSignedPreKeyPublic));
-            ArgumentNullException.ThrowIfNullOrEmpty(sessionId, nameof(sessionId));
-
+            Initialize();
             return DoubleRatchet.InitializeDoubleRatchet(sharedKeyFromX3DH, senderIdentityKeyPair, 
                 recipientSignedPreKeyPublic, sessionId, true);
         }
@@ -224,11 +208,7 @@ namespace LibEmiddle.Crypto
              byte[] senderEphemeralKeyPublic,
              string sessionId)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(sharedKeyFromX3DH.ToString(), nameof(sharedKeyFromX3DH));
-            ArgumentNullException.ThrowIfNullOrEmpty(receiverSignedPreKeyPair.ToString(), nameof(receiverSignedPreKeyPair));
-            ArgumentNullException.ThrowIfNullOrEmpty(senderEphemeralKeyPublic.ToString(), nameof(senderEphemeralKeyPublic));
-            ArgumentNullException.ThrowIfNullOrEmpty(sessionId, nameof(sessionId));
-
+            Initialize();
             return DoubleRatchet.InitializeDoubleRatchet(sharedKeyFromX3DH, receiverSignedPreKeyPair,
                 senderEphemeralKeyPublic, sessionId, false);
         }
@@ -245,7 +225,20 @@ namespace LibEmiddle.Crypto
             DoubleRatchetSession session, 
             Guid? lastProcessedMessageId = null)
         {
+            Initialize();
             return DoubleRatchet.ResumeSession(session, lastProcessedMessageId);
+        }
+
+        /// <summary>
+        /// Validates that a DoubleRatchetSession is properly initialized with required keys and valid state.
+        /// Used to verify session integrity before performing cryptographic operations.
+        /// </summary>
+        /// <param name="session">The DoubleRatchetSession to validate.</param>
+        /// <returns>True if the session is valid and can be used for cryptographic operations, false otherwise.</returns>
+        public bool ValidateSession(DoubleRatchetSession? session)
+        {
+            Initialize();
+            return DoubleRatchet.ValidateSession(session);
         }
 
         /// <summary>
@@ -258,9 +251,7 @@ namespace LibEmiddle.Crypto
             byte[] rootKey, 
             byte[] dhOutput)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(rootKey.ToString(), nameof(rootKey));
-            ArgumentNullException.ThrowIfNullOrEmpty(dhOutput.ToString(), nameof(dhOutput));
-
+            Initialize();
             return DoubleRatchet.DHRatchetStep(rootKey, dhOutput);
         }
 
@@ -268,17 +259,15 @@ namespace LibEmiddle.Crypto
         /// Performs a step in the Double Ratchet to derive new keys
         /// </summary>
         /// <param name="chainKey">Current chain key</param>
-        /// <param name="sessionId">Optional session ID for tracking</param>
+        /// <param name="sessionId">Session ID for tracking</param>
         /// <param name="strategy">Key rotation strategy</param>
         /// <returns>New chain key and message key</returns>
         public (byte[] newChainKey, byte[] messageKey) RatchetStep(
             byte[] chainKey,
-            string? sessionId = null,
+            string sessionId,
             Enums.KeyRotationStrategy strategy = Enums.KeyRotationStrategy.Standard)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(chainKey.ToString(), nameof(chainKey));
-            ArgumentNullException.ThrowIfNullOrEmpty(sessionId, nameof(sessionId));
-
+            Initialize();
             return DoubleRatchet.RatchetStep(chainKey, sessionId, strategy);
         }
 
@@ -294,8 +283,6 @@ namespace LibEmiddle.Crypto
             string message, 
             Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(session.ToString(), nameof(session));
-
             Initialize();
             return DoubleRatchet.DoubleRatchetEncrypt(session, message, rotationStrategy);
         }

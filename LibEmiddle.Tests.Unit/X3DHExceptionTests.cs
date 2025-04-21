@@ -210,10 +210,12 @@ namespace LibEmiddle.Tests.Unit
             // Store message keys for later verification
             List<byte[]> messageKeys = new List<byte[]>();
 
+            string sessionId = "session-" + Guid.NewGuid().ToString();
+
             // Perform several ratchet steps
             for (int i = 0; i < 5; i++)
             {
-                var (newChainKey, messageKey) = _cryptoProvider.RatchetStep(currentChainKey);
+                var (newChainKey, messageKey) = _cryptoProvider.RatchetStep(currentChainKey, sessionId);
                 messageKeys.Add(messageKey);
                 currentChainKey = newChainKey;
 
@@ -234,7 +236,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] compromisedChainKey = currentChainKey;
 
             // Try to derive earlier message keys from compromised keys
-            var (_, attemptedMessageKey) = _cryptoProvider.RatchetStep(compromisedChainKey);
+            var (_, attemptedMessageKey) = _cryptoProvider.RatchetStep(compromisedChainKey, sessionId);
 
             // Assert
             // If forward secrecy is maintained, the derived message key should not match any previous keys

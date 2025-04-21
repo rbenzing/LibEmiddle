@@ -29,10 +29,32 @@ namespace LibEmiddle.MultiDevice
             ArgumentNullException.ThrowIfNull(newDevicePublicKey, nameof(newDevicePublicKey));
 
             byte[] normalizedPublicKey;
+
+            // Track the key format to include in the derivation info
+            string keyFormat;
+
             try
             {
                 // Try to convert assuming it is a valid Ed25519 public key.
-                normalizedPublicKey = Sodium.ConvertEd25519PublicKeyToX25519(newDevicePublicKey);
+                if (newDevicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
+                {
+                    normalizedPublicKey = Sodium.ConvertEd25519PublicKeyToX25519(newDevicePublicKey);
+                    keyFormat = "Ed25519";
+                }
+                else if (newDevicePublicKey.Length == Constants.X25519_KEY_SIZE)
+                {
+                    // Key is already in X25519 format
+                    if (!Sodium.ValidateX25519PublicKey(newDevicePublicKey))
+                    {
+                        throw new CryptographicException("Public key is invalid.");
+                    }
+                    normalizedPublicKey = newDevicePublicKey;
+                    keyFormat = "X25519";
+                }
+                else
+                {
+                    throw new ArgumentException($"Invalid public key length: {newDevicePublicKey.Length}. Expected {Constants.ED25519_PUBLIC_KEY_SIZE} or {Constants.X25519_KEY_SIZE} bytes.", nameof(newDevicePublicKey));
+                }
             }
             catch (Exception)
             {
@@ -42,12 +64,15 @@ namespace LibEmiddle.MultiDevice
                     throw new CryptographicException("Public key is invalid.");
                 }
                 normalizedPublicKey = newDevicePublicKey;
+                keyFormat = "X25519";
             }
 
+            // Include the original key format in the derivation info to ensure different results
+            // for Ed25519 vs X25519 inputs
             return Sodium.HkdfDerive(
                 normalizedPublicKey,
                 existingSharedKey,
-                info: Encoding.UTF8.GetBytes("DeviceLinkKeyDerivation")
+                info: Encoding.UTF8.GetBytes($"DeviceLinkKeyDerivation-{keyFormat}")
             );
         }
 
@@ -71,15 +96,19 @@ namespace LibEmiddle.MultiDevice
             // Convert main device's Ed25519 private key to X25519.
             byte[] mainDeviceX25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(mainDeviceKeyPair.PrivateKey);
 
-            // Compute the main device's X25519 public key.
-            byte[] mainDeviceX25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
-            Sodium.ComputePublicKey(mainDeviceX25519Public, mainDeviceKeyPair.PrivateKey);
-
             // Convert new device's Ed25519 public key to X25519.
-            byte[] newDeviceX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(newDevicePublicKey);
+            byte[] newDeviceX25519Public;
+            try
+            {
+                newDeviceX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(newDevicePublicKey);
+            }
+            catch (Exception ex)
+            {
+                throw new ArgumentException("New device public key is not a valid Ed25519 public key.", nameof(newDevicePublicKey), ex);
+            }
 
             // Compute the shared secret using X3DH.
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(newDeviceX25519Public, mainDeviceX25519Private);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(mainDeviceX25519Private, newDeviceX25519Public);
 
             // Sign the new device's original Ed25519 public key using the main device's Ed25519 private key.
             byte[] signature = MessageSigning.SignMessage(newDevicePublicKey, mainDeviceKeyPair.PrivateKey);
@@ -95,11 +124,14 @@ namespace LibEmiddle.MultiDevice
             byte[] nonce = NonceGenerator.GenerateNonce();
             byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
 
+            // FIXED: Use the main device's X25519 public key for SenderDHKey
+            byte[] mainDeviceX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(mainDeviceKeyPair.PublicKey);
+
             return new EncryptedMessage
             {
                 Ciphertext = ciphertext,
                 Nonce = nonce,
-                SenderDHKey = mainDeviceX25519Public,
+                SenderDHKey = mainDeviceX25519Public, // Use X25519 public key here, not newDeviceX25519Public
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 MessageNumber = 0,
                 SessionId = null
@@ -146,14 +178,25 @@ namespace LibEmiddle.MultiDevice
                 byte[] mainDeviceX25519Public = encryptedMessage.SenderDHKey;
                 if (mainDeviceX25519Public.Length != Constants.X25519_KEY_SIZE)
                 {
-                    throw new ArgumentException("Invalid main device X25519 public key length in SenderDHKey");
+                    LoggingManager.LogWarning(nameof(DeviceLinking), $"Invalid main device X25519 public key length in SenderDHKey: {mainDeviceX25519Public.Length}, expected {Constants.X25519_KEY_SIZE}");
+                    return null;
                 }
 
                 // Compute the shared secret.
-                byte[] sharedSecret = X3DHExchange.PerformX25519DH(mainDeviceX25519Public, newDeviceX25519Private);
+                byte[] sharedSecret = X3DHExchange.PerformX25519DH(newDeviceX25519Private, mainDeviceX25519Public);
 
                 // Decrypt the ciphertext.
-                byte[] plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, sharedSecret, encryptedMessage.Nonce);
+                byte[] plaintext;
+                try
+                {
+                    plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, sharedSecret, encryptedMessage.Nonce);
+                }
+                catch (CryptographicException ex)
+                {
+                    LoggingManager.LogWarning(nameof(DeviceLinking), $"Failed to decrypt device link message: {ex.Message}");
+                    return null;
+                }
+
                 string json = Encoding.UTF8.GetString(plaintext);
 
                 // Deserialize the payload.

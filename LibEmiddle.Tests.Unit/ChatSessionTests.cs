@@ -36,7 +36,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(_alicePrivateKey, _bobKeyPair.PublicKey);
 
             // Initialize Double Ratchet
-            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             string sessionId = Guid.NewGuid().ToString();
 
@@ -351,11 +351,14 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public async Task ChatSession_IsValid_ShouldReturnFalseWhenTerminated()
         {
-            // Assert
+            // Act - first activate the session
             Assert.IsTrue(await _aliceChatSession.ActivateAsync());
 
-            // Assert
-            Assert.IsFalse(await _aliceChatSession.TerminateAsync());
+            // Terminate the session - should return true (successful termination)
+            Assert.IsTrue(await _aliceChatSession.TerminateAsync());
+
+            // Assert - IsValid should return false for a terminated session
+            Assert.IsFalse(_aliceChatSession.IsValid());
         }
 
         [TestMethod]

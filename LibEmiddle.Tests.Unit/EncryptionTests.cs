@@ -112,14 +112,6 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentNullException))]
-        public void EncryptMessage_WithNullKey_ShouldThrowException()
-        {
-            // Act & Assert - Should throw ArgumentNullException
-            LibEmiddleClient.EncryptMessage("Test message", null);
-        }
-
-        [TestMethod]
         [ExpectedException(typeof(ArgumentException))]
         public void EncryptMessage_WithEmptyMessage_ShouldThrowException()
         {

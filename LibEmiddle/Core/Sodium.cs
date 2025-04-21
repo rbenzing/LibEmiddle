@@ -420,8 +420,9 @@ namespace LibEmiddle.Core
             try
             {
                 int result = crypto_auth_hmacsha256(output, message, (nuint)message.Length, key);
+
                 if (result != 0)
-                    throw new InvalidOperationException("HMAC computation failed.");
+                    throw new CryptographicException("Libsodium HMAC-SHA256 computation failed.");
 
                 return output;
             }
@@ -639,7 +640,8 @@ namespace LibEmiddle.Core
             int result = crypto_scalarmult_curve25519(sharedSecret, secretKey, publicKey);
 
             if (result != 0)
-                throw new InvalidOperationException("X25519 key exchange failed.");
+                // Use CryptographicException
+                throw new CryptographicException("Libsodium X25519 public key generation failed.");
 
             return sharedSecret;
         }
@@ -671,7 +673,9 @@ namespace LibEmiddle.Core
             int result = crypto_scalarmult_curve25519_base(publicKey, secretKey);
 
             if (result != 0)
-                throw new InvalidOperationException("X25519 public key generation failed.");
+                // Use CryptographicException
+                throw new CryptographicException("Libsodium X25519 public key generation failed.");
+
 
             return publicKey;
         }
@@ -836,42 +840,42 @@ namespace LibEmiddle.Core
         /// <summary>
         /// Validates an Ed25519 public key.
         /// </summary>
-        /// <param name="publicKey">The public key to validate.</param>
+        /// <param name="eD25519PublicKey">The public key to validate.</param>
         /// <returns>True if the key is valid, false otherwise.</returns>
-        public static bool ValidateEd25519PublicKey(ReadOnlySpan<byte> publicKey)
+        public static bool ValidateEd25519PublicKey(ReadOnlySpan<byte> eD25519PublicKey)
         {
-            if (publicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+            if (eD25519PublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
                 return false;
 
             Initialize();
 
-            int result = crypto_core_ed25519_is_valid_point(publicKey);
+            int result = crypto_core_ed25519_is_valid_point(eD25519PublicKey);
             return result == 1;
         }
 
         /// <summary>
         /// Validates an X25519 public key to ensure it's not an invalid or dangerous value
         /// </summary>
-        /// <param name="publicKey">X25519 public key to validate</param>
+        /// <param name="x25519PublicKey">X25519 public key to validate</param>
         /// <returns>True if the key is valid.</returns>
         // In KeyValidation.cs
-        public static bool ValidateX25519PublicKey(byte[] publicKey)
+        public static bool ValidateX25519PublicKey(byte[] x25519PublicKey)
         {
-            if (publicKey == null)
+            if (x25519PublicKey == null)
             {
                 return false;
             }
 
-            if (publicKey.Length != Constants.X25519_KEY_SIZE)
+            if (x25519PublicKey.Length != Constants.X25519_KEY_SIZE)
             {
                 return false;
             }
 
             // Check for all-zero key, which is invalid for X25519
             bool allZeros = true;
-            for (int i = 0; i < publicKey.Length; i++)
+            for (int i = 0; i < x25519PublicKey.Length; i++)
             {
-                if (publicKey[i] != 0)
+                if (x25519PublicKey[i] != 0)
                 {
                     allZeros = false;
                     break;
@@ -987,20 +991,31 @@ namespace LibEmiddle.Core
         /// <summary>
         /// Computes the X25519 public key corresponding to a private key.
         /// </summary>
-        /// <param name="output">The generated public key (32 bytes).</param>
-        /// <param name="privateKey">The private key to derive from (32 bytes).</param>
+        /// <param name="output">The generated X25519 public key (32 bytes).</param>
+        /// <param name="privateKey">The X25519 private key to compute from (32 bytes).</param>
         public static void ComputePublicKey(Span<byte> output, ReadOnlySpan<byte> privateKey)
         {
+            if (privateKey.Length != Constants.X25519_KEY_SIZE)
+            {
+                throw new ArgumentException($"Private key must be {Constants.X25519_KEY_SIZE} bytes long.", nameof(privateKey));
+            }
+            if (output.Length != Constants.X25519_KEY_SIZE)
+            {
+                throw new ArgumentException($"Output buffer must be {Constants.X25519_KEY_SIZE} bytes long.", nameof(output));
+            }
+
             try
             {
                 int result = Sodium.crypto_scalarmult_curve25519_base(output, privateKey);
 
                 if (result != 0)
-                    throw new InvalidOperationException("Failed to compute X25519 public key.");
+                    // Using CryptographicException directly might be slightly better here
+                    throw new CryptographicException("Libsodium failed to compute X25519 public key.");
             }
-            catch (Exception e)
+            catch (Exception e) when (e is not CryptographicException && e is not ArgumentException) // Avoid re-wrapping our own exceptions
             {
-                throw new CryptographicException(e.Message, nameof(Sodium));
+                // Wrap unexpected exceptions (e.g., DllNotFoundException if libsodium isn't loaded)
+                throw new CryptographicException($"An error occurred during public key computation: {e.Message}", e);
             }
         }
 

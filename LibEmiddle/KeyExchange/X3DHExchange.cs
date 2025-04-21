@@ -478,7 +478,7 @@ namespace LibEmiddle.KeyExchange
                         : DeriveSharedSecret(dh1, dh2, dh3);
 
                     // Initialize Double Ratchet with the master secret from X3DH
-                    var (rootKey, chainKey) = DoubleRatchet.DerriveDoubleRatchet(sharedSecret);
+                    var (rootKey, chainKey) = DoubleRatchet.DeriveDoubleRatchet(sharedSecret);
 
                     // Create the session object with all necessary information
                     var session = new X3DHSession(

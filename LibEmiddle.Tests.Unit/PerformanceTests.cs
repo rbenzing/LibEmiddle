@@ -186,7 +186,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Initial shared secret
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             // Create a session ID that will be shared between Alice and Bob
             string sessionId = "alice-bob-session-" + Guid.NewGuid().ToString();

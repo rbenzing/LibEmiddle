@@ -51,8 +51,8 @@ namespace LibEmiddle.Domain // Adjust namespace as needed
             KeyPair dhRatchetKeyPair,          // Our current DH key pair (DHs)
             byte[] remoteDHRatchetKey,             // Their current public DH key (DHr)
             byte[] rootKey,                        // Current Root Key (RK)
-            byte[]? sendingChainKey,               // Current Sending Chain Key (CKs), nullable for initial state
-            byte[]? receivingChainKey,             // Current Receiving Chain Key (CKr), nullable for initial state
+            byte[] sendingChainKey,               // Current Sending Chain Key (CKs), nullable for initial state
+            byte[] receivingChainKey,             // Current Receiving Chain Key (CKr), nullable for initial state
             int messageNumberSending,              // Ns: Number of messages sent in current sending chain
             int messageNumberReceiving,            // Nr: Number of messages received in current receiving chain
             string? sessionId = null,                  // Optional session ID
@@ -61,6 +61,8 @@ namespace LibEmiddle.Domain // Adjust namespace as needed
             ImmutableDictionary<Tuple<byte[], int>, byte[]>? skippedMessageKeys = null // Store keys for out-of-order messages
         )
         {
+            ArgumentNullException.ThrowIfNull(receivingChainKey, nameof(receivingChainKey));
+            ArgumentNullException.ThrowIfNull(sendingChainKey, nameof(sendingChainKey));
             ArgumentNullException.ThrowIfNullOrEmpty(dhRatchetKeyPair.ToString(), nameof(dhRatchetKeyPair));
 
             // Validate non-nullable required arguments
@@ -68,16 +70,21 @@ namespace LibEmiddle.Domain // Adjust namespace as needed
             RootKey = rootKey ?? throw new ArgumentNullException(nameof(rootKey));
 
             // Validate key lengths (assuming Constants class is accessible)
-            if (RemoteDHRatchetKey.Length != Constants.X25519_KEY_SIZE) throw new ArgumentException("Invalid Remote DH Ratchet Key size.", nameof(remoteDHRatchetKey));
-            if (RootKey.Length != Constants.AES_KEY_SIZE) throw new ArgumentException("Invalid Root Key size.", nameof(rootKey));
-            if (sendingChainKey != null && sendingChainKey.Length != Constants.AES_KEY_SIZE) throw new ArgumentException("Invalid Sending Chain Key size.", nameof(sendingChainKey));
-            if (receivingChainKey != null && receivingChainKey.Length != Constants.AES_KEY_SIZE) throw new ArgumentException("Invalid Receiving Chain Key size.", nameof(receivingChainKey));
+            if (RemoteDHRatchetKey.Length != Constants.X25519_KEY_SIZE) 
+                throw new ArgumentException("Invalid Remote DH Ratchet Key size.", nameof(remoteDHRatchetKey));
+            if (RootKey.Length != Constants.AES_KEY_SIZE) 
+                throw new ArgumentException("Invalid Root Key size.", nameof(rootKey));
             
+            if (sendingChainKey != null && sendingChainKey.Length != Constants.AES_KEY_SIZE)
+                throw new ArgumentException("Invalid Sending Chain Key size.", nameof(sendingChainKey));
+            if (receivingChainKey != null && receivingChainKey.Length != Constants.AES_KEY_SIZE) 
+                throw new ArgumentException("Invalid Receiving Chain Key size.", nameof(receivingChainKey));
+
             // TODO: Add validation for DHRatchetKeyPair keys if needed
 
             // Assign properties
-            SendingChainKey = sendingChainKey; // Can be null initially
-            ReceivingChainKey = receivingChainKey; // Can be null initially
+            SendingChainKey = sendingChainKey ?? this.SendingChainKey;
+            ReceivingChainKey = receivingChainKey ?? this.ReceivingChainKey;
             MessageNumberSending = messageNumberSending;
             MessageNumberReceiving = messageNumberReceiving;
             SessionId = sessionId ?? Guid.NewGuid().ToString();
@@ -114,12 +121,12 @@ namespace LibEmiddle.Domain // Adjust namespace as needed
         /// <summary>
         /// Current Sending Chain Key (CKs), if initialized. Null otherwise.
         /// </summary>
-        public byte[]? SendingChainKey { get; }
+        public byte[] SendingChainKey { get; } = Array.Empty<byte>();
 
         /// <summary>
         /// Current Receiving Chain Key (CKr), if initialized. Null otherwise.
         /// </summary>
-        public byte[]? ReceivingChainKey { get; }
+        public byte[] ReceivingChainKey { get; } = Array.Empty<byte>();
 
         /// <summary>
         /// Number of messages sent using the current sending chain key (Ns).
@@ -214,7 +221,7 @@ namespace LibEmiddle.Domain // Adjust namespace as needed
                 dhRatchetKeyPair: newDHRatchetKeyPair ?? this.DHRatchetKeyPair,
                 remoteDHRatchetKey: newRemoteDHRatchetKey ?? this.RemoteDHRatchetKey,
                 rootKey: newRootKey ?? this.RootKey,
-                sendingChainKey: newSendingChainKey ?? this.SendingChainKey,       // Keeps existing if new value is null
+                sendingChainKey: newSendingChainKey ?? this.SendingChainKey, // Keeps existing if new value is null
                 receivingChainKey: newReceivingChainKey ?? this.ReceivingChainKey, // Keeps existing if new value is null
                 messageNumberSending: newMessageNumberSending ?? this.MessageNumberSending,
                 messageNumberReceiving: newMessageNumberReceiving ?? this.MessageNumberReceiving,

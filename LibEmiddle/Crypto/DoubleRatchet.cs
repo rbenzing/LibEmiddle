@@ -32,14 +32,14 @@ namespace LibEmiddle.Crypto
 
         // --- Double Ratchet Initialization ---
         /// <summary>
-        /// Derrives the Double Ratchet keypair from a shared key (typically from X3DH).
+        /// Derives the Double Ratchet keypair from a shared key (typically from X3DH).
         /// Creates the initial root key and chain key for the Double Ratchet session.
         /// </summary>
         /// <param name="sharedKey">32-byte shared secret derived from X3DH key agreement.</param>
         /// <returns>A tuple containing (rootKey, chainKey) used to initialize the Double Ratchet session.</returns>
         /// <exception cref="ArgumentException">Thrown when sharedKey is empty or has invalid length.</exception>
         /// <exception cref="CryptographicException">Thrown when key derivation fails.</exception>
-        public static (byte[] rootKey, byte[] chainKey) DerriveDoubleRatchet(ReadOnlySpan<byte> sharedKey)
+        public static (byte[] rootKey, byte[] chainKey) DeriveDoubleRatchet(ReadOnlySpan<byte> sharedKey)
         {
             if (sharedKey.IsEmpty)
                 throw new ArgumentException("Shared key cannot be empty", nameof(sharedKey));
@@ -517,6 +517,19 @@ namespace LibEmiddle.Crypto
                 }
                 else
                 {
+                    if (targetMsgNum > currentReceivingMsgNum)
+                    {
+                        uint gap = targetMsgNum - currentReceivingMsgNum;
+
+                        if (gap > Constants.MAX_SKIPPED_MESSAGES)
+                        {
+                            LoggingManager.LogWarning(nameof(DoubleRatchet),
+                                $"Discarding message: gap {gap} exceeds MAX_SKIPPED_MESSAGES={Constants.MAX_SKIPPED_MESSAGES}");
+                            SecureMemory.SecureClear(currentReceivingChainKey);
+                            return (null, null); // exit immediately – no looping, no crash
+                        }
+                    }
+
                     // Message is current or from the future - ratchet forward if needed
                     while (currentReceivingMsgNum < targetMsgNum)
                     {

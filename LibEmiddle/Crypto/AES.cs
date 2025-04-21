@@ -212,8 +212,7 @@ namespace LibEmiddle.Crypto
 
                 if (result != 0)
                 {
-                    throw new CryptographicException(
-                        "Authentication failed. The data may have been tampered with or the wrong key was used.");
+                    throw new CryptographicException("Authentication failed. The data may have been tampered with or the wrong key was used.");
                 }
 
                 // Create a properly sized result array if needed
@@ -267,6 +266,7 @@ namespace LibEmiddle.Crypto
         {
             ArgumentException.ThrowIfNullOrEmpty(message, nameof(message));
             ArgumentNullException.ThrowIfNull(key.ToArray(), nameof(key));
+
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
 
@@ -295,6 +295,7 @@ namespace LibEmiddle.Crypto
             ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, "Ciphertext cannot be null");
             ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce, "Nonce cannot be null");
             ArgumentNullException.ThrowIfNull(key.ToArray(), nameof(key));
+
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
 

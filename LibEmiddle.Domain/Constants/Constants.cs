@@ -61,7 +61,12 @@ namespace LibEmiddle.Domain
         /// <summary>
         /// Maximum number of message IDs to track for replay protection
         /// </summary>
-        public const int MAX_TRACKED_MESSAGE_IDS = 100;
+        public const int MAX_TRACKED_MESSAGE_IDS = 2000;
+
+        /// <summary>
+        /// Maximum number of messages to track when skipping
+        /// </summary>
+        public const int MAX_SKIPPED_MESSAGES = 2000;
 
         /// <summary>
         /// Default number of one-time prekeys to generate for key bundles

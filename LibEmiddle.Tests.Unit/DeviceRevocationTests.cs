@@ -7,6 +7,7 @@ using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Models;
 using LibEmiddle.MultiDevice;
+using System.Security.Cryptography.X509Certificates;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -172,8 +173,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Create X25519 key for the device to revoke
             byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
-            Sodium.ComputePublicKey(
-                deviceToRevokeX25519Public,
+            Sodium.ComputePublicKey(deviceToRevokeX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.PrivateKey));
 
             // Create two device managers
@@ -238,7 +238,7 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        [ExpectedException(typeof(KeyNotFoundException))]
+        [ExpectedException(typeof(InvalidOperationException))]
         public void DeviceManager_RevokeLinkedDevice_UnknownDevice_ShouldThrowException()
         {
             // Arrange
@@ -251,10 +251,10 @@ namespace LibEmiddle.Tests.Unit
                 deviceToRevokeX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.PrivateKey));
 
-            // Create a device manager without linking the device
+            // Create a device manager without linking the deviceToRevokeKeyPair
             var deviceManager = new DeviceManager(mainDeviceKeyPair);
 
-            // Act & Assert - Should throw KeyNotFoundException
+            // Act & Assert - Should throw InvalidOperationException
             deviceManager.RevokeLinkedDevice(deviceToRevokeX25519Public);
         }
 
@@ -329,21 +329,21 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var deviceManager = new DeviceManager(identityKeyPair);
-            var deviceKey = Sodium.GenerateEd25519KeyPair().PublicKey;
+            var deviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
-            deviceManager.AddLinkedDevice(deviceKey);
-            Assert.IsTrue(deviceManager.IsDeviceLinked(deviceKey));
+            deviceManager.AddLinkedDevice(deviceKeyPair.PublicKey);
+            Assert.IsTrue(deviceManager.IsDeviceLinked(deviceKeyPair.PublicKey));
 
             // Revoke the device
-            deviceManager.RevokeLinkedDevice(deviceKey);
-            Assert.IsFalse(deviceManager.IsDeviceLinked(deviceKey));
+            deviceManager.RevokeLinkedDevice(deviceKeyPair.PublicKey);
+            Assert.IsFalse(deviceManager.IsDeviceLinked(deviceKeyPair.PublicKey));
 
             // Attempt to add it again
             bool exceptionThrown = false;
             try
             {
-                deviceManager.AddLinkedDevice(deviceKey);
+                deviceManager.AddLinkedDevice(deviceKeyPair.PublicKey);
             }
             catch (SecurityException)
             {
@@ -352,7 +352,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsTrue(exceptionThrown, "Expected SecurityException was not thrown");
-            Assert.IsFalse(deviceManager.IsDeviceLinked(deviceKey));
+            Assert.IsFalse(deviceManager.IsDeviceLinked(deviceKeyPair.PublicKey));
         }
 
         [TestMethod]

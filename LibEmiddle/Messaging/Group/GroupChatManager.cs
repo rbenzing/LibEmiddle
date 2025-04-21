@@ -37,7 +37,7 @@ namespace LibEmiddle.Messaging.Group
         private readonly SkippedMessageKeyStore _skippedMessageKeyStore;
 
         /// <summary>
-        /// Creates a new GroupChatManager with the specified identity key pair
+        /// Creates a new GroupChatManager with the specified Ed25519 identity key pair
         /// </summary>
         /// <param name="identityKeyPair">Ed25519 Identity key pair for signing and verification</param>
         public GroupChatManager(KeyPair identityKeyPair)

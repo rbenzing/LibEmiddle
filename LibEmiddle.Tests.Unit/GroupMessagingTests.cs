@@ -165,6 +165,7 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var adminKeyPair = Sodium.GenerateEd25519KeyPair();
             var memberKeyPair = Sodium.GenerateEd25519KeyPair();
+
             var adminManager = new GroupChatManager(adminKeyPair);
             var memberManager = new GroupChatManager(memberKeyPair);
 
@@ -339,11 +340,13 @@ namespace LibEmiddle.Tests.Unit
             // Create distribution message
             var distributionMessage = groupChatManager.CreateDistributionMessage(groupId);
 
+            byte[] senderPrivateKey = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(senderKeyPair.PrivateKey);
+            byte[] recipientPublicKey = _cryptoProvider.ConvertEd25519PublicKeyToX25519(recipientKeyPair.PublicKey);
+            byte[] recipientPrivateKey = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(recipientKeyPair.PrivateKey);
+
             // Act
-            var encryptedDistribution = SenderKeyDistribution.EncryptSenderKeyDistribution(
-                distributionMessage, recipientKeyPair.PublicKey, senderKeyPair.PrivateKey);
-            var decryptedDistribution = SenderKeyDistribution.DecryptSenderKeyDistribution(
-                encryptedDistribution, recipientKeyPair.PrivateKey);
+            var encryptedDistribution = SenderKeyDistribution.EncryptSenderKeyDistribution(distributionMessage, recipientPublicKey, senderPrivateKey);
+            var decryptedDistribution = SenderKeyDistribution.DecryptSenderKeyDistribution(encryptedDistribution, recipientPrivateKey);
 
             // Assert
             Assert.AreEqual(distributionMessage.GroupId, decryptedDistribution.GroupId);

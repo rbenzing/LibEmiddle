@@ -40,7 +40,7 @@ namespace LibEmiddle.Messaging.Group
         public byte[] GenerateInitialChainKey()
         {
             // Use preferred method for generating secure random bytes
-            return RandomNumberGenerator.GetBytes(Constants.AES_KEY_SIZE);
+            return Sodium.GenerateRandomBytes(Constants.AES_KEY_SIZE);
         }
 
         /// <summary>

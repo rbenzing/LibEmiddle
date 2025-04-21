@@ -40,8 +40,8 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             string sessionId = "resume-test-" + Guid.NewGuid().ToString();
 
@@ -90,8 +90,8 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             string sessionId = "resume-with-msgid-" + Guid.NewGuid().ToString();
 
@@ -260,8 +260,8 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             // Create a session ID that will be shared between Alice and Bob
             string sessionId = "error-recovery-test-" + Guid.NewGuid().ToString();
@@ -481,8 +481,8 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning($"Second device X25519 public key: {Convert.ToBase64String(secondDeviceX25519Public)}");
 
             // Let's manually test the key exchange works both ways
-            byte[] sharedSecret1 = X3DHExchange.PerformX25519DH(secondDeviceX25519Public, mainDeviceX25519Private);
-            byte[] sharedSecret2 = X3DHExchange.PerformX25519DH(mainDeviceX25519Public, secondDeviceX25519Private);
+            byte[] sharedSecret1 = X3DHExchange.PerformX25519DH(mainDeviceX25519Private, secondDeviceX25519Public);
+            byte[] sharedSecret2 = X3DHExchange.PerformX25519DH(secondDeviceX25519Private, mainDeviceX25519Public);
 
             Trace.TraceWarning($"Manual key exchange - Shared secret 1 length: {sharedSecret1.Length}, " +
                              $"Shared secret 2 length: {sharedSecret2.Length}");
@@ -646,8 +646,8 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = _cryptoProvider.DerriveDoubleRatchet(sharedSecret);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             string sessionId = "cross-device-" + Guid.NewGuid().ToString();
 

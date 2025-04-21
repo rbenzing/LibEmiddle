@@ -354,7 +354,7 @@ namespace LibEmiddle.Messaging.Transport
             byte[] sharedSecret = X3DHExchange.PerformX25519DH(contactX25519Key, x25519PrivateKey);
 
             // Initialize Double Ratchet
-            var (rootKey, chainKey) = DoubleRatchet.DerriveDoubleRatchet(sharedSecret);
+            var (rootKey, chainKey) = DoubleRatchet.DeriveDoubleRatchet(sharedSecret);
 
             // Create a session with a unique ID
             string sessionId = $"session-{contactId}-{Guid.NewGuid()}";

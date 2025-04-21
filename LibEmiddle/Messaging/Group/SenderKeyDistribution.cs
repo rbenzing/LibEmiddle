@@ -220,8 +220,8 @@ namespace LibEmiddle.Messaging.Group
         /// Encrypts a sender key distribution message for a specific recipient
         /// </summary>
         /// <param name="distribution">Distribution message to encrypt</param>
-        /// <param name="recipientPublicKey">Recipient's public key</param>
-        /// <param name="senderPrivateKey">Sender's private key</param>
+        /// <param name="recipientPublicKey">Recipient's X25519 public key</param>
+        /// <param name="senderPrivateKey">Sender's X25519 private key</param>
         /// <returns>Encrypted distribution message</returns>
         public static EncryptedSenderKeyDistribution EncryptSenderKeyDistribution(
             SenderKeyDistributionMessage distribution,
@@ -232,67 +232,69 @@ namespace LibEmiddle.Messaging.Group
             ArgumentNullException.ThrowIfNull(recipientPublicKey, nameof(recipientPublicKey));
             ArgumentNullException.ThrowIfNull(senderPrivateKey, nameof(senderPrivateKey));
 
-            // Serialize the distribution message
+            /* ---------- (1)  Serialize the distribution exactly as before ---------- */
             byte[] serializedData;
             using (var ms = new MemoryStream())
-            using (var writer = new BinaryWriter(ms))
+            using (var w = new BinaryWriter(ms))
             {
-                writer.Write(distribution.GroupId ?? string.Empty);
-                writer.Write(distribution.Iteration);
-                writer.Write(distribution.ChainKey?.Length ?? 0);
-                if (distribution.ChainKey != null)
-                    writer.Write(distribution.ChainKey);
-                writer.Write(distribution.SenderIdentityKey?.Length ?? 0);
-                if (distribution.SenderIdentityKey != null)
-                    writer.Write(distribution.SenderIdentityKey);
-                writer.Write(distribution.Signature?.Length ?? 0);
-                if (distribution.Signature != null)
-                    writer.Write(distribution.Signature);
-                writer.Write(distribution.Timestamp);
-                writer.Write(distribution.MessageId ?? string.Empty);
-
+                w.Write(distribution.GroupId ?? string.Empty);
+                w.Write(distribution.Iteration);
+                w.Write(distribution.ChainKey?.Length ?? 0); if (distribution.ChainKey is { } ck) w.Write(ck);
+                w.Write(distribution.SenderIdentityKey?.Length ?? 0); if (distribution.SenderIdentityKey is { } sik) w.Write(sik);
+                w.Write(distribution.Signature?.Length ?? 0); if (distribution.Signature is { } sig) w.Write(sig);
+                w.Write(distribution.Timestamp);
+                w.Write(distribution.MessageId ?? string.Empty);
                 serializedData = ms.ToArray();
             }
 
-            // Generate a random nonce
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            /* ---------- (2)  Convert keys to X25519 ---------- */
+            byte[] senderX25519Priv = senderPrivateKey.Length == Constants.ED25519_PRIVATE_KEY_SIZE
+                                      ? Sodium.ConvertEd25519PrivateKeyToX25519(senderPrivateKey)
+                                      : senderPrivateKey;                       // already X25519
 
+            byte[] recipientX25519Pub;
             try
             {
-                // Generate a shared secret using X25519
-                byte[] sharedSecret = X3DHExchange.PerformX25519DH(senderPrivateKey, recipientPublicKey);
-
-                // Derive an encryption key from the shared secret
-                byte[] encryptionKey = KeyConversion.HkdfDerive(
-                    sharedSecret,
-                    null, // No salt needed
-                    Encoding.UTF8.GetBytes("SenderKeyDistributionEncryption"),
-                    Constants.AES_KEY_SIZE);
-
-                // Encrypt the serialized data
-                byte[] ciphertext = AES.AESEncrypt(serializedData, encryptionKey, nonce);
-
-                // Create and return the encrypted distribution
-                return new EncryptedSenderKeyDistribution
-                {
-                    Ciphertext = ciphertext,
-                    Nonce = nonce,
-                    RecipientPublicKey = recipientPublicKey,
-                    SenderPublicKey = distribution.SenderIdentityKey
-                };
-            }
-            catch (Exception ex)
+                recipientX25519Pub = Sodium.ConvertEd25519PublicKeyToX25519(recipientPublicKey);
+            } 
+            catch
             {
-                LoggingManager.LogError(nameof(SenderKeyDistribution), $"Error encrypting distribution: {ex.Message}");
-                throw;
+                // Already a valid X25519 public key
+                recipientX25519Pub = recipientPublicKey;
             }
+
+            /* ---------- (3)  Derive shared secret (priv ‑, pub ↑) ---------- */
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(
+                                      senderX25519Priv,         // our private scalar
+                                      recipientX25519Pub);      // peer public point
+
+            /* ---------- (4)  Derive encryption key & encrypt ---------- */
+            byte[] encKey = KeyConversion.HkdfDerive(
+                                  sharedSecret,
+                                  salt: null,
+                                  info: Encoding.UTF8.GetBytes("SenderKeyDistributionEncryption"));
+
+            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] ciphertext = AES.AESEncrypt(serializedData, encKey, nonce);
+
+            SecureMemory.SecureClear(sharedSecret);
+            SecureMemory.SecureClear(encKey);
+
+            /* ---------- (5)  Build result ---------- */
+            return new EncryptedSenderKeyDistribution
+            {
+                Ciphertext = ciphertext,
+                Nonce = nonce,
+                RecipientPublicKey = recipientPublicKey,           // keep original form for metadata
+                SenderPublicKey = distribution.SenderIdentityKey
+            };
         }
 
         /// <summary>
         /// Decrypts an encrypted sender key distribution message
         /// </summary>
         /// <param name="encryptedDistribution">Encrypted distribution message</param>
-        /// <param name="recipientPrivateKey">Recipient's private key</param>
+        /// <param name="recipientPrivateKey">Recipient's X25519 private key</param>
         /// <returns>Decrypted distribution message</returns>
         public static SenderKeyDistributionMessage DecryptSenderKeyDistribution(
             EncryptedSenderKeyDistribution encryptedDistribution,
@@ -307,42 +309,62 @@ namespace LibEmiddle.Messaging.Group
 
             try
             {
-                // Generate a shared secret using X25519
-                byte[] sharedSecret = X3DHExchange.PerformX25519DH(recipientPrivateKey, encryptedDistribution.SenderPublicKey);
+                /* ---------- (1)  Convert keys to X25519 ---------- */
+                byte[] recipientX25519Priv = recipientPrivateKey.Length == Constants.ED25519_PRIVATE_KEY_SIZE
+                    ? Sodium.ConvertEd25519PrivateKeyToX25519(recipientPrivateKey)
+                    : recipientPrivateKey; // already X25519
 
-                // Derive an encryption key from the shared secret
-                byte[] encryptionKey = KeyConversion.HkdfDerive(
-                    sharedSecret,
-                    null, // No salt needed
-                    Encoding.UTF8.GetBytes("SenderKeyDistributionEncryption"),
-                    Constants.AES_KEY_SIZE);
-
-                // Decrypt the ciphertext
-                byte[] plaintext = AES.AESDecrypt(encryptedDistribution.Ciphertext, encryptionKey, encryptedDistribution.Nonce);
-
-                // Deserialize the distribution message
-                SenderKeyDistributionMessage distribution = new SenderKeyDistributionMessage();
-                using (var ms = new MemoryStream(plaintext))
-                using (var reader = new BinaryReader(ms))
+                byte[] senderX25519Pub;
+                try
                 {
-                    distribution.GroupId = reader.ReadString();
-                    distribution.Iteration = reader.ReadUInt32();
-
-                    int chainKeyLength = reader.ReadInt32();
-                    if (chainKeyLength > 0)
-                        distribution.ChainKey = reader.ReadBytes(chainKeyLength);
-
-                    int senderKeyLength = reader.ReadInt32();
-                    if (senderKeyLength > 0)
-                        distribution.SenderIdentityKey = reader.ReadBytes(senderKeyLength);
-
-                    int signatureLength = reader.ReadInt32();
-                    if (signatureLength > 0)
-                        distribution.Signature = reader.ReadBytes(signatureLength);
-
-                    distribution.Timestamp = reader.ReadInt64();
-                    distribution.MessageId = reader.ReadString();
+                    // Convert Ed25519 to X25519
+                    senderX25519Pub = Sodium.ConvertEd25519PublicKeyToX25519(encryptedDistribution.SenderPublicKey);
                 }
+                catch
+                {
+                    // already X25519
+                    senderX25519Pub = encryptedDistribution.SenderPublicKey;           
+                }
+
+                /* ---------- (2)  Derive shared secret ---------- */
+                byte[] sharedSecret = X3DHExchange.PerformX25519DH(
+                    recipientX25519Priv,     // our private scalar
+                    senderX25519Pub);        // peer public point
+
+                /* ---------- (3)  Derive encryption key ---------- */
+                byte[] encKey = KeyConversion.HkdfDerive(
+                    sharedSecret,
+                    salt: null,
+                    info: Encoding.UTF8.GetBytes("SenderKeyDistributionEncryption"));
+
+                /* ---------- (4)  Decrypt ---------- */
+                byte[] plaintext = AES.AESDecrypt(
+                    encryptedDistribution.Ciphertext,
+                    encKey,
+                    encryptedDistribution.Nonce);
+
+                SecureMemory.SecureClear(sharedSecret);
+                SecureMemory.SecureClear(encKey);
+
+                /* ---------- (5)  Deserialize ---------- */
+                var distribution = new SenderKeyDistributionMessage();
+                using var ms = new MemoryStream(plaintext);
+                using var reader = new BinaryReader(ms);
+
+                distribution.GroupId = reader.ReadString();
+                distribution.Iteration = reader.ReadUInt32();
+
+                int ckLen = reader.ReadInt32();
+                if (ckLen > 0) distribution.ChainKey = reader.ReadBytes(ckLen);
+
+                int skLen = reader.ReadInt32();
+                if (skLen > 0) distribution.SenderIdentityKey = reader.ReadBytes(skLen);
+
+                int sigLen = reader.ReadInt32();
+                if (sigLen > 0) distribution.Signature = reader.ReadBytes(sigLen);
+
+                distribution.Timestamp = reader.ReadInt64();
+                distribution.MessageId = reader.ReadString();
 
                 return distribution;
             }
