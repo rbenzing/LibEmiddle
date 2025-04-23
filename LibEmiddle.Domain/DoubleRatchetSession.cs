@@ -51,8 +51,8 @@ namespace LibEmiddle.Domain // Adjust namespace as needed
             KeyPair dhRatchetKeyPair,          // Our current DH key pair (DHs)
             byte[] remoteDHRatchetKey,             // Their current public DH key (DHr)
             byte[] rootKey,                        // Current Root Key (RK)
-            byte[] sendingChainKey,               // Current Sending Chain Key (CKs), nullable for initial state
-            byte[] receivingChainKey,             // Current Receiving Chain Key (CKr), nullable for initial state
+            byte[]? sendingChainKey,               // Current Sending Chain Key (CKs), nullable for initial state
+            byte[]? receivingChainKey,             // Current Receiving Chain Key (CKr), nullable for initial state
             int messageNumberSending,              // Ns: Number of messages sent in current sending chain
             int messageNumberReceiving,            // Nr: Number of messages received in current receiving chain
             string? sessionId = null,                  // Optional session ID
@@ -61,8 +61,6 @@ namespace LibEmiddle.Domain // Adjust namespace as needed
             ImmutableDictionary<Tuple<byte[], int>, byte[]>? skippedMessageKeys = null // Store keys for out-of-order messages
         )
         {
-            ArgumentNullException.ThrowIfNull(receivingChainKey, nameof(receivingChainKey));
-            ArgumentNullException.ThrowIfNull(sendingChainKey, nameof(sendingChainKey));
             ArgumentNullException.ThrowIfNullOrEmpty(dhRatchetKeyPair.ToString(), nameof(dhRatchetKeyPair));
 
             // Validate non-nullable required arguments
@@ -83,8 +81,8 @@ namespace LibEmiddle.Domain // Adjust namespace as needed
             // TODO: Add validation for DHRatchetKeyPair keys if needed
 
             // Assign properties
-            SendingChainKey = sendingChainKey ?? this.SendingChainKey;
-            ReceivingChainKey = receivingChainKey ?? this.ReceivingChainKey;
+            SendingChainKey = sendingChainKey;
+            ReceivingChainKey = receivingChainKey;
             MessageNumberSending = messageNumberSending;
             MessageNumberReceiving = messageNumberReceiving;
             SessionId = sessionId ?? Guid.NewGuid().ToString();
@@ -121,12 +119,12 @@ namespace LibEmiddle.Domain // Adjust namespace as needed
         /// <summary>
         /// Current Sending Chain Key (CKs), if initialized. Null otherwise.
         /// </summary>
-        public byte[] SendingChainKey { get; } = Array.Empty<byte>();
+        public byte[]? SendingChainKey { get; }
 
         /// <summary>
         /// Current Receiving Chain Key (CKr), if initialized. Null otherwise.
         /// </summary>
-        public byte[] ReceivingChainKey { get; } = Array.Empty<byte>();
+        public byte[]? ReceivingChainKey { get; }
 
         /// <summary>
         /// Number of messages sent using the current sending chain key (Ns).

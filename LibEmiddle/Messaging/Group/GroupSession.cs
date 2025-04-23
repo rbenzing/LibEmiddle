@@ -136,21 +136,29 @@ namespace LibEmiddle.Messaging.Group
         /// Creates a new GroupSession instance representing the state after a key rotation.
         /// </summary>
         /// <param name="newChainKey">The new Chain Key.</param>
+        /// <param name="keyRotationTimestamp">Optional timestamp for the key rotation. If not provided, current time is used.</param>
         /// <returns>A new GroupSession instance with the updated key and reset iteration.</returns>
         /// <exception cref="ArgumentNullException">If newChainKey is null.</exception>
         /// <exception cref="ArgumentException">If newChainKey has invalid length.</exception>
-        public GroupSession WithRotatedKey(byte[] newChainKey)
+        public GroupSession WithRotatedKey(byte[] newChainKey, long keyRotationTimestamp = 0)
         {
             // Validation happens in constructor
-            return new GroupSession(
+            var timestamp = keyRotationTimestamp > 0 ? keyRotationTimestamp : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            var newSession = new GroupSession(
                 groupId: this.GroupId,
                 chainKey: newChainKey, // Constructor will validate and clone
                 iteration: this.Iteration + 1, // Increment the iteration
                 creatorIdentityKey: this.CreatorIdentityKey, // Creator doesn't change
                 creationTimestamp: this.CreationTimestamp, // Group creation time doesn't change
-                keyEstablishmentTimestamp: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), // Update key time
+                keyEstablishmentTimestamp: timestamp, // Update key time
                 metadata: this.Metadata // Metadata persists
             );
+
+            // Set the last key rotation timestamp
+            newSession.LastKeyRotation = timestamp;
+
+            return newSession;
         }
 
         /// <summary>

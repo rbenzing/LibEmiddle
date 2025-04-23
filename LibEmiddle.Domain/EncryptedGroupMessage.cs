@@ -6,6 +6,11 @@
     public class EncryptedGroupMessage
     {
         /// <summary>
+        /// Unique message identifier
+        /// </summary>
+        public string? MessageId { get; set; }
+
+        /// <summary>
         /// Group identifier
         /// </summary>
         public string? GroupId { get; set; }
@@ -32,13 +37,27 @@
         public long Timestamp { get; set; }
 
         /// <summary>
-        /// Message identifier for access control and replay protection
+        /// Timestamp of the last key rotation (helps enforce forward secrecy)
         /// </summary>
-        public string? MessageId { get; set; }
+        public long KeyRotationTimestamp { get; set; }
 
         /// <summary>
         /// Chain key iteration number for ratchet protocol
         /// </summary>
         public uint Iteration { get; set; }
+
+        /// <summary>
+        /// Validates that all required fields are present
+        /// </summary>
+        /// <returns>True if the message is valid</returns>
+        public bool IsValid()
+        {
+            return !string.IsNullOrEmpty(GroupId) &&
+                   !string.IsNullOrEmpty(MessageId) &&
+                   SenderIdentityKey != null &&
+                   Ciphertext != null &&
+                   Nonce != null &&
+                   Timestamp > 0;
+        }
     }
 }

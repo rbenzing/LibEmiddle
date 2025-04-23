@@ -13,8 +13,8 @@ namespace LibEmiddle.Domain
         public string? DHRatchetPrivateKey { get; set; } // Store private key securely!
         public string? RemoteDHRatchetKey { get; set; }
         public string? RootKey { get; set; }
-        public string? SendingChainKey { get; set; } // Nullable
-        public string? ReceivingChainKey { get; set; } // Nullable
+        public string? SendingChainKey { get; set; }
+        public string? ReceivingChainKey { get; set; }
         public int MessageNumberSending { get; set; }
         public int MessageNumberReceiving { get; set; }
         public string? SessionId { get; set; }

@@ -23,6 +23,7 @@ namespace LibEmiddle.Messaging.Group
         {
             public uint Iteration { get; init; }
             public byte[] ChainKey { get; init; } = Array.Empty<byte>();
+            public long LastRotationTimestamp { get; init; }
 
             // Method to securely clear the sensitive chain key
             public void Clear() => SecureMemory.SecureClear(ChainKey);
@@ -529,14 +530,17 @@ namespace LibEmiddle.Messaging.Group
             {
                 if (_receivedStates.TryRemove(key, out ReceivedSenderKeyState? removedState))
                 {
+                    // Securely clear the removed state
                     removedState?.Clear();
                     anyRemoved = true;
                 }
             }
 
+            LoggingManager.LogInformation(nameof(SenderKeyDistribution),
+                $"Removed {keysToRemove.Count} distribution states for group {groupId}");
+
             return anyRemoved;
         }
-
         /// <summary>
         /// Securely clears all stored keys.
         /// </summary>

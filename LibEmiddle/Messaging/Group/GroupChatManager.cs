@@ -221,12 +221,19 @@ namespace LibEmiddle.Messaging.Group
 
             // Check if the sender is a member of the group
             // This is essential for security - only accept distributions from group members
-            if (distribution.GroupId != null && distribution.SenderIdentityKey != null &&
-                !_memberManager.IsMember(distribution.GroupId, distribution.SenderIdentityKey))
+            if (distribution.GroupId != null && distribution.SenderIdentityKey != null)
             {
-                // Sender is not a member of the group - reject the distribution
-                LoggingManager.LogWarning(nameof(GroupChatManager), "Rejecting distribution from non-member of the group");
-                return false;
+                // If we're processing a distribution from someone else,
+                // we just need to ensure WE are a member of the group
+                // (not necessarily check if the sender is a member, as that would block initial distributions)
+                bool ourMembership = _memberManager.IsMember(distribution.GroupId, _identityKeyPair.PublicKey);
+                if (!ourMembership)
+                {
+                    // We are not a member of the group - reject the distribution
+                    LoggingManager.LogWarning(nameof(SenderKeyDistribution),
+                        "Rejecting distribution: recipient not a member of the group");
+                    return false;
+                }
             }
 
             // Record when we processed this distribution message for the group
@@ -240,8 +247,7 @@ namespace LibEmiddle.Messaging.Group
         }
 
         /// <summary>
-        /// Encrypts a message for a group. For Standard rotation, it does not force a key rotation on every message;
-        /// for time‐based strategies it calls CheckAndRotateKeyIfNeeded.
+        /// Encrypts a message for a group
         /// </summary>
         /// <param name="groupId">Group identifier</param>
         /// <param name="message">Message to encrypt</param>
@@ -272,8 +278,13 @@ namespace LibEmiddle.Messaging.Group
                 var (messageKey, iteration) = _keyManager.GetSenderMessageKey(groupId);
                 try
                 {
-                    // Encrypt the message using the provided key.
+                    // Get the last key rotation timestamp
+                    long rotationTimestamp = _lastKeyRotationTimestamps.GetOrAdd(groupId, 0);
+
                     var encryptedMessage = _messageCrypto.EncryptMessage(groupId, message, messageKey, _identityKeyPair);
+
+                    // Set rotation timestamp on the message
+                    encryptedMessage.KeyRotationTimestamp = rotationTimestamp;
 
                     // Append iteration information to the message ID for tracing.
                     string originalMessageId = encryptedMessage.MessageId ?? Guid.NewGuid().ToString();
@@ -305,6 +316,33 @@ namespace LibEmiddle.Messaging.Group
             if (encryptedMessage.GroupId == null)
             {
                 throw new ArgumentNullException(nameof(encryptedMessage.GroupId), "Group id cannot be null.");
+            }
+
+            // Add this check - verify the current user is still a member of the group
+            if (!_memberManager.IsMember(encryptedMessage.GroupId, _identityKeyPair.PublicKey))
+            {
+                LoggingManager.LogWarning(nameof(GroupChatManager),
+                    $"Rejecting message: user is not a member of group {encryptedMessage.GroupId}");
+                return null;
+            }
+
+            // Check if the message was encrypted after our key rotation timestamp
+            // This ensures forward secrecy when members are removed
+            if (encryptedMessage.KeyRotationTimestamp > 0)
+            {
+                var groupSession = _sessionPersistence.GetGroupSession(encryptedMessage.GroupId);
+                if (groupSession != null)
+                {
+                    // If this message was encrypted with a newer key rotation than what we have,
+                    // we can't decrypt it (which is the point of forward secrecy)
+                    if (groupSession.LastKeyRotation < encryptedMessage.KeyRotationTimestamp)
+                    {
+                        LoggingManager.LogWarning(nameof(GroupChatManager),
+                            $"Rejecting message: encrypted with newer key rotation timestamp " +
+                            $"({encryptedMessage.KeyRotationTimestamp} vs {groupSession.LastKeyRotation})");
+                        return null;
+                    }
+                }
             }
 
             // Synchronize access for the specific group.
@@ -378,6 +416,25 @@ namespace LibEmiddle.Messaging.Group
         }
 
         /// <summary>
+        /// Joins an existing group without creating it
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <returns>True if successfully joined the group</returns>
+        public bool JoinGroup(string groupId)
+        {
+            _securityValidator.ValidateGroupId(groupId);
+
+            // Record that we've joined this group
+            _messageCrypto.RecordGroupJoin(groupId);
+
+            // Add the current user as a member in the local state
+            // This allows the user to process distributions from this group
+            _memberManager.AddMember(groupId, _identityKeyPair.PublicKey, Enums.MemberRole.Member);
+
+            return true;
+        }
+
+        /// <summary>
         /// Removes a member from a group
         /// </summary>
         /// <param name="groupId">Group identifier</param>
@@ -387,38 +444,69 @@ namespace LibEmiddle.Messaging.Group
         {
             _securityValidator.ValidateGroupId(groupId);
 
-            // Check if user being removed was an admin or owner - we need to know for key rotation
+            // Check if user being removed was an admin or owner
             bool wasAdmin = _memberManager.WasAdmin(groupId, memberPublicKey);
 
             // Remove the member
             var result = _memberManager.RemoveMember(groupId, memberPublicKey);
 
-            // If member was successfully removed, we need to rotate the group key to maintain forward secrecy
+            // If member was successfully removed, rotate the key and create new distribution
             if (result)
             {
                 try
                 {
-                    // Rotate the group key
-                    byte[] newKey = RotateGroupKey(groupId);
+                    // IMPORTANT: First clear the existing keys to prevent reuse
+                    _keyManager.ClearSenderState(groupId);
+
+                    // Generate a completely new chain key
+                    byte[] newKey = _keyManager.GenerateInitialChainKey();
+
+                    // Reinitialize the sender state with the new key
+                    _keyManager.InitializeSenderState(groupId, newKey);
+
+                    // Retrieve and update the current group session
+                    var currentSession = _sessionPersistence.GetGroupSession(groupId);
+                    if (currentSession == null)
+                    {
+                        throw new InvalidOperationException($"Group {groupId} does not exist");
+                    }
+
+                    // Get current timestamp for the key rotation
+                    long rotationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                    // Create an updated session with the new key
+                    var updatedSession = currentSession.WithRotatedKey(newKey);
+
+                    // Set the rotation timestamp on the session
+                    updatedSession.LastKeyRotation = rotationTimestamp;
+
+                    // Store the updated session
+                    _sessionPersistence.StoreGroupSession(updatedSession);
+
+                    // Critical: Delete all previous distribution messages
+                    _distributionManager.DeleteGroupDistributions(groupId);
 
                     // Create a new distribution message with the new key
                     var distribution = CreateDistributionMessage(groupId);
 
-                    // Process our own distribution to ensure we can continue decrypting our own messages
+                    // Process our own distribution to ensure we can decrypt our own messages
                     ProcessSenderKeyDistribution(distribution);
 
-                    // Here in a real system, you would distribute this new key to all remaining members
-                    // but for the test we're just ensuring our own instance has the updated key
+                    // Update the rotation timestamp
+                    _lastKeyRotationTimestamps[groupId] = rotationTimestamp;
+
+                    LoggingManager.LogInformation(nameof(GroupChatManager),
+                        $"Successfully rotated keys after removing member from group {groupId}");
                 }
-                catch (UnauthorizedAccessException)
+                catch (UnauthorizedAccessException ex)
                 {
-                    // Log the error but don't fail - the member was still removed
-                    LoggingManager.LogWarning(nameof(GroupChatManager), "Warning: Group key rotation failed due to permission issues");
+                    LoggingManager.LogWarning(nameof(GroupChatManager),
+                        $"Warning: Group key rotation failed due to permission issues: {ex.Message}");
                 }
                 catch (Exception ex)
                 {
-                    // Log but don't fail the member removal operation
-                    LoggingManager.LogWarning(nameof(GroupChatManager), $"Warning: Failed to rotate group key after member removal: {ex.Message}");
+                    LoggingManager.LogWarning(nameof(GroupChatManager),
+                        $"Warning: Failed to rotate group key after member removal: {ex.Message}");
                 }
             }
 

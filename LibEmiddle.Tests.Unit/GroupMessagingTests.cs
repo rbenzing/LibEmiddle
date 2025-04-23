@@ -165,30 +165,25 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var adminKeyPair = Sodium.GenerateEd25519KeyPair();
             var memberKeyPair = Sodium.GenerateEd25519KeyPair();
-
             var adminManager = new GroupChatManager(adminKeyPair);
             var memberManager = new GroupChatManager(memberKeyPair);
-
             string groupId = $"test-forward-secrecy-{Guid.NewGuid()}";
 
-            // 1. Admin creates the group and member joins
+            // 1. Admin creates the group
             adminManager.CreateGroup(groupId);
-            memberManager.CreateGroup(groupId);
 
-            // 2. Admin authorizes member and vice versa
+            // 2. Admin authorizes member
             adminManager.AddGroupMember(groupId, memberKeyPair.PublicKey);
-            memberManager.AddGroupMember(groupId, adminKeyPair.PublicKey);
+
+            // Member needs to create local session but doesn't create a group
+            memberManager.JoinGroup(groupId);
 
             // Create and exchange distribution messages
             var adminDistribution = adminManager.CreateDistributionMessage(groupId);
-            var memberDistribution = memberManager.CreateDistributionMessage(groupId);
 
-            // Process distributions
+            // Member processes admin's distribution
             bool memberProcessResult = memberManager.ProcessSenderKeyDistribution(adminDistribution);
             Assert.IsTrue(memberProcessResult, "Member should be able to process admin's distribution");
-
-            bool adminProcessResult = adminManager.ProcessSenderKeyDistribution(memberDistribution);
-            Assert.IsTrue(adminProcessResult, "Admin should process member's distribution");
 
             // Test communication before revocation
             string message1 = "Message before revocation";

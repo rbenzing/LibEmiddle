@@ -155,6 +155,8 @@ namespace LibEmiddle.KeyExchange
                     string.IsNullOrWhiteSpace(sessionDto.DHRatchetPrivateKey) || // Private key is essential state
                     string.IsNullOrWhiteSpace(sessionDto.RemoteDHRatchetKey) ||
                     string.IsNullOrWhiteSpace(sessionDto.RootKey) ||
+                    string.IsNullOrWhiteSpace(sessionDto.SendingChainKey) ||
+                    string.IsNullOrWhiteSpace(sessionDto.ReceivingChainKey) ||
                     string.IsNullOrWhiteSpace(sessionDto.SessionId))
                 {
                     throw new InvalidDataException("Deserialized session data is missing required fields.");
@@ -165,8 +167,8 @@ namespace LibEmiddle.KeyExchange
                 byte[] dhPrivateKey = Convert.FromBase64String(sessionDto.DHRatchetPrivateKey);
                 byte[] remoteDHKey = Convert.FromBase64String(sessionDto.RemoteDHRatchetKey);
                 byte[] rootKey = Convert.FromBase64String(sessionDto.RootKey);
-                byte[]? sendingChainKey = !string.IsNullOrEmpty(sessionDto.SendingChainKey) ? Convert.FromBase64String(sessionDto.SendingChainKey) : null;
-                byte[]? receivingChainKey = !string.IsNullOrEmpty(sessionDto.ReceivingChainKey) ? Convert.FromBase64String(sessionDto.ReceivingChainKey) : null;
+                byte[] sendingChainKey = Convert.FromBase64String(sessionDto.SendingChainKey);
+                byte[] receivingChainKey = Convert.FromBase64String(sessionDto.ReceivingChainKey);
 
                 // Reconstruct immutable collections
                 var recentlyProcessedIds = (sessionDto.RecentlyProcessedIds ?? Enumerable.Empty<Guid>()).ToImmutableList();

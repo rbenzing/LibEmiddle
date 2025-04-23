@@ -26,6 +26,10 @@ namespace LibEmiddle.Messaging.Group
         private readonly ConcurrentDictionary<string, object> _groupLocks =
             new ConcurrentDictionary<string, object>();
 
+        // Add new field to track when keys were last rotated
+        private readonly ConcurrentDictionary<string, long> _lastKeyRotationTimestamps =
+            new ConcurrentDictionary<string, long>();
+
         /// <summary>
         /// Encrypts a message for a group using the provided message key
         /// </summary>
@@ -73,7 +77,9 @@ namespace LibEmiddle.Messaging.Group
                     Ciphertext = ciphertext,
                     Nonce = nonce,
                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    MessageId = Guid.NewGuid().ToString()
+                    MessageId = Guid.NewGuid().ToString(),
+                    // Add the key rotation timestamp to allow recipients to validate it's a new-key message
+                    KeyRotationTimestamp = _lastKeyRotationTimestamps.TryGetValue(groupId, out var timestamp) ? timestamp : 0
                 };
 
                 return encryptedMessage;
