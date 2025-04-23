@@ -35,7 +35,7 @@ namespace LibEmiddle.MultiDevice
         /// <summary>
         /// Creates a new multi-device manager
         /// </summary>
-        /// <param name="deviceKeyPair">This device's key pair</param>
+        /// <param name="deviceKeyPair">This device's Ed25519 key pair</param>
         public DeviceManager(KeyPair deviceKeyPair)
         {
             if (deviceKeyPair.PublicKey == null || deviceKeyPair.PublicKey.Length == 0)
@@ -65,40 +65,52 @@ namespace LibEmiddle.MultiDevice
             if (devicePublicKey == null)
                 throw new ArgumentNullException(nameof(devicePublicKey));
 
-            // Validate key length
-            if (devicePublicKey.Length != Constants.X25519_KEY_SIZE)
-            {
-                throw new ArgumentException(
-                    $"Device public key must be {Constants.X25519_KEY_SIZE} bytes",
-                    nameof(devicePublicKey));
-            }
-
             // Check if device was previously revoked
             if (IsDeviceRevoked(devicePublicKey))
                 throw new SecurityException("Cannot add a previously revoked device");
 
-            // Validate X25519 public key if it's that length
-            if (devicePublicKey.Length == Constants.X25519_KEY_SIZE &&
-                !Sodium.ValidateX25519PublicKey(devicePublicKey))
+            // Normalize the key format
+            byte[]? normalizedKey = null;
+            try
             {
-                throw new ArgumentException("Invalid X25519 public key", nameof(devicePublicKey));
-            }
+                // Handle X25519 format (common case)
+                if (devicePublicKey.Length == Constants.X25519_KEY_SIZE)
+                {
+                    // Validate X25519 public key
+                    if (!Sodium.ValidateX25519PublicKey(devicePublicKey))
+                    {
+                        throw new ArgumentException("Invalid X25519 public key", nameof(devicePublicKey));
+                    }
+                    normalizedKey = (byte[])devicePublicKey.Clone();
+                }
+                // Handle Ed25519 format
+                else if (devicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
+                {
+                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
+                }
+                else
+                {
+                    throw new ArgumentException(
+                        $"Device public key must be {Constants.X25519_KEY_SIZE} or {Constants.ED25519_PUBLIC_KEY_SIZE} bytes",
+                        nameof(devicePublicKey));
+                }
 
-            // Convert key to X25519 if needed
-            byte[] finalKey;
-            try { 
-                // If it's an Ed25519 public key, convert it to X25519
-                finalKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
+                // Add to dictionary using Base64 representation of the key as dictionary key
+                string keyBase64 = Convert.ToBase64String(normalizedKey);
+                _linkedDevices.TryAdd(keyBase64, normalizedKey);
+
+                // Important: Set normalizedKey to null to prevent it from being cleared in finally block
+                // since it's now stored in the dictionary
+                normalizedKey = null;
             }
-            catch
+            finally
             {
-                // Otherwise, use as is (already X25519)
-                finalKey = (byte[])devicePublicKey.Clone();
+                // Clear the normalized key if we didn't store it successfully
+                if (normalizedKey != null)
+                {
+                    SecureMemory.SecureClear(normalizedKey);
+                }
             }
-
-            // Add to dictionary using Base64 representation of the key as dictionary key to prevent duplicates
-            string keyBase64 = Convert.ToBase64String(finalKey);
-            _linkedDevices.TryAdd(keyBase64, finalKey);
         }
 
         /// <summary>
@@ -113,17 +125,18 @@ namespace LibEmiddle.MultiDevice
             if (devicePublicKey == null)
                 throw new ArgumentNullException(nameof(devicePublicKey));
 
-            byte[]? finalKey = null;
+            byte[]? normalizedKey = null;
             try
             {
-                // Convert key to X25519 if needed
-                if (devicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
+                // Handle X25519 format (common case)
+                if (devicePublicKey.Length == Constants.X25519_KEY_SIZE)
                 {
-                    finalKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
+                    normalizedKey = (byte[])devicePublicKey.Clone();
                 }
-                else if (devicePublicKey.Length == Constants.X25519_KEY_SIZE)
+                // Handle Ed25519 format
+                else if (devicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                 {
-                    finalKey = (byte[])devicePublicKey.Clone();
+                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
                 }
                 else
                 {
@@ -133,7 +146,7 @@ namespace LibEmiddle.MultiDevice
                 }
 
                 // Use Base64 representation as dictionary key
-                string keyBase64 = Convert.ToBase64String(finalKey);
+                string keyBase64 = Convert.ToBase64String(normalizedKey);
 
                 // Try to remove and securely clear the removed key if successful
                 if (_linkedDevices.TryRemove(keyBase64, out byte[]? removedKey))
@@ -150,9 +163,9 @@ namespace LibEmiddle.MultiDevice
             finally
             {
                 // Always securely clear the temporary key
-                if (finalKey != null)
+                if (normalizedKey != null)
                 {
-                    SecureMemory.SecureClear(finalKey);
+                    SecureMemory.SecureClear(normalizedKey);
                 }
             }
         }
@@ -439,31 +452,41 @@ namespace LibEmiddle.MultiDevice
         {
             ThrowIfDisposed();
 
-            if (devicePublicKey.IsEmpty || devicePublicKey.Length != Constants.X25519_KEY_SIZE)
+            if (devicePublicKey.IsEmpty)
                 return false;
 
-            byte[]? finalKey = null;
+            byte[]? normalizedKey = null;
             try
             {
-                // TODO: Make this better through context
-                // Convert key to X25519 format if needed
-                try
+                // Handle X25519 format (common case)
+                if (devicePublicKey.Length == Constants.X25519_KEY_SIZE)
                 {
-                    finalKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey.ToArray());
+                    normalizedKey = devicePublicKey.ToArray();
                 }
-                catch
+                // Handle Ed25519 format
+                else if (devicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                 {
-                    finalKey = devicePublicKey.ToArray();
+                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey.ToArray());
+                }
+                else
+                {
+                    return false; // Invalid key length
                 }
 
-                string keyBase64 = Convert.ToBase64String(finalKey);
+                string keyBase64 = Convert.ToBase64String(normalizedKey);
                 return _linkedDevices.ContainsKey(keyBase64);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogWarning(nameof(DeviceManager),
+                    $"Error in IsDeviceLinked: {ex.Message}");
+                return false;
             }
             finally
             {
-                if (finalKey != null)
+                if (normalizedKey != null)
                 {
-                    SecureMemory.SecureClear(finalKey);
+                    SecureMemory.SecureClear(normalizedKey);
                 }
             }
         }
@@ -475,31 +498,42 @@ namespace LibEmiddle.MultiDevice
         /// <returns>True if the device was revoked</returns>
         public bool IsDeviceRevoked(byte[] devicePublicKey)
         {
-            if (devicePublicKey == null || devicePublicKey.Length != Constants.X25519_KEY_SIZE)
+            if (devicePublicKey == null)
                 return false;
 
-            // Convert key to X25519 if needed and then to Base64 for lookup
-            byte[]? finalKey = null;
+            byte[]? normalizedKey = null;
             try
             {
-                // TODO: Make this better through context
-                // Convert key to X25519 format if needed
-                try
-                { 
-                    finalKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
-                } catch { 
-                    finalKey = (byte[])devicePublicKey.Clone();
+                // Handle X25519 format (common case)
+                if (devicePublicKey.Length == Constants.X25519_KEY_SIZE)
+                {
+                    normalizedKey = (byte[])devicePublicKey.Clone();
+                }
+                // Handle Ed25519 format
+                else if (devicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
+                {
+                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
+                }
+                else
+                {
+                    return false; // Invalid key length
                 }
 
-                string deviceId = Convert.ToBase64String(finalKey);
+                string deviceId = Convert.ToBase64String(normalizedKey);
                 return _revokedDevices.ContainsKey(deviceId);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogWarning(nameof(DeviceManager),
+                    $"Error in IsDeviceRevoked: {ex.Message}");
+                return false;
             }
             finally
             {
                 // Always securely clear sensitive key material
-                if (finalKey != null)
+                if (normalizedKey != null)
                 {
-                    SecureMemory.SecureClear(finalKey);
+                    SecureMemory.SecureClear(normalizedKey);
                 }
             }
         }
@@ -565,11 +599,19 @@ namespace LibEmiddle.MultiDevice
 
             if (!_linkedDevices.ContainsKey(deviceId))
             {
-                // 2. Not found – maybe the caller passed the Ed25519 key, so convert it.
-                if (devicePublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
-                    throw new ArgumentException("Unknown key format", nameof(devicePublicKey));
+                try
+                {
+                    // see if the key can be converted
+                    byte[]? X25519PublicKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
+                    if (X25519PublicKey != null)
+                    {
+                        devicePublicKey = X25519PublicKey;
+                    }
+                } catch
+                {
+                    // do nothing
+                }
 
-                devicePublicKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
                 deviceId = Convert.ToBase64String(devicePublicKey);
 
                 if (!_linkedDevices.ContainsKey(deviceId))
@@ -613,23 +655,57 @@ namespace LibEmiddle.MultiDevice
             if (revocationMessage.RevokedDeviceKey == null || revocationMessage.RevokedDeviceKey.Length == 0)
                 return false;
 
-            // The key in the revocation message is already in the format we need
-            // Use it directly to create the Base64 representation for dictionary lookup
-            string deviceId = Convert.ToBase64String(revocationMessage.RevokedDeviceKey);
+            // Determine the key format and convert if necessary
+            byte[]? normalizedKey = null;
+            string deviceId;
 
-            // Remove the device if it exists
-            bool removed = _linkedDevices.TryRemove(deviceId, out byte[]? removedKey);
-
-            // Securely clear the removed key if it exists
-            if (removedKey != null)
+            try
             {
-                SecureMemory.SecureClear(removedKey);
+                // First, try to handle the common case where the key is already X25519
+                if (revocationMessage.RevokedDeviceKey.Length == Constants.X25519_KEY_SIZE)
+                {
+                    normalizedKey = (byte[])revocationMessage.RevokedDeviceKey.Clone();
+                }
+                // Then try Ed25519 format as fallback
+                else if (revocationMessage.RevokedDeviceKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
+                {
+                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(revocationMessage.RevokedDeviceKey);
+                }
+                else
+                {
+                    LoggingManager.LogWarning(nameof(DeviceManager),
+                        $"Invalid key length in revocation message: {revocationMessage.RevokedDeviceKey.Length} bytes");
+                    return false;
+                }
+
+                deviceId = Convert.ToBase64String(normalizedKey);
+
+                // Remove the device if it exists
+                bool removed = _linkedDevices.TryRemove(deviceId, out byte[]? removedKey);
+
+                // Securely clear the removed key if it exists
+                if (removedKey != null)
+                {
+                    SecureMemory.SecureClear(removedKey);
+                }
+
+                // Add to revoked devices tracking regardless of whether removal succeeded
+                _revokedDevices[deviceId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                // Debugging info for test cases
+                LoggingManager.LogDebug(nameof(DeviceManager),
+                    $"ProcessRevocationMessage: deviceId={deviceId}, removed={removed}, linkedDevices={_linkedDevices.Count}");
+
+                return removed;
             }
-
-            // Add to revoked devices tracking
-            _revokedDevices[deviceId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-            return removed;
+            finally
+            {
+                // Always clear the temporary key
+                if (normalizedKey != null)
+                {
+                    SecureMemory.SecureClear(normalizedKey);
+                }
+            }
         }
 
         /// <summary>

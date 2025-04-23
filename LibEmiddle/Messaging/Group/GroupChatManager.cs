@@ -109,6 +109,9 @@ namespace LibEmiddle.Messaging.Group
                 keyEstablishmentTimestamp: currentTime,
                 metadata: null);
 
+            // Set the LastKeyRotation timestamp to match current time
+            groupSession.LastKeyRotation = currentTime;  // Add this line
+
             // Store the group session
             _sessionPersistence.StoreGroupSession(groupSession);
 
@@ -278,8 +281,11 @@ namespace LibEmiddle.Messaging.Group
                 var (messageKey, iteration) = _keyManager.GetSenderMessageKey(groupId);
                 try
                 {
-                    // Get the last key rotation timestamp
-                    long rotationTimestamp = _lastKeyRotationTimestamps.GetOrAdd(groupId, 0);
+                    // Get the last key rotation timestamp, ensuring it's synchronized with the session
+                    long rotationTimestamp = groupSession.LastKeyRotation;
+
+                    // Update our tracking dictionary if needed
+                    _lastKeyRotationTimestamps[groupId] = rotationTimestamp;
 
                     var encryptedMessage = _messageCrypto.EncryptMessage(groupId, message, messageKey, _identityKeyPair);
 

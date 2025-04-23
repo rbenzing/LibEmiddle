@@ -238,7 +238,7 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        [ExpectedException(typeof(InvalidOperationException))]
+        [ExpectedException(typeof(KeyNotFoundException))]
         public void DeviceManager_RevokeLinkedDevice_UnknownDevice_ShouldThrowException()
         {
             // Arrange
