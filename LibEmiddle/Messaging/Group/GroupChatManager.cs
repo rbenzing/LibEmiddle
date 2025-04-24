@@ -226,15 +226,23 @@ namespace LibEmiddle.Messaging.Group
             // This is essential for security - only accept distributions from group members
             if (distribution.GroupId != null && distribution.SenderIdentityKey != null)
             {
-                // If we're processing a distribution from someone else,
-                // we just need to ensure WE are a member of the group
-                // (not necessarily check if the sender is a member, as that would block initial distributions)
+                // First, ensure WE are a member of the group
                 bool ourMembership = _memberManager.IsMember(distribution.GroupId, _identityKeyPair.PublicKey);
                 if (!ourMembership)
                 {
                     // We are not a member of the group - reject the distribution
                     LoggingManager.LogWarning(nameof(SenderKeyDistribution),
                         "Rejecting distribution: recipient not a member of the group");
+                    return false;
+                }
+
+                // IMPORTANT: Also verify that the SENDER is a member of the group
+                bool senderMembership = _memberManager.IsMember(distribution.GroupId, distribution.SenderIdentityKey);
+                if (!senderMembership)
+                {
+                    // Sender is not a member of the group - reject the distribution
+                    LoggingManager.LogWarning(nameof(SenderKeyDistribution),
+                        "Rejecting distribution: sender not a member of the group");
                     return false;
                 }
             }

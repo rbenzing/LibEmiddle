@@ -104,8 +104,14 @@ namespace LibEmiddle.Tests.Unit
             var identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var bobKeyPair = Sodium.GenerateEd25519KeyPair();
 
+            var identityX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(identityKeyPair.PublicKey);
+            var identityX25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(identityKeyPair.PrivateKey);
+
+            var bobX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(bobKeyPair.PublicKey);
+            var bobX25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(bobKeyPair.PrivateKey);
+
             // Create a shared secret (simulating X3DH)
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, identityKeyPair.PrivateKey);
+            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobX25519Public, identityX25519Private);
 
             // Initialize Double Ratchet
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);

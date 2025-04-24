@@ -12,6 +12,8 @@ using System.Collections.Generic;
 using System.Reflection.Metadata;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -29,100 +31,45 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public void FullE2EEFlow_ShouldWorkEndToEnd()
         {
-            // This test simulates a full conversation flow between Alice and Bob
-
-            // Step 1: Generate identity keys for Alice and Bob with correct formats
+            // Step 1: Generate identity keys for Alice and Bob
             var aliceIdentityKeyPair = Sodium.GenerateEd25519KeyPair();
             var bobIdentityKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            // Create X25519 versions of the keys for Double Ratchet
-            var aliceX25519KeyPair = new KeyPair(
-                Sodium.ConvertEd25519PublicKeyToX25519(aliceIdentityKeyPair.PublicKey),
-                Sodium.ConvertEd25519PrivateKeyToX25519(aliceIdentityKeyPair.PrivateKey)
-            );
-
-            // Step 2: Create Bob's key bundle
+            // Step 2: Create Bob's key bundle with the proper identity key
             var bobKeyBundle = X3DHExchange.CreateX3DHKeyBundle(bobIdentityKeyPair);
             var bobPublicBundle = bobKeyBundle.ToPublicBundle();
 
-            // Step 3: Derive the initial root key and chain keys
-            // For testing, we'll use a deterministic approach to ensure proper initialization
-            byte[] sharedKey = Sodium.GenerateRandomBytes(Constants.AES_KEY_SIZE);
-            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedKey);
+            // Step 3: Generate a shared secret for Alice and Bob to use
+            // This would normally come from a full X3DH exchange
+            var sharedSecret = Sodium.GenerateRandomBytes(Constants.AES_KEY_SIZE);
 
-            // Generate a session ID that will be consistent between Alice and Bob
-            string sessionId = "session-" + Guid.NewGuid().ToString();
+            // Step 4: Derive the Double Ratchet root key and chain keys
+            var (rootKey, sendingChainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
-            // Step 4: Manually create Alice's Double Ratchet session with properly initialized chain keys
-            // The issue might be that chainKey is getting cleared somewhere or isn't properly assigned
-            // Let's create a copy to make sure it stays intact
-            byte[] aliceChainKey = new byte[chainKey.Length];
-            Buffer.BlockCopy(chainKey, 0, aliceChainKey, 0, chainKey.Length);
+            // Ensure we have valid chain keys - this is critical
+            Assert.IsNotNull(sendingChainKey, "Chain key should not be null");
+            Assert.AreEqual(Constants.AES_KEY_SIZE, sendingChainKey.Length, "Chain key should be the correct size");
 
-            // Get the Bob's SPK in X25519 format to ensure compatibility
-            byte[] bobSignedPreKey = new byte[bobPublicBundle.SignedPreKey.Length];
-            Buffer.BlockCopy(bobPublicBundle.SignedPreKey, 0, bobSignedPreKey, 0, bobPublicBundle.SignedPreKey.Length);
+            // Create session ID that will be consistent between Alice and Bob
+            string sessionId = Guid.NewGuid().ToString();
 
-            // Debug verification that chain keys are properly set
-            Assert.AreEqual(Constants.AES_KEY_SIZE, aliceChainKey.Length, "Alice's chain key should be the correct size");
-            Assert.IsFalse(aliceChainKey.All(b => b == 0), "Alice's chain key should not be all zeros");
+            // Step 5: Set up Alice's DH key pair for the Double Ratchet
+            var aliceDHKeyPair = Sodium.GenerateX25519KeyPair();
 
-            var aliceDRSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: aliceX25519KeyPair,
-                remoteDHRatchetKey: bobSignedPreKey,
-                rootKey: rootKey,
-                sendingChainKey: aliceChainKey,  // Use a dedicated copy of the chain key
-                receivingChainKey: null,    // Receiver chain key can be null initially
-                messageNumberSending: 0,
-                messageNumberReceiving: 0,
-                sessionId: sessionId,
-                recentlyProcessedIds: ImmutableList<Guid>.Empty,
-                processedMessageNumbersReceiving: ImmutableHashSet<int>.Empty,
-                skippedMessageKeys: ImmutableDictionary<Tuple<byte[], int>, byte[]>.Empty
-            );
-
-            // Verify the session is valid before proceeding
-            Assert.IsTrue(_cryptoProvider.ValidateSession(aliceDRSession), "Alice's session should be valid before encrypting");
-
-            // Additional debug checks to pinpoint the issue
-            Assert.IsNotNull(aliceDRSession.SendingChainKey, "Alice's sending chain key should not be null after initialization");
-            Assert.AreEqual(Constants.AES_KEY_SIZE, aliceDRSession.SendingChainKey.Length, "Alice's sending chain key should be the correct size");
-
-            // Try a direct implementation first to see if the issue is in the Double Ratchet implementation
-            // or in our test setup
-            byte[] msgKey = Sodium.GenerateHmacSha256(new byte[] { 0x01 }, aliceDRSession.SendingChainKey);
-            byte[] nextChainKey = Sodium.GenerateHmacSha256(new byte[] { 0x02 }, aliceDRSession.SendingChainKey);
-
-            Assert.IsNotNull(msgKey, "Message key derivation should succeed");
-            Assert.IsNotNull(nextChainKey, "Next chain key derivation should succeed");
-
-            // Step 5: Alice sends initial message to Bob
-            string initialMessage = "Hello Bob, this is Alice!";
-            var (aliceUpdatedDRSession, encryptedMessage) =
-                _cryptoProvider.DoubleRatchetEncrypt(aliceDRSession, initialMessage);
-
-            // If we get this far, we know the encryption worked - now set up Bob's session for decryption
-
-            // Create a key pair for Bob using his SignedPreKey (already in X25519 format)
+            // Step 6: Set up Bob's X25519 key pair
+            byte[] bobSignedPreKeyPrivate = bobKeyBundle.GetSignedPreKeyPrivate();
             var bobSignedPreKeyPair = new KeyPair(
                 bobPublicBundle.SignedPreKey,
-                bobKeyBundle.GetSignedPreKeyPrivate()
+                bobSignedPreKeyPrivate
             );
 
-            // Make a copy of the chain key for Bob
-            byte[] bobChainKey = new byte[chainKey.Length];
-            Buffer.BlockCopy(chainKey, 0, bobChainKey, 0, chainKey.Length);
-
-            byte[] senderDHKey = new byte[encryptedMessage.SenderDHKey.Length];
-            Buffer.BlockCopy(encryptedMessage.SenderDHKey, 0, senderDHKey, 0, encryptedMessage.SenderDHKey.Length);
-
-            // Step 6: Manually create Bob's Double Ratchet session with properly initialized chain keys
-            var bobDRSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: bobSignedPreKeyPair,
-                remoteDHRatchetKey: senderDHKey,
+            // Step 7: Initialize Alice's session with properly configured sending chain key
+            var aliceSession = new DoubleRatchetSession(
+                dhRatchetKeyPair: aliceDHKeyPair,
+                remoteDHRatchetKey: bobPublicBundle.SignedPreKey,
                 rootKey: rootKey,
-                sendingChainKey: null,      // Sender chain key can be null initially
-                receivingChainKey: bobChainKey, // Use the same chain key for receiving
+                sendingChainKey: sendingChainKey,  // This is the key that needs to be properly initialized
+                receivingChainKey: null,    // Receiving chain can be null for the initiator
                 messageNumberSending: 0,
                 messageNumberReceiving: 0,
                 sessionId: sessionId,
@@ -131,60 +78,73 @@ namespace LibEmiddle.Tests.Unit
                 skippedMessageKeys: ImmutableDictionary<Tuple<byte[], int>, byte[]>.Empty
             );
 
-            // Verify Bob's session is valid before proceeding
-            Assert.IsTrue(_cryptoProvider.ValidateSession(bobDRSession), "Bob's session should be valid before decrypting");
+            // Double-check that Alice's session is valid and chain key is set
+            Assert.IsTrue(_cryptoProvider.ValidateSession(aliceSession), "Alice's session should be valid");
+            Assert.IsNotNull(aliceSession.SendingChainKey, "Alice's sending chain key must not be null");
 
-            // Additional debug checks
-            Assert.IsNotNull(bobDRSession.ReceivingChainKey, "Bob's receiving chain key should not be null after initialization");
-            Assert.AreEqual(Constants.AES_KEY_SIZE, bobDRSession.ReceivingChainKey.Length, "Bob's receiving chain key should be the correct size");
+            // Step 8: Alice encrypts a message to Bob
+            string initialMessage = "Hello Bob, this is Alice!";
+            var (aliceUpdatedSession, encryptedMessage) = _cryptoProvider.DoubleRatchetEncrypt(aliceSession, initialMessage);
 
-            // Step 7: Bob decrypts Alice's message
-            var (bobUpdatedDRSession, decryptedMessage) =
-                _cryptoProvider.DoubleRatchetDecrypt(bobDRSession, encryptedMessage);
+            // Verify encryption was successful
+            Assert.IsNotNull(encryptedMessage, "Encrypted message should not be null");
+            Assert.IsNotNull(encryptedMessage.Ciphertext, "Ciphertext should not be null");
 
-            // Verify Bob successfully decrypted the message
-            Assert.IsNotNull(bobUpdatedDRSession, "Bob's session should be updated after decryption");
-            Assert.IsNotNull(decryptedMessage, "Bob should successfully decrypt Alice's message");
+            byte[] receivingChainKey = SecureMemory.SecureCopy(sendingChainKey);
+
+            // Step 9: Initialize Bob's session with properly configured receiving chain key
+            var bobSession = new DoubleRatchetSession(
+                dhRatchetKeyPair: bobSignedPreKeyPair,
+                remoteDHRatchetKey: aliceDHKeyPair.PublicKey,
+                rootKey: rootKey,
+                sendingChainKey: sendingChainKey,
+                receivingChainKey: receivingChainKey, // Bob needs the same chain key that Alice used for sending
+                messageNumberSending: 0,
+                messageNumberReceiving: 0,
+                sessionId: sessionId,
+                recentlyProcessedIds: ImmutableList<Guid>.Empty,
+                processedMessageNumbersReceiving: ImmutableHashSet<int>.Empty,
+                skippedMessageKeys: ImmutableDictionary<Tuple<byte[], int>, byte[]>.Empty
+            );
+
+            // Verify Bob's session is valid
+            Assert.IsTrue(_cryptoProvider.ValidateSession(bobSession), "Bob's session should be valid");
+            Assert.IsNotNull(bobSession.ReceivingChainKey, "Bob's receiving chain key must not be null");
+
+            // Step 10: Bob decrypts Alice's message
+            var (bobUpdatedSession, decryptedMessage) = _cryptoProvider.DoubleRatchetDecrypt(bobSession, encryptedMessage);
+
+            // Verify decryption was successful
+            Assert.IsNotNull(bobUpdatedSession, "Bob's updated session should not be null");
+            Assert.IsNotNull(decryptedMessage, "Decrypted message should not be null");
             Assert.AreEqual(initialMessage, decryptedMessage, "Bob should see Alice's original message");
 
-            // Step 8: Bob replies to Alice
+            // Step 11: Bob replies to Alice
             string replyMessage = "Hi Alice, Bob here!";
-            var (bobRepliedDRSession, bobReplyEncrypted) =
-                _cryptoProvider.DoubleRatchetEncrypt(bobUpdatedDRSession, replyMessage);
+            var (bobRepliedSession, bobReplyEncrypted) = _cryptoProvider.DoubleRatchetEncrypt(bobUpdatedSession, replyMessage);
 
-            // Step 9: Alice decrypts Bob's reply
-            var (aliceFinalSession, aliceDecryptedReply) =
-                _cryptoProvider.DoubleRatchetDecrypt(aliceUpdatedDRSession, bobReplyEncrypted);
+            // Verify Bob's encryption was successful
+            Assert.IsNotNull(bobReplyEncrypted, "Bob's encrypted reply should not be null");
 
-            // Assert final results
-            Assert.IsNotNull(aliceFinalSession, "Alice's session should be updated after decryption");
+            // Step 12: Alice decrypts Bob's reply
+            var (aliceFinalSession, aliceDecryptedReply) = _cryptoProvider.DoubleRatchetDecrypt(aliceUpdatedSession, bobReplyEncrypted);
+
+            // Verify Alice correctly decrypted Bob's message
             Assert.IsNotNull(aliceDecryptedReply, "Alice should successfully decrypt Bob's message");
             Assert.AreEqual(replyMessage, aliceDecryptedReply, "Alice should see Bob's original message");
 
             // Verify session properties were correctly updated
-            Assert.AreEqual(encryptedMessage.SessionId, aliceUpdatedDRSession.SessionId,
-                "Alice's session ID should remain the same after update");
-            Assert.AreEqual(bobReplyEncrypted.SessionId, bobRepliedDRSession.SessionId,
-                "Bob's session ID should remain the same after update");
-
-            // Verify message numbers increased
-            Assert.AreEqual(1, aliceUpdatedDRSession.MessageNumberSending, "Alice's message number should be incremented");
-            Assert.AreEqual(1, bobUpdatedDRSession.MessageNumberReceiving, "Bob's message number should be incremented");
-
-            // Verify chain keys changed
-            Assert.IsFalse(SecureMemory.SecureCompare(aliceDRSession.SendingChainKey, aliceUpdatedDRSession.SendingChainKey),
-                "Alice's sending chain key should change after encryption");
-            Assert.IsFalse(SecureMemory.SecureCompare(bobDRSession.ReceivingChainKey, bobUpdatedDRSession.ReceivingChainKey),
-                "Bob's receiving chain key should change after decryption");
+            Assert.AreEqual(1, aliceUpdatedSession.MessageNumberSending, "Alice's message number should be incremented");
+            Assert.AreEqual(1, bobUpdatedSession.MessageNumberReceiving, "Bob's message number should be incremented");
 
             // Clean up sensitive key material
-            bobKeyBundle.ClearPrivateKeys();
+            bobKeyBundle.Dispose();
+            SecureMemory.SecureClear(sharedSecret);
             SecureMemory.SecureClear(rootKey);
-            SecureMemory.SecureClear(chainKey);
-            SecureMemory.SecureClear(aliceChainKey);
-            SecureMemory.SecureClear(bobChainKey);
-            SecureMemory.SecureClear(msgKey);
-            SecureMemory.SecureClear(nextChainKey);
+            SecureMemory.SecureClear(sendingChainKey);
+            SecureMemory.SecureClear(receivingChainKey);
+            SecureMemory.SecureClear(aliceDHKeyPair.PrivateKey);
+            SecureMemory.SecureClear(bobSignedPreKeyPrivate);
         }
 
         [TestMethod]

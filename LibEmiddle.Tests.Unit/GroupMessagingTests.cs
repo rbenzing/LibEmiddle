@@ -179,6 +179,7 @@ namespace LibEmiddle.Tests.Unit
 
             // 2. Admin authorizes member
             adminManager.AddGroupMember(groupId, memberKeyPair.PublicKey);
+            memberManager.AddGroupMember(groupId, adminKeyPair.PublicKey);
 
             // Member needs to create local session but doesn't create a group
             memberManager.JoinGroup(groupId);
@@ -238,6 +239,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Add trusted members to each other's groups, but NOT the untrusted user
             adminManager.AddGroupMember(groupId, memberKeyPair.PublicKey);
+            memberManager.AddGroupMember(groupId, adminKeyPair.PublicKey);
 
             // Member needs to create local session but doesn't create a group
             memberManager.JoinGroup(groupId);
@@ -357,6 +359,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string groupId = $"test-group-{Guid.NewGuid()}";
+
             var senderKeyPair = Sodium.GenerateEd25519KeyPair();
             var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
 
