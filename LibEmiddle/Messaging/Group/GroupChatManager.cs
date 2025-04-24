@@ -287,10 +287,8 @@ namespace LibEmiddle.Messaging.Group
                     // Update our tracking dictionary if needed
                     _lastKeyRotationTimestamps[groupId] = rotationTimestamp;
 
-                    var encryptedMessage = _messageCrypto.EncryptMessage(groupId, message, messageKey, _identityKeyPair);
-
-                    // Set rotation timestamp on the message
-                    encryptedMessage.KeyRotationTimestamp = rotationTimestamp;
+                    // Pass the rotation timestamp to EncryptMessage
+                    var encryptedMessage = _messageCrypto.EncryptMessage(groupId, message, messageKey, _identityKeyPair, rotationTimestamp);
 
                     // Append iteration information to the message ID for tracing.
                     string originalMessageId = encryptedMessage.MessageId ?? Guid.NewGuid().ToString();
@@ -324,7 +322,9 @@ namespace LibEmiddle.Messaging.Group
                 throw new ArgumentNullException(nameof(encryptedMessage.GroupId), "Group id cannot be null.");
             }
 
-            // Add this check - verify the current user is still a member of the group
+            // CRITICAL: Add these membership checks BEFORE attempting to decrypt
+
+            // 1. First verify current user is still a member of the group
             if (!_memberManager.IsMember(encryptedMessage.GroupId, _identityKeyPair.PublicKey))
             {
                 LoggingManager.LogWarning(nameof(GroupChatManager),
@@ -332,23 +332,12 @@ namespace LibEmiddle.Messaging.Group
                 return null;
             }
 
-            // Check if the message was encrypted after our key rotation timestamp
-            // This ensures forward secrecy when members are removed
-            if (encryptedMessage.KeyRotationTimestamp > 0)
+            // 2. Specifically check if the user was removed before this message was created
+            if (_memberManager.WasRemovedBeforeTimestamp(encryptedMessage.GroupId, _identityKeyPair.PublicKey, encryptedMessage.Timestamp))
             {
-                var groupSession = _sessionPersistence.GetGroupSession(encryptedMessage.GroupId);
-                if (groupSession != null)
-                {
-                    // If this message was encrypted with a newer key rotation than what we have,
-                    // we can't decrypt it (which is the point of forward secrecy)
-                    if (groupSession.LastKeyRotation < encryptedMessage.KeyRotationTimestamp)
-                    {
-                        LoggingManager.LogWarning(nameof(GroupChatManager),
-                            $"Rejecting message: encrypted with newer key rotation timestamp " +
-                            $"({encryptedMessage.KeyRotationTimestamp} vs {groupSession.LastKeyRotation})");
-                        return null;
-                    }
-                }
+                LoggingManager.LogWarning(nameof(GroupChatManager),
+                    $"Rejecting message: message was created after user was removed from group {encryptedMessage.GroupId}");
+                return null;
             }
 
             // Synchronize access for the specific group.

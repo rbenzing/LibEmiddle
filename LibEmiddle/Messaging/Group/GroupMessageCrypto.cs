@@ -37,9 +37,10 @@ namespace LibEmiddle.Messaging.Group
         /// <param name="message">Message to encrypt</param>
         /// <param name="messageKey">Message key for this specific message (from ratchet)</param>
         /// <param name="identityKeyPair">Sender's identity key pair for signing</param>
+        /// <param name="keyRotationTimestamp">The key rotation timestamp</param>
         /// <returns>Encrypted group message</returns>
         public EncryptedGroupMessage EncryptMessage(string groupId, string message, byte[] messageKey,
-            KeyPair identityKeyPair)
+    KeyPair identityKeyPair, long keyRotationTimestamp = 0)
         {
             ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
             ArgumentNullException.ThrowIfNull(message, nameof(message));
@@ -78,9 +79,15 @@ namespace LibEmiddle.Messaging.Group
                     Nonce = nonce,
                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     MessageId = Guid.NewGuid().ToString(),
-                    // Add the key rotation timestamp to allow recipients to validate it's a new-key message
-                    KeyRotationTimestamp = _lastKeyRotationTimestamps.TryGetValue(groupId, out var timestamp) ? timestamp : 0
+                    // Use the provided rotation timestamp, tracking in our internal state for the future
+                    KeyRotationTimestamp = keyRotationTimestamp
                 };
+
+                // Update our internal tracking
+                if (keyRotationTimestamp > 0)
+                {
+                    _lastKeyRotationTimestamps[groupId] = keyRotationTimestamp;
+                }
 
                 return encryptedMessage;
             }

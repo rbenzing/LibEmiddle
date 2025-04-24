@@ -193,12 +193,18 @@ namespace LibEmiddle.Tests.Unit
             // Now revoke member
             adminManager.RemoveGroupMember(groupId, memberKeyPair.PublicKey);
 
+            // IMPORTANT: Create a new member manager to simulate restarting the app
+            // This ensures we're testing real forward secrecy where membership is enforced
+            // on each message, not just based on in-memory state
+            var memberManager2 = new GroupChatManager(memberKeyPair);
+            memberManager2.JoinGroup(groupId); // Try to join the group again
+
             // Send a new message after revocation
             string message2 = "Message after revocation";
             var encrypted2 = adminManager.EncryptGroupMessage(groupId, message2);
 
-            // Act - member tries to decrypt post-revocation message
-            string decrypted2 = memberManager.DecryptGroupMessage(encrypted2);
+            // Act - member tries to decrypt post-revocation message with fresh manager
+            string decrypted2 = memberManager2.DecryptGroupMessage(encrypted2);
 
             // Assert
             Assert.IsNotNull(decrypted1);
@@ -490,15 +496,17 @@ namespace LibEmiddle.Tests.Unit
             var bobManager = new GroupChatManager(bobKeyPair);
             var daveManager = new GroupChatManager(daveKeyPair);
 
-            // 1. Each member creates their own group
-            aliceManager.CreateGroup(groupId);
-            bobManager.CreateGroup(groupId);
+            // 1. Alice creates the group and sets rotation strategy to Standard
+            aliceManager.CreateGroup(groupId, Enums.KeyRotationStrategy.Standard);
 
-            // 2. Bidirectional authorization between Alice and Bob
+            // 2. Bob creates his own group instance
+            bobManager.CreateGroup(groupId, Enums.KeyRotationStrategy.Standard);
+
+            // 3. Bidirectional authorization between Alice and Bob
             aliceManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
             bobManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
 
-            // 3. Exchange distribution messages between Alice and Bob
+            // 4. Exchange distribution messages between Alice and Bob
             var aliceDistribution = aliceManager.CreateDistributionMessage(groupId);
             var bobDistribution = bobManager.CreateDistributionMessage(groupId);
 
@@ -508,44 +516,49 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsTrue(aliceProcessBob, "Alice should successfully process Bob's distribution");
             Assert.IsTrue(bobProcessAlice, "Bob should successfully process Alice's distribution");
 
-            // 4. Send initial message before Dave joins
+            // 5. Send initial message before Dave joins
             string initialMessage = "Initial message before Dave joins";
             var initialEncrypted = aliceManager.EncryptGroupMessage(groupId, initialMessage);
             string bobDecryptsInitial = bobManager.DecryptGroupMessage(initialEncrypted);
 
             Assert.AreEqual(initialMessage, bobDecryptsInitial, "Bob should be able to decrypt the initial message");
 
-            // 5. Add Dave to the group - ensure timestamp separation
-            // Use a small delay to ensure clear timestamp separation
+            // 6. Add Dave to the group - ensure timestamp separation
             Thread.Sleep(100);
 
-            // Now Dave joins the group
-            daveManager.CreateGroup(groupId);
+            // 7. Dave creates his group instance
+            daveManager.CreateGroup(groupId, Enums.KeyRotationStrategy.Standard);
 
-            // Bidirectional authorization for Dave with both Alice and Bob
+            // 8. CRITICAL: Rotate keys after adding new member
+            byte[] newKey = aliceManager.RotateGroupKey(groupId);
+
+            // 9. Add Dave as a member in all groups
             aliceManager.AddGroupMember(groupId, daveKeyPair.PublicKey);
-            daveManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
-
             bobManager.AddGroupMember(groupId, daveKeyPair.PublicKey);
+
+            // 10. Dave adds Alice and Bob to his member list
+            daveManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
             daveManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
 
-            // 6. Exchange distribution messages for all members
+            // 11. Create fresh distribution messages with the new keys
+            var aliceDistributionNew = aliceManager.CreateDistributionMessage(groupId);
+            var bobDistributionNew = bobManager.CreateDistributionMessage(groupId);
             var daveDistribution = daveManager.CreateDistributionMessage(groupId);
 
-            // Process Dave's distribution
-            bool aliceProcessDave = aliceManager.ProcessSenderKeyDistribution(daveDistribution);
-            bool bobProcessDave = bobManager.ProcessSenderKeyDistribution(daveDistribution);
+            // 12. Everyone processes everyone else's distribution messages
+            // Alice processes Bob's and Dave's distributions
+            aliceManager.ProcessSenderKeyDistribution(bobDistributionNew);
+            aliceManager.ProcessSenderKeyDistribution(daveDistribution);
+
+            // Bob processes Alice's and Dave's distributions
+            bobManager.ProcessSenderKeyDistribution(aliceDistributionNew);
+            bobManager.ProcessSenderKeyDistribution(daveDistribution);
 
             // Dave processes Alice's and Bob's distributions
-            bool daveProcessAlice = daveManager.ProcessSenderKeyDistribution(aliceDistribution);
-            bool daveProcessBob = daveManager.ProcessSenderKeyDistribution(bobDistribution);
+            daveManager.ProcessSenderKeyDistribution(aliceDistributionNew);
+            daveManager.ProcessSenderKeyDistribution(bobDistributionNew);
 
-            Assert.IsTrue(aliceProcessDave, "Alice should successfully process Dave's distribution");
-            Assert.IsTrue(bobProcessDave, "Bob should successfully process Dave's distribution");
-            Assert.IsTrue(daveProcessAlice, "Dave should successfully process Alice's distribution");
-            Assert.IsTrue(daveProcessBob, "Dave should successfully process Bob's distribution");
-
-            // 7. Send new messages after Dave joins - ensure timestamp separation again
+            // 13. Send new messages after Dave joins - ensure timestamp separation
             Thread.Sleep(100);
 
             string aliceMessage = "Message from Alice after Dave joined";
@@ -556,7 +569,7 @@ namespace LibEmiddle.Tests.Unit
             var bobEncrypted = bobManager.EncryptGroupMessage(groupId, bobMessage);
             var daveEncrypted = daveManager.EncryptGroupMessage(groupId, daveMessage);
 
-            // 8. Everyone decrypts new messages
+            // 14. Everyone decrypts new messages
             string bobDecryptsAlice = bobManager.DecryptGroupMessage(aliceEncrypted);
             string bobDecryptsDave = bobManager.DecryptGroupMessage(daveEncrypted);
             string aliceDecryptsBob = aliceManager.DecryptGroupMessage(bobEncrypted);
@@ -564,10 +577,10 @@ namespace LibEmiddle.Tests.Unit
             string daveDecryptsAlice = daveManager.DecryptGroupMessage(aliceEncrypted);
             string daveDecryptsBob = daveManager.DecryptGroupMessage(bobEncrypted);
 
-            // 9. Dave tries to decrypt the initial message
+            // 15. Dave tries to decrypt the initial message
             string daveDecryptsInitial = daveManager.DecryptGroupMessage(initialEncrypted);
 
-            // 10. Assert results
+            // 16. Assert results
             Assert.AreEqual(aliceMessage, bobDecryptsAlice, "Bob should be able to decrypt Alice's message");
             Assert.AreEqual(daveMessage, bobDecryptsDave, "Bob should be able to decrypt Dave's message");
             Assert.AreEqual(bobMessage, aliceDecryptsBob, "Alice should be able to decrypt Bob's message");

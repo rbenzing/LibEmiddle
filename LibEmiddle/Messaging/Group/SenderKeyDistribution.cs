@@ -406,6 +406,16 @@ namespace LibEmiddle.Messaging.Group
                 return null;
             }
 
+            // Add a check: if the message timestamp is greater than any distribution the member has processed,
+            // and there was a new distribution message sent after removing the member, 
+            // then the member shouldn't be able to decrypt
+            if (currentState.Iteration < messageIteration)
+            {
+                LoggingManager.LogWarning(nameof(SenderKeyDistribution),
+                    $"Cannot decrypt message with iteration {messageIteration} > current state {currentState.Iteration}");
+                return null;
+            }
+
             if (messageIteration < currentState.Iteration)
             {
                 // Message is from the past relative to our current chain key state

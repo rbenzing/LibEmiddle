@@ -15,6 +15,10 @@ namespace LibEmiddle.Messaging.Group
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, Enums.MemberRole>> _groupMembers =
             new ConcurrentDictionary<string, ConcurrentDictionary<string, Enums.MemberRole>>();
 
+        // Member removed timestamps
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _memberRemovalTimestamps =
+    new ConcurrentDictionary<string, ConcurrentDictionary<string, long>>();
+
         // Tracks removed members who were admins
         private readonly ConcurrentDictionary<string, HashSet<string>> _formerAdmins =
             new ConcurrentDictionary<string, HashSet<string>>();
@@ -161,6 +165,12 @@ namespace LibEmiddle.Messaging.Group
                 return false;
             }
 
+            // Track removal timestamp BEFORE removing the member
+            long removalTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var groupRemovalTimestamps = _memberRemovalTimestamps.GetOrAdd(groupId,
+                _ => new ConcurrentDictionary<string, long>());
+            groupRemovalTimestamps[memberKeyBase64] = removalTimestamp;
+
             // Try to get the current role before removing
             if (members.TryGetValue(memberKeyBase64, out var role))
             {
@@ -177,6 +187,37 @@ namespace LibEmiddle.Messaging.Group
 
             // Remove the member
             return members.TryRemove(memberKeyBase64, out _);
+        }
+
+        /// <summary>
+        /// Checks if the member was removed before a message timestamp
+        /// </summary>
+        /// <param name="groupId"></param>
+        /// <param name="memberPublicKey"></param>
+        /// <param name="messageTimestamp"></param>
+        /// <returns></returns>
+        public bool WasRemovedBeforeTimestamp(string groupId, byte[] memberPublicKey, long messageTimestamp)
+        {
+            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
+            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
+
+            // Convert public key to base64 for lookup
+            string memberKeyBase64 = Convert.ToBase64String(memberPublicKey);
+
+            // Check if we have removal timestamp information for this group
+            if (_memberRemovalTimestamps.TryGetValue(groupId, out var removalTimestamps))
+            {
+                // Check if this member has a removal timestamp
+                if (removalTimestamps.TryGetValue(memberKeyBase64, out long removalTime))
+                {
+                    // If the message timestamp is after the removal timestamp,
+                    // the member was removed before the message was created
+                    return messageTimestamp > removalTime;
+                }
+            }
+
+            // If no removal information, the member wasn't removed
+            return false;
         }
 
         /// <summary>
