@@ -1,275 +1,232 @@
-﻿using System.Collections.Immutable;
+﻿using System.Text.Json.Serialization;
 
-namespace LibEmiddle.Domain // Adjust namespace as needed
+namespace LibEmiddle.Domain
 {
     /// <summary>
-    /// Represents the state of a Double Ratchet session.
-    /// This class is immutable; all state changes result in a new session instance.
+    /// Represents the state of a Double Ratchet session as defined in the Signal protocol.
+    /// Contains all cryptographic state needed for encrypted communication with forward secrecy
+    /// and break-in recovery.
     /// </summary>
     public class DoubleRatchetSession
     {
-        // Define a key type for the skipped message keys dictionary
-        // Using Tuple<byte[], int> is possible but requires custom comparer for byte[] equality.
-        // A dedicated struct might be better for clarity and correct equality.
-        public readonly record struct SkippedKeyIdentifier(byte[] RemoteDhPublicKey, int MessageNumber)
+        /// <summary>
+        /// Gets or sets the unique identifier for this session.
+        /// </summary>
+        public string SessionId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets the root key for the Double Ratchet algorithm.
+        /// This key evolves with each new ratchet step.
+        /// </summary>
+        public byte[] RootKey { get; set; } = Array.Empty<byte>();
+
+        /// <summary>
+        /// Gets or sets the chain key for sending messages.
+        /// This advances with each message sent.
+        /// </summary>
+        public byte[]? SenderChainKey { get; set; }
+
+        /// <summary>
+        /// Gets or sets the chain key for receiving messages.
+        /// This advances with each message received.
+        /// </summary>
+        public byte[]? ReceiverChainKey { get; set; }
+
+        /// <summary>
+        /// Gets or sets the sender's ratchet key pair (X25519).
+        /// This is rotated periodically for enhanced security.
+        /// </summary>
+        public KeyPair SenderRatchetKeyPair { get; set; } = new KeyPair();
+
+        /// <summary>
+        /// Gets or sets the receiver's ratchet public key (X25519).
+        /// This is the public key provided by the other party.
+        /// </summary>
+        public byte[]? ReceiverRatchetPublicKey { get; set; }
+
+        /// <summary>
+        /// Gets or sets the previous receiver's ratchet public key.
+        /// Used for handling out-of-order messages.
+        /// </summary>
+        public byte[]? PreviousReceiverRatchetPublicKey { get; set; }
+
+        /// <summary>
+        /// Gets or sets the current message number for sending.
+        /// Incremented with each message sent in the current chain.
+        /// </summary>
+        public uint SendMessageNumber { get; set; }
+
+        /// <summary>
+        /// Gets or sets the current message number for receiving.
+        /// Incremented with each message received in the current chain.
+        /// </summary>
+        public uint ReceiveMessageNumber { get; set; }
+
+        /// <summary>
+        /// Gets or sets the dictionary of message keys for sent messages.
+        /// Used for handling out-of-order messages.
+        /// Key is the message number, value is the message key.
+        /// </summary>
+        public Dictionary<uint, byte[]> SentMessages { get; set; } = new Dictionary<uint, byte[]>();
+
+        /// <summary>
+        /// Gets or sets the dictionary of skipped message keys.
+        /// Used for handling out-of-order messages.
+        /// Key is the SkippedMessageKey (DH public key + message number), value is the message key.
+        /// </summary>
+        public Dictionary<SkippedMessageKey, byte[]> SkippedMessageKeys { get; set; } =
+            new Dictionary<SkippedMessageKey, byte[]>();
+
+        /// <summary>
+        /// Gets or sets whether the session is fully initialized.
+        /// </summary>
+        public bool IsInitialized { get; set; }
+
+        /// <summary>
+        /// Gets or sets when the session was created (milliseconds since Unix epoch).
+        /// </summary>
+        public long CreationTimestamp { get; set; }
+
+        /// <summary>
+        /// Gets or sets additional metadata for the session.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public Dictionary<string, string>? Metadata { get; set; }
+
+        /// <summary>
+        /// Creates a deep clone of this Double Ratchet session.
+        /// </summary>
+        /// <returns>A cloned copy of this session.</returns>
+        public DoubleRatchetSession Clone()
         {
-            // Implement custom equality based on byte array content if needed,
-            // record struct provides value equality by default IF RemoteDhPublicKey was immutable (e.g. ReadOnlyMemory<byte>)
-            // For byte[], we might need SequenceEqual. Let's keep Tuple for simplicity now,
-            // but acknowledge a custom struct with proper equality is more robust.
-        }
-
-        // Using Tuple for simplicity - requires careful handling or a custom comparer in practice
-        // Key: Tuple Item1=Remote DHR Key (Their Public Key), Item2=Message Number
-        // Value: Message Key
-        private readonly ImmutableDictionary<Tuple<byte[], int>, byte[]> _skippedMessageKeys;
-
-        /// <summary>
-        /// Read-only collection of recently processed message IDs for replay protection. Bounded size.
-        /// </summary>
-        private readonly ImmutableList<Guid> _recentlyProcessedIds;
-
-        /// <summary>
-        /// Set of processed message numbers for the current receiving chain. Used for replay/duplicate detection within a chain.
-        /// </summary>
-        private readonly ImmutableHashSet<int> _processedMessageNumbersReceiving;
-
-        /// <summary>
-        /// The DHRatchet KeyPair
-        /// </summary>
-        private readonly KeyPair _dhRatchetKeyPair;
-
-        /// <summary>
-        /// Maximum number of message IDs to keep track of for replay protection.
-        /// </summary>
-        private const int MaxTrackedMessageIds = 100;
-
-        /// <summary>
-        /// Initializes a new instance of the DoubleRatchetSession class.
-        /// </summary>
-        public DoubleRatchetSession(
-            KeyPair dhRatchetKeyPair,          // Our current DH key pair (DHs)
-            byte[] remoteDHRatchetKey,             // Their current public DH key (DHr)
-            byte[] rootKey,                        // Current Root Key (RK)
-            byte[]? sendingChainKey,               // Current Sending Chain Key (CKs), nullable for initial state
-            byte[]? receivingChainKey,             // Current Receiving Chain Key (CKr), nullable for initial state
-            int messageNumberSending,              // Ns: Number of messages sent in current sending chain
-            int messageNumberReceiving,            // Nr: Number of messages received in current receiving chain
-            string? sessionId = null,                  // Optional session ID
-            ImmutableList<Guid>? recentlyProcessedIds = null, // Track recent Message Guids for replay
-            ImmutableHashSet<int>? processedMessageNumbersReceiving = null, // Track received message numbers in current chain
-            ImmutableDictionary<Tuple<byte[], int>, byte[]>? skippedMessageKeys = null // Store keys for out-of-order messages
-        )
-        {
-            ArgumentNullException.ThrowIfNullOrEmpty(dhRatchetKeyPair.ToString(), nameof(dhRatchetKeyPair));
-
-            // Validate non-nullable required arguments
-            RemoteDHRatchetKey = remoteDHRatchetKey ?? throw new ArgumentNullException(nameof(remoteDHRatchetKey));
-            RootKey = rootKey ?? throw new ArgumentNullException(nameof(rootKey));
-
-            // Validate key lengths (assuming Constants class is accessible)
-            if (RemoteDHRatchetKey.Length != Constants.X25519_KEY_SIZE) 
-                throw new ArgumentException("Invalid Remote DH Ratchet Key size.", nameof(remoteDHRatchetKey));
-            if (RootKey.Length != Constants.AES_KEY_SIZE) 
-                throw new ArgumentException("Invalid Root Key size.", nameof(rootKey));
-            
-            if (sendingChainKey != null && sendingChainKey.Length != Constants.AES_KEY_SIZE)
-                throw new ArgumentException("Invalid Sending Chain Key size.", nameof(sendingChainKey));
-            if (receivingChainKey != null && receivingChainKey.Length != Constants.AES_KEY_SIZE) 
-                throw new ArgumentException("Invalid Receiving Chain Key size.", nameof(receivingChainKey));
-
-            // TODO: Add validation for DHRatchetKeyPair keys if needed
-
-            // Assign properties
-            SendingChainKey = sendingChainKey;
-            ReceivingChainKey = receivingChainKey;
-            MessageNumberSending = messageNumberSending;
-            MessageNumberReceiving = messageNumberReceiving;
-            SessionId = sessionId ?? Guid.NewGuid().ToString();
-
-            // Initialize immutable collections
-            _dhRatchetKeyPair = dhRatchetKeyPair;
-            _recentlyProcessedIds = recentlyProcessedIds ?? ImmutableList<Guid>.Empty;
-            _processedMessageNumbersReceiving = processedMessageNumbersReceiving ?? ImmutableHashSet<int>.Empty;
-            _skippedMessageKeys = skippedMessageKeys ?? ImmutableDictionary<Tuple<byte[], int>, byte[]>.Empty; // Requires custom comparer for byte[] keys usually
-        }
-
-        // --- Public Properties ---
-
-        /// <summary>
-        /// Unique session identifier.
-        /// </summary>
-        public string SessionId { get; }
-
-        /// <summary>
-        /// Our current DH ratchet key pair (DHs). Contains private key. Handle with care.
-        /// </summary>
-        public ref readonly KeyPair DHRatchetKeyPair => ref _dhRatchetKeyPair;
-
-        /// <summary>
-        /// Remote party's current public DH ratchet key (DHr).
-        /// </summary>
-        public byte[] RemoteDHRatchetKey { get; }
-
-        /// <summary>
-        /// Current Root Key (RK).
-        /// </summary>
-        public byte[] RootKey { get; }
-
-        /// <summary>
-        /// Current Sending Chain Key (CKs), if initialized. Null otherwise.
-        /// </summary>
-        public byte[]? SendingChainKey { get; }
-
-        /// <summary>
-        /// Current Receiving Chain Key (CKr), if initialized. Null otherwise.
-        /// </summary>
-        public byte[]? ReceivingChainKey { get; }
-
-        /// <summary>
-        /// Number of messages sent using the current sending chain key (Ns).
-        /// </summary>
-        public int MessageNumberSending { get; }
-
-        /// <summary>
-        /// Number of messages received using the current receiving chain key (Nr).
-        /// </summary>
-        public int MessageNumberReceiving { get; } // Tracks count within current receiving chain step
-
-        /// <summary>
-        /// Provides read-only access to the dictionary of skipped message keys.
-        /// Key: Tuple(RemoteDHKeyPublicKey, MessageNumber). Value: MessageKey.
-        /// Note: Using byte[] in Tuple requires custom equality logic for reliable dictionary operations.
-        /// Consider a dedicated struct key with SequenceEqual implementation.
-        /// </summary>
-        public ImmutableDictionary<Tuple<byte[], int>, byte[]> SkippedMessageKeys => _skippedMessageKeys;
-
-        /// <summary>
-        /// Provides read-only access to recently processed message GUIDs (for replay protection).
-        /// </summary>
-        public ImmutableList<Guid> RecentlyProcessedIds => _recentlyProcessedIds;
-
-        /// <summary>
-        /// Provides read-only access to the set of processed message numbers in the current receiving chain.
-        /// </summary>
-        public ImmutableHashSet<int> ProcessedMessageNumbersReceiving => _processedMessageNumbersReceiving;
-
-        // --- Methods ---
-
-        /// <summary>
-        /// Checks if a message GUID has been processed recently.
-        /// </summary>
-        public bool HasProcessedMessageId(Guid messageId)
-        {
-            return _recentlyProcessedIds.Contains(messageId);
-        }
-
-        /// <summary>
-        /// Checks if a message number within the current receiving chain has been processed.
-        /// </summary>
-        public bool HasProcessedMessageNumberReceiving(int messageNumber)
-        {
-            return _processedMessageNumbersReceiving.Contains(messageNumber);
-        }
-
-        /// <summary>
-        /// Creates a copy of this session with updated parameters. Returns a new instance.
-        /// Use this method to reflect state changes after cryptographic operations.
-        /// </summary>
-        public DoubleRatchetSession WithUpdatedParameters(
-            KeyPair? newDHRatchetKeyPair = null,
-            byte[]? newRemoteDHRatchetKey = null,
-            byte[]? newRootKey = null,
-            byte[]? newSendingChainKey = null,       // Use null to keep existing, or provide new value
-            byte[]? newReceivingChainKey = null,     // Use null to keep existing, or provide new value
-            int? newMessageNumberSending = null,
-            int? newMessageNumberReceiving = null,
-            Guid? newProcessedMessageId = null,        // ID of the message just processed (for replay list)
-            int? newProcessedMessageNumberReceiving = null, // Number of msg just processed (for received set)
-            ImmutableDictionary<Tuple<byte[], int>, byte[]>? newSkippedMessageKeys = null, // Replace entire skipped key dict
-            bool resetReceivingChainState = false // Flag to reset receiving message numbers upon DH ratchet
-            )
-        {
-            // Update recently processed IDs list
-            var updatedMessageIds = _recentlyProcessedIds;
-            if (newProcessedMessageId.HasValue)
+            var clone = new DoubleRatchetSession
             {
-                updatedMessageIds = updatedMessageIds.Add(newProcessedMessageId.Value);
-                // Maintain bounded size
-                if (updatedMessageIds.Count > MaxTrackedMessageIds)
+                SessionId = SessionId,
+                RootKey = RootKey?.ToArray() ?? Array.Empty<byte>(),
+                SenderChainKey = SenderChainKey?.ToArray(),
+                ReceiverChainKey = ReceiverChainKey?.ToArray(),
+                SenderRatchetKeyPair = new KeyPair
                 {
-                    updatedMessageIds = updatedMessageIds.RemoveAt(0);
-                }
-            }
+                    PublicKey = SenderRatchetKeyPair.PublicKey.ToArray(),
+                    PrivateKey = SenderRatchetKeyPair.PrivateKey.ToArray()
+                },
+                ReceiverRatchetPublicKey = ReceiverRatchetPublicKey?.ToArray(),
+                PreviousReceiverRatchetPublicKey = PreviousReceiverRatchetPublicKey?.ToArray(),
+                SendMessageNumber = SendMessageNumber,
+                ReceiveMessageNumber = ReceiveMessageNumber,
+                IsInitialized = IsInitialized,
+                CreationTimestamp = CreationTimestamp
+            };
 
-            // Update processed message numbers set for the receiving chain
-            var updatedMessageNumbersReceiving = _processedMessageNumbersReceiving;
-            if (resetReceivingChainState) // Usually after a DH Ratchet step for the receiving chain
+            // Clone dictionaries
+            foreach (var kvp in SentMessages)
             {
-                updatedMessageNumbersReceiving = ImmutableHashSet<int>.Empty;
+                clone.SentMessages[kvp.Key] = kvp.Value.ToArray();
             }
-            else if (newProcessedMessageNumberReceiving.HasValue)
+
+            foreach (var kvp in SkippedMessageKeys)
             {
-                updatedMessageNumbersReceiving = updatedMessageNumbersReceiving.Add(newProcessedMessageNumberReceiving.Value);
+                // Create a new entry with a cloned key and value
+                var key = new SkippedMessageKey(
+                    kvp.Key.DhPublicKey.ToArray(),
+                    kvp.Key.MessageNumber
+                );
+                clone.SkippedMessageKeys[key] = kvp.Value.ToArray();
             }
 
+            // Clone metadata if present
+            if (Metadata != null)
+            {
+                clone.Metadata = new Dictionary<string, string>(Metadata);
+            }
 
-            // Create new session with updated parameters using null-coalescing operator
-            return new DoubleRatchetSession(
-                dhRatchetKeyPair: newDHRatchetKeyPair ?? this.DHRatchetKeyPair,
-                remoteDHRatchetKey: newRemoteDHRatchetKey ?? this.RemoteDHRatchetKey,
-                rootKey: newRootKey ?? this.RootKey,
-                sendingChainKey: newSendingChainKey ?? this.SendingChainKey, // Keeps existing if new value is null
-                receivingChainKey: newReceivingChainKey ?? this.ReceivingChainKey, // Keeps existing if new value is null
-                messageNumberSending: newMessageNumberSending ?? this.MessageNumberSending,
-                messageNumberReceiving: newMessageNumberReceiving ?? this.MessageNumberReceiving,
-                sessionId: this.SessionId, // Session ID does not change
-                recentlyProcessedIds: updatedMessageIds,
-                processedMessageNumbersReceiving: updatedMessageNumbersReceiving,
-                skippedMessageKeys: newSkippedMessageKeys ?? this.SkippedMessageKeys // Replace or keep existing dict
-            );
+            return clone;
         }
 
         /// <summary>
-        /// Creates a copy of this session marking a message ID as processed.
+        /// Securely clears sensitive cryptographic material from memory.
         /// </summary>
-        public DoubleRatchetSession WithProcessedMessageId(Guid messageId)
+        public void ClearSensitiveData()
         {
-            return WithUpdatedParameters(newProcessedMessageId: messageId);
+            // Clear root key
+            if (RootKey != null && RootKey.Length > 0)
+            {
+                RootKey = Array.Empty<byte>();
+            }
+
+            // Clear chain keys
+            if (SenderChainKey != null)
+            {
+                SenderChainKey = null;
+            }
+
+            if (ReceiverChainKey != null)
+            {
+                ReceiverChainKey = null;
+            }
+
+            // Clear sent message keys
+            SentMessages.Clear();
+
+            // Clear skipped message keys
+            SkippedMessageKeys.Clear();
         }
 
         /// <summary>
-        /// Creates a copy of this session marking a receiving message number as processed.
+        /// Validates that all required fields are present and properly formatted.
         /// </summary>
-        public DoubleRatchetSession WithProcessedMessageNumberReceiving(int messageNumber)
+        /// <returns>True if the session is valid, false otherwise.</returns>
+        public bool Validate()
         {
-            return WithUpdatedParameters(newProcessedMessageNumberReceiving: messageNumber);
+            if (string.IsNullOrEmpty(SessionId))
+                return false;
+
+            if (RootKey == null || RootKey.Length != Constants.ROOT_KEY_SIZE)
+                return false;
+
+            if (!IsInitialized)
+                return false;
+
+            if (SenderRatchetKeyPair.PublicKey == null ||
+                SenderRatchetKeyPair.PrivateKey == null ||
+                SenderRatchetKeyPair.PublicKey.Length != Constants.X25519_KEY_SIZE ||
+                SenderRatchetKeyPair.PrivateKey.Length != Constants.X25519_KEY_SIZE)
+                return false;
+
+            // If we have a sender chain key, validate it
+            if (SenderChainKey != null && SenderChainKey.Length != Constants.CHAIN_KEY_SIZE)
+                return false;
+
+            // If we have a receiver chain key, validate it
+            if (ReceiverChainKey != null && ReceiverChainKey.Length != Constants.CHAIN_KEY_SIZE)
+                return false;
+
+            // If we have a receiver ratchet public key, validate it
+            if (ReceiverRatchetPublicKey != null &&
+                ReceiverRatchetPublicKey.Length != Constants.X25519_KEY_SIZE)
+                return false;
+
+            // If we have a previous receiver ratchet public key, validate it
+            if (PreviousReceiverRatchetPublicKey != null &&
+                PreviousReceiverRatchetPublicKey.Length != Constants.X25519_KEY_SIZE)
+                return false;
+
+            return true;
         }
 
         /// <summary>
-        /// Creates a copy of this session with an added skipped message key.
+        /// Creates a new Double Ratchet session with default values.
         /// </summary>
-        public DoubleRatchetSession WithAddedSkippedKey(Tuple<byte[], int> keyIdentifier, byte[] messageKey)
+        /// <param name="sessionId">The session identifier to use.</param>
+        /// <returns>A new session instance.</returns>
+        public static DoubleRatchetSession Create(string sessionId)
         {
-            // Use ImmutableDictionary.Add - creates new dictionary instance
-            var updatedSkippedKeys = _skippedMessageKeys.Add(keyIdentifier, messageKey);
-            return WithUpdatedParameters(newSkippedMessageKeys: updatedSkippedKeys);
+            return new DoubleRatchetSession
+            {
+                SessionId = sessionId,
+                CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                IsInitialized = false
+            };
         }
-
-        /// <summary>
-        /// Creates a copy of this session with a removed skipped message key.
-        /// </summary>
-        public DoubleRatchetSession WithRemovedSkippedKey(Tuple<byte[], int> keyIdentifier)
-        {
-            // Use ImmutableDictionary.Remove - creates new dictionary instance
-            var updatedSkippedKeys = _skippedMessageKeys.Remove(keyIdentifier);
-            return WithUpdatedParameters(newSkippedMessageKeys: updatedSkippedKeys);
-        }
-
-        // CONSIDER: Add a Dispose method or pattern if KeyPair contains sensitive
-        // private key material that should be securely cleared when the session is discarded.
-        // Since this class is immutable, clearing happens when instances go out of scope
-        // and are garbage collected, but explicit clearing might be desired depending
-        // on the KeyPair implementation and overall memory management strategy.
     }
 }

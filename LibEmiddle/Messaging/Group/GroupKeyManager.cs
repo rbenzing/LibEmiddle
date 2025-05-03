@@ -1,224 +1,529 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Security.Cryptography;
-using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using LibEmiddle.Core;
-using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.Abstractions;
 
 namespace LibEmiddle.Messaging.Group
 {
     /// <summary>
-    /// Manages the Sender Key state (Chain Key and Iteration) for groups
-    /// where the local user is the sender. Generates initial keys and performs
-    /// the symmetric key ratchet to derive message keys.
+    /// Manages cryptographic keys and ratchet chains for group messaging sessions,
+    /// supporting key generation, rotation, and secure distribution in group contexts.
     /// </summary>
-    public class GroupKeyManager : IDisposable // Implement IDisposable if clearing keys on disposal is desired
+    public class GroupKeyManager
     {
-        // Internal state record for Sender Keys
-        private sealed record SenderKeyState
-        {
-            public byte[] ChainKey { get; init; } = Array.Empty<byte>();
-            public uint Iteration { get; init; }
+        private readonly ICryptoProvider _cryptoProvider;
+        private readonly SemaphoreSlim _operationLock = new SemaphoreSlim(1, 1);
 
-            // Method to securely dispose of the chain key if needed
-            public void Clear() => SecureMemory.SecureClear(ChainKey);
-        }
+        // In-memory storage for sender chain states
+        private readonly ConcurrentDictionary<string, GroupSenderState> _senderStates = new ConcurrentDictionary<string, GroupSenderState>();
 
-        // Stores the current SenderKeyState for each group this client sends to
-        // Key: groupId (string)
-        // Value: SenderKeyState (containing ChainKey and Iteration)
-        private readonly ConcurrentDictionary<string, SenderKeyState> _senderState = new();
+        // In-memory storage for receiver chain states
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte[]>> _receiverStates =
+            new ConcurrentDictionary<string, ConcurrentDictionary<string, byte[]>>();
 
-        // Constants from Double Ratchet KDF_CK (ensure these are accessible)
-        private const byte MESSAGE_KEY_SEED_BYTE = 0x01;
-        private const byte CHAIN_KEY_SEED_BYTE = 0x02;
+        // Timestamps of last key rotations
+        private readonly ConcurrentDictionary<string, long> _lastRotationTimestamps = new ConcurrentDictionary<string, long>();
 
         /// <summary>
-        /// Generates a new cryptographically secure initial Chain Key (32 bytes).
+        /// Initializes a new instance of the GroupKeyManager class.
         /// </summary>
-        /// <returns>A new 32-byte random key suitable as an initial Chain Key.</returns>
+        /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
+        public GroupKeyManager(ICryptoProvider cryptoProvider)
+        {
+            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
+        }
+
+        /// <summary>
+        /// Generates an initial chain key for a new group.
+        /// </summary>
+        /// <returns>A 32-byte random key suitable for initializing a group chain.</returns>
         public byte[] GenerateInitialChainKey()
         {
-            // Use preferred method for generating secure random bytes
-            return Sodium.GenerateRandomBytes(Constants.AES_KEY_SIZE);
+            return _cryptoProvider.GenerateRandomBytes(Constants.CHAIN_KEY_SIZE);
         }
 
         /// <summary>
-        /// Initializes the sender state for a group with the given initial chain key.
-        /// Typically called when creating a group or rotating the key.
+        /// Initializes the sender state for a new group or after key rotation.
         /// </summary>
-        /// <param name="groupId">Group identifier.</param>
-        /// <param name="initialChainKey">The initial chain key.</param>
-        public void InitializeSenderState(string groupId, byte[] initialChainKey)
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="initialChainKey">The initial chain key for the group.</param>
+        /// <returns>True if the sender state was initialized successfully.</returns>
+        public bool InitializeSenderState(string groupId, byte[] initialChainKey)
         {
-            ArgumentException.ThrowIfNullOrEmpty(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(initialChainKey, nameof(initialChainKey));
-            if (initialChainKey.Length != Constants.AES_KEY_SIZE)
-                throw new ArgumentException($"Initial Chain Key must be {Constants.AES_KEY_SIZE} bytes.", nameof(initialChainKey));
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-            // Store a copy
-            byte[] chainKeyCopy = (byte[])initialChainKey.Clone();
+            if (initialChainKey == null || initialChainKey.Length != Constants.CHAIN_KEY_SIZE)
+                throw new ArgumentException($"Initial chain key must be {Constants.CHAIN_KEY_SIZE} bytes.", nameof(initialChainKey));
 
-            var initialState = new SenderKeyState
+            try
             {
-                ChainKey = chainKeyCopy,
-                Iteration = 0 // Start iteration at 0
-            };
-
-            // AddOrUpdate ensures thread-safety and handles potential existing state clearing
-            _senderState.AddOrUpdate(groupId, initialState, (key, existingState) => {
-                existingState.Clear(); // Clear old key if replacing
-                return initialState;
-            });
-        }
-
-        /// <summary>
-        /// Performs the symmetric ratchet step for the sender's chain.
-        /// Derives the next message key and advances the chain state.
-        /// </summary>
-        /// <param name="groupId">Group identifier.</param>
-        /// <returns>A tuple containing the MessageKey (byte[32]) to use for encryption
-        /// and the Iteration (uint) associated with that key.</returns>
-        /// <exception cref="InvalidOperationException">If sender state is not initialized for the group.</exception>
-        /// <exception cref="CryptographicException">If HMAC operation fails.</exception>
-        public (byte[] MessageKey, uint Iteration) GetSenderMessageKey(string groupId)
-        {
-            ArgumentException.ThrowIfNullOrEmpty(groupId, nameof(groupId));
-
-            SenderKeyState currentState;
-            SenderKeyState nextState;
-            byte[] messageKey;
-            byte[] nextChainKey; // Declare here
-
-            // Atomically get current state and update to next state
-            do
-            {
-                if (!_senderState.TryGetValue(groupId, out currentState!))
+                var senderState = new GroupSenderState
                 {
-                    throw new InvalidOperationException($"Sender state not initialized for group {groupId}. Call InitializeSenderState first.");
-                }
-
-                // --- Perform KDF_CK using KeyGenerator.GenerateHmacSha256 ---
-                byte[] currentChainKey = currentState.ChainKey;
-                uint currentIteration = currentState.Iteration;
-
-                // Derive keys using the existing HMAC function
-                messageKey = Sodium.GenerateHmacSha256([MESSAGE_KEY_SEED_BYTE], currentChainKey);
-                nextChainKey = Sodium.GenerateHmacSha256([CHAIN_KEY_SEED_BYTE], currentChainKey);
-
-                // Validation of output length happens inside GenerateHmacSha256 now (or should)
-                // If not, add checks here:
-                if (messageKey == null || messageKey.Length != Constants.AES_KEY_SIZE || nextChainKey == null || nextChainKey.Length != Constants.AES_KEY_SIZE)
-                    throw new CryptographicException("KDF_CK (HMAC) failed or produced incorrect output length.");
-
-                // Prepare the next state object (with incremented iteration)
-                nextState = new SenderKeyState
-                {
-                    ChainKey = nextChainKey, // Store the newly derived chain key
-                    Iteration = currentIteration + 1
+                    ChainKey = initialChainKey.ToArray(), // Create a copy
+                    Iteration = 0,
+                    CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 };
 
-                // Attempt to update the state in the dictionary using optimistic concurrency
-            } while (!_senderState.TryUpdate(groupId, nextState, currentState)); // Compare-and-swap
+                _senderStates[groupId] = senderState;
+                _lastRotationTimestamps[groupId] = senderState.CreationTimestamp;
 
-            // IMPORTANT: Return the message key derived from the *current* state,
-            // along with the *current* iteration number (before it was incremented).
-            return (messageKey, currentState.Iteration);
-        }
-
-        /// <summary>
-        /// Checks if a key should be rotated based on the rotation strategy and establishment time
-        /// </summary>
-        /// <param name="keyEstablishmentTimeMs">Time when key was established (milliseconds since epoch).</param>
-        /// <param name="rotationStrategy">Rotation strategy to apply.</param>
-        /// <returns>True if key rotation is recommended.</returns>
-        public bool ShouldRotateKey(long keyEstablishmentTimeMs, Enums.KeyRotationStrategy rotationStrategy)
-        {
-            if (keyEstablishmentTimeMs <= 0) return true; // Rotate if timestamp invalid or unset
-
-            // For Standard strategy, always rotate
-            if (rotationStrategy == Enums.KeyRotationStrategy.Standard)
-            {
                 return true;
             }
-
-            long currentTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            TimeSpan elapsed = TimeSpan.FromMilliseconds(currentTimeMs - keyEstablishmentTimeMs);
-
-            // Check based on strategy
-            return rotationStrategy switch
+            catch (Exception ex)
             {
-                Enums.KeyRotationStrategy.Hourly => elapsed >= TimeSpan.FromHours(1),
-                Enums.KeyRotationStrategy.Daily => elapsed >= TimeSpan.FromDays(1),
-                _ => false // Unknown strategy, don't rotate automatically
-            };
+                LoggingManager.LogError(nameof(GroupKeyManager), $"Failed to initialize sender state for group {groupId}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
-        /// Derives a subkey for a specific purpose from a base key using HKDF.
+        /// Gets the current sender state for a group.
         /// </summary>
-        /// <param name="baseKey">Base key (e.g., Chain Key).</param>
-        /// <param name="purpose">Purpose string for the 'info' parameter of HKDF.</param>
-        /// <returns>Derived key (32 bytes).</returns>
-        public byte[] DeriveSubkey(byte[] baseKey, string purpose)
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <returns>The current sender state, or null if the group doesn't exist.</returns>
+        public GroupSenderState? GetSenderState(string groupId)
         {
-            ArgumentNullException.ThrowIfNull(baseKey, nameof(baseKey));
-            ArgumentException.ThrowIfNullOrEmpty(purpose, nameof(purpose));
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-            // Assuming KeyConversion.HkdfDerive uses a zero salt by default if not provided
-            return KeyConversion.HkdfDerive(
-                inputKeyMaterial: baseKey,
-                salt: null, // Or provide explicit zero salt if required by implementation
-                info: Encoding.UTF8.GetBytes($"SubkeyDerivation-{purpose}"), // Use purpose in info
-                outputLength: Constants.AES_KEY_SIZE // Typically 32 bytes
-            );
+            if (_senderStates.TryGetValue(groupId, out var state))
+            {
+                // Return a copy to prevent modification
+                return new GroupSenderState
+                {
+                    ChainKey = state.ChainKey.ToArray(),
+                    Iteration = state.Iteration,
+                    CreationTimestamp = state.CreationTimestamp
+                };
+            }
+
+            return null;
         }
 
         /// <summary>
-        /// Securely clears the stored Chain Key and Iteration state for a specific group.
+        /// Clears the sender state for a group, typically when the group is deleted.
         /// </summary>
-        /// <param name="groupId">Group identifier.</param>
-        /// <returns>True if state for the group was found and cleared.</returns>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <returns>True if the sender state was cleared successfully.</returns>
         public bool ClearSenderState(string groupId)
         {
-            ArgumentException.ThrowIfNullOrEmpty(groupId, nameof(groupId));
-            if (_senderState.TryRemove(groupId, out SenderKeyState? removedState))
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            try
             {
-                removedState?.Clear(); // Securely clear the chain key within the state object
+                if (_senderStates.TryRemove(groupId, out var state))
+                {
+                    // Securely clear the chain key
+                    SecureMemory.SecureClear(state.ChainKey);
+                }
+
+                // Clear receiver states for this group
+                if (_receiverStates.TryRemove(groupId, out var receiverDict))
+                {
+                    foreach (var senderKey in receiverDict.Values)
+                    {
+                        SecureMemory.SecureClear(senderKey);
+                    }
+                }
+
+                // Clear rotation timestamp
+                _lastRotationTimestamps.TryRemove(groupId, out _);
+
                 return true;
             }
-            return false;
-        }
-
-        /// <summary>
-        /// Securely clears all stored Sender Key states.
-        /// </summary>
-        public void ClearAllSenderStates()
-        {
-            // Get all keys first to avoid issues with modifying dict while iterating
-            var allKeys = _senderState.Keys.ToList();
-            foreach (var groupId in allKeys)
+            catch (Exception ex)
             {
-                if (_senderState.TryRemove(groupId, out SenderKeyState? removedState))
-                {
-                    removedState?.Clear();
-                }
+                LoggingManager.LogError(nameof(GroupKeyManager), $"Failed to clear sender state for group {groupId}: {ex.Message}");
+                return false;
             }
-            // Double check if clear is needed - TryRemove might have race conditions if key re-added
-            _senderState.Clear(); // Final clear just in case
         }
 
         /// <summary>
-        /// Implements IDisposable to ensure all stored keys are cleared.
+        /// Gets a message key for encrypting a new message and advances the chain.
         /// </summary>
-        public void Dispose()
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <returns>A tuple containing the message key and the current iteration.</returns>
+        public (byte[] MessageKey, uint Iteration) GetSenderMessageKey(string groupId)
         {
-            ClearAllSenderStates();
-            GC.SuppressFinalize(this);
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            _operationLock.Wait();
+            try
+            {
+                if (!_senderStates.TryGetValue(groupId, out var state))
+                    throw new KeyNotFoundException($"Group {groupId} does not exist or sender state not initialized.");
+
+                // Generate message key from current chain key
+                byte[] messageKey = DeriveMessageKey(state.ChainKey);
+
+                // Advance the chain
+                state.ChainKey = DeriveNextChainKey(state.ChainKey);
+                state.Iteration++;
+
+                return (messageKey, state.Iteration - 1);
+            }
+            finally
+            {
+                _operationLock.Release();
+            }
         }
 
-        // Optional Finalizer as safety net
-        ~GroupKeyManager() => ClearAllSenderStates();
+        /// <summary>
+        /// Stores a sender key for a specific sender in a group.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="senderIdentityKey">The sender's identity key.</param>
+        /// <param name="senderKey">The sender key to store.</param>
+        /// <returns>True if the sender key was stored successfully.</returns>
+        public bool StoreSenderKey(string groupId, byte[] senderIdentityKey, byte[] senderKey)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-    } // End Class
-} // End Namespace
+            if (senderIdentityKey == null || senderIdentityKey.Length == 0)
+                throw new ArgumentException("Sender identity key cannot be null or empty.", nameof(senderIdentityKey));
+
+            if (senderKey == null || senderKey.Length != Constants.CHAIN_KEY_SIZE)
+                throw new ArgumentException($"Sender key must be {Constants.CHAIN_KEY_SIZE} bytes.", nameof(senderKey));
+
+            try
+            {
+                var receiverDict = _receiverStates.GetOrAdd(groupId, _ => new ConcurrentDictionary<string, byte[]>());
+                string senderKeyId = Convert.ToBase64String(senderIdentityKey);
+
+                receiverDict[senderKeyId] = senderKey.ToArray(); // Create a copy
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(GroupKeyManager), $"Failed to store sender key for group {groupId}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Retrieves a sender key for a specific sender in a group.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="senderIdentityKey">The sender's identity key.</param>
+        /// <returns>The sender key, or null if not found.</returns>
+        public byte[]? GetSenderKey(string groupId, byte[] senderIdentityKey)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            if (senderIdentityKey == null || senderIdentityKey.Length == 0)
+                throw new ArgumentException("Sender identity key cannot be null or empty.", nameof(senderIdentityKey));
+
+            try
+            {
+                if (_receiverStates.TryGetValue(groupId, out var receiverDict))
+                {
+                    string senderKeyId = Convert.ToBase64String(senderIdentityKey);
+
+                    if (receiverDict.TryGetValue(senderKeyId, out var senderKey))
+                    {
+                        return senderKey.ToArray(); // Return a copy
+                    }
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(GroupKeyManager), $"Failed to get sender key for group {groupId}: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Validates an encrypted group message.
+        /// </summary>
+        /// <param name="message">The encrypted group message to validate.</param>
+        /// <returns>True if the message passes basic validation.</returns>
+        public bool ValidateEncryptedMessage(EncryptedGroupMessage message)
+        {
+            if (message == null)
+                return false;
+
+            if (string.IsNullOrEmpty(message.GroupId))
+                return false;
+
+            if (message.Ciphertext == null || message.Ciphertext.Length == 0)
+                return false;
+
+            if (message.Nonce == null || message.Nonce.Length != Constants.NONCE_SIZE)
+                return false;
+
+            if (message.SenderIdentityKey == null || message.SenderIdentityKey.Length == 0)
+                return false;
+
+            if (message.Timestamp <= 0)
+                return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Validates a sender key distribution message.
+        /// </summary>
+        /// <param name="distribution">The distribution message to validate.</param>
+        /// <returns>True if the distribution message passes basic validation.</returns>
+        public bool ValidateDistributionMessage(SenderKeyDistributionMessage distribution)
+        {
+            if (distribution == null)
+                return false;
+
+            if (string.IsNullOrEmpty(distribution.GroupId))
+                return false;
+
+            if (distribution.SenderIdentityKey == null || distribution.SenderIdentityKey.Length == 0)
+                return false;
+
+            if (distribution.ChainKey == null || distribution.ChainKey.Length != Constants.CHAIN_KEY_SIZE)
+                return false;
+
+            if (distribution.Signature == null || distribution.Signature.Length == 0)
+                return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Gets the timestamp of the last key rotation for a group.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <returns>The timestamp of the last key rotation, or 0 if the group doesn't exist.</returns>
+        public long GetLastRotationTimestamp(string groupId)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            return _lastRotationTimestamps.TryGetValue(groupId, out var timestamp) ? timestamp : 0;
+        }
+
+        /// <summary>
+        /// Updates the timestamp of the last key rotation for a group.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="timestamp">The timestamp to set.</param>
+        public void UpdateLastRotationTimestamp(string groupId, long timestamp)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            _lastRotationTimestamps[groupId] = timestamp;
+        }
+
+        /// <summary>
+        /// Exports the group key state for persistence.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <returns>A serializable group key state.</returns>
+        public Task<GroupKeyState> ExportKeyStateAsync(string groupId)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            try
+            {
+                var keyState = new GroupKeyState
+                {
+                    GroupId = groupId,
+                    LastRotationTimestamp = GetLastRotationTimestamp(groupId),
+                    SenderState = null,
+                    ReceiverStates = new Dictionary<string, string>()
+                };
+
+                // Export sender state if it exists
+                if (_senderStates.TryGetValue(groupId, out var senderState))
+                {
+                    keyState.SenderState = new GroupSenderStateDto
+                    {
+                        ChainKey = Convert.ToBase64String(senderState.ChainKey),
+                        Iteration = senderState.Iteration,
+                        CreationTimestamp = senderState.CreationTimestamp
+                    };
+                }
+
+                // Export receiver states if they exist
+                if (_receiverStates.TryGetValue(groupId, out var receiverDict))
+                {
+                    foreach (var kvp in receiverDict)
+                    {
+                        keyState.ReceiverStates[kvp.Key] = Convert.ToBase64String(kvp.Value);
+                    }
+                }
+
+                return Task.FromResult(keyState);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(GroupKeyManager), $"Failed to export key state for group {groupId}: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Imports a group key state from persistence.
+        /// </summary>
+        /// <param name="keyState">The group key state to import.</param>
+        /// <returns>True if the key state was imported successfully.</returns>
+        public Task<bool> ImportKeyStateAsync(GroupKeyState keyState)
+        {
+            if (keyState == null)
+                throw new ArgumentNullException(nameof(keyState));
+
+            if (string.IsNullOrEmpty(keyState.GroupId))
+                throw new ArgumentException("Group ID cannot be null or empty.");
+
+            try
+            {
+                string groupId = keyState.GroupId;
+
+                // Import sender state if it exists
+                if (keyState.SenderState != null)
+                {
+                    var senderState = new GroupSenderState
+                    {
+                        ChainKey = Convert.FromBase64String(keyState.SenderState.ChainKey),
+                        Iteration = keyState.SenderState.Iteration,
+                        CreationTimestamp = keyState.SenderState.CreationTimestamp
+                    };
+
+                    _senderStates[groupId] = senderState;
+                }
+
+                // Import receiver states if they exist
+                if (keyState.ReceiverStates != null && keyState.ReceiverStates.Count > 0)
+                {
+                    var receiverDict = _receiverStates.GetOrAdd(groupId, _ => new ConcurrentDictionary<string, byte[]>());
+
+                    foreach (var kvp in keyState.ReceiverStates)
+                    {
+                        receiverDict[kvp.Key] = Convert.FromBase64String(kvp.Value);
+                    }
+                }
+
+                // Import rotation timestamp
+                _lastRotationTimestamps[groupId] = keyState.LastRotationTimestamp;
+
+                return Task.FromResult(true);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(GroupKeyManager), $"Failed to import key state for group {keyState.GroupId}: {ex.Message}");
+                return Task.FromResult(false);
+            }
+        }
+
+        /// <summary>
+        /// Derives a message key from a chain key.
+        /// </summary>
+        /// <param name="chainKey">The current chain key.</param>
+        /// <returns>The derived message key.</returns>
+        private byte[] DeriveMessageKey(byte[] chainKey)
+        {
+            // In Signal protocol, message keys are derived using HMAC-SHA256
+            // with a specific info string to differentiate from chain key derivation
+            return _cryptoProvider.DeriveKey(
+                chainKey,
+                null,
+                System.Text.Encoding.UTF8.GetBytes("GroupMessageKey"),
+                Constants.MESSAGE_KEY_SIZE);
+        }
+
+        /// <summary>
+        /// Derives the next chain key from the current chain key.
+        /// </summary>
+        /// <param name="chainKey">The current chain key.</param>
+        /// <returns>The next chain key in the ratchet sequence.</returns>
+        private byte[] DeriveNextChainKey(byte[] chainKey)
+        {
+            // In Signal protocol, chain keys are derived using HMAC-SHA256
+            // with a specific info string to differentiate from message key derivation
+            return _cryptoProvider.DeriveKey(
+                chainKey,
+                null,
+                System.Text.Encoding.UTF8.GetBytes("GroupChainKey"),
+                Constants.CHAIN_KEY_SIZE);
+        }
+    }
+
+    /// <summary>
+    /// Represents the sender state for a group.
+    /// </summary>
+    public class GroupSenderState
+    {
+        /// <summary>
+        /// Gets or sets the current chain key.
+        /// </summary>
+        public byte[] ChainKey { get; set; } = Array.Empty<byte>();
+
+        /// <summary>
+        /// Gets or sets the current iteration (message number).
+        /// </summary>
+        public uint Iteration { get; set; }
+
+        /// <summary>
+        /// Gets or sets the creation timestamp (milliseconds since Unix epoch).
+        /// </summary>
+        public long CreationTimestamp { get; set; }
+    }
+
+    /// <summary>
+    /// Represents the serializable state of group keys for persistence.
+    /// </summary>
+    public class GroupKeyState
+    {
+        /// <summary>
+        /// Gets or sets the group identifier.
+        /// </summary>
+        public string GroupId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets the sender state.
+        /// </summary>
+        public GroupSenderStateDto? SenderState { get; set; }
+
+        /// <summary>
+        /// Gets or sets the receiver states.
+        /// Key is the Base64-encoded sender identity key, value is the Base64-encoded sender key.
+        /// </summary>
+        public Dictionary<string, string> ReceiverStates { get; set; } = new Dictionary<string, string>();
+
+        /// <summary>
+        /// Gets or sets the timestamp of the last key rotation.
+        /// </summary>
+        public long LastRotationTimestamp { get; set; }
+    }
+
+    /// <summary>
+    /// DTO for serializing and deserializing group sender state.
+    /// </summary>
+    public class GroupSenderStateDto
+    {
+        /// <summary>
+        /// Gets or sets the Base64-encoded chain key.
+        /// </summary>
+        public string ChainKey { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets the current iteration (message number).
+        /// </summary>
+        public uint Iteration { get; set; }
+
+        /// <summary>
+        /// Gets or sets the creation timestamp (milliseconds since Unix epoch).
+        /// </summary>
+        public long CreationTimestamp { get; set; }
+    }
+}

@@ -4,8 +4,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using LibEmiddle.Core;
-using LibEmiddle.Models;
-using LibEmiddle.KeyExchange;
 using LibEmiddle.Messaging.Transport;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
@@ -86,7 +84,7 @@ namespace LibEmiddle.MultiDevice
                 // Handle Ed25519 format
                 else if (devicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                 {
-                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
+                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey).ToArray();
                 }
                 else
                 {
@@ -136,7 +134,7 @@ namespace LibEmiddle.MultiDevice
                 // Handle Ed25519 format
                 else if (devicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                 {
-                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
+                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey).ToArray();
                 }
                 else
                 {
@@ -233,7 +231,7 @@ namespace LibEmiddle.MultiDevice
                             }
 
                             // Perform key exchange
-                            byte[] sharedSecret = X3DHExchange.PerformX25519DH(senderX25519Private, x25519PublicKey);
+                            byte[] sharedSecret = Sodium.ScalarMult(senderX25519Private, x25519PublicKey);
 
                             // Sign the sync data
                             byte[] signature = MessageSigning.SignMessage(secureSyncData.Value, _deviceKeyPair.PrivateKey);
@@ -261,7 +259,7 @@ namespace LibEmiddle.MultiDevice
 
                             // Encrypt
                             byte[] plaintext = Encoding.UTF8.GetBytes(json);
-                            byte[] nonce = NonceGenerator.GenerateNonce();
+                            byte[] nonce = Nonce.GenerateNonce();
                             byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
 
                             // Securely clear shared secret after use
@@ -274,10 +272,7 @@ namespace LibEmiddle.MultiDevice
                                 Ciphertext = ciphertext,
                                 Nonce = nonce,
                                 Timestamp = syncMessage.Timestamp,
-                                MessageId = Guid.NewGuid(),
-                                // Add protocol version information
-                                ProtocolMajorVersion = ProtocolVersion.MAJOR_VERSION,
-                                ProtocolMinorVersion = ProtocolVersion.MINOR_VERSION
+                                MessageId = Guid.NewGuid().ToString()
                             };
                         }
                         catch (Exception ex)
@@ -314,7 +309,7 @@ namespace LibEmiddle.MultiDevice
                 throw new ArgumentNullException(nameof(encryptedMessage));
 
             // Validate the encrypted message
-            if (!encryptedMessage.Validate())
+            if (!encryptedMessage.IsValid())
             {
                 return null;
             }
@@ -346,7 +341,7 @@ namespace LibEmiddle.MultiDevice
                 {
                     Ciphertext = encryptedMessage.Ciphertext?.ToArray(),
                     Nonce = encryptedMessage.Nonce?.ToArray(),
-                    MessageNumber = encryptedMessage.MessageNumber,
+                    SenderMessageNumber = encryptedMessage.SenderMessageNumber,
                     SenderDHKey = encryptedMessage.SenderDHKey?.ToArray(),
                     Timestamp = encryptedMessage.Timestamp,
                     MessageId = encryptedMessage.MessageId,
@@ -383,7 +378,7 @@ namespace LibEmiddle.MultiDevice
                         return null;
 
                     // Step 2: Get shared secret
-                    byte[] sharedSecret = X3DHExchange.PerformX25519DH(deviceKey, x25519Private);
+                    byte[] sharedSecret = Sodium.ScalarMult(deviceKey, x25519Private);
 
                     // Step 3: Decrypt message
                     byte[] plaintext;
@@ -466,7 +461,7 @@ namespace LibEmiddle.MultiDevice
                 // Handle Ed25519 format
                 else if (devicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                 {
-                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey.ToArray());
+                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey.ToArray()).ToArray();
                 }
                 else
                 {
@@ -512,7 +507,7 @@ namespace LibEmiddle.MultiDevice
                 // Handle Ed25519 format
                 else if (devicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                 {
-                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
+                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey).ToArray();
                 }
                 else
                 {
@@ -602,7 +597,7 @@ namespace LibEmiddle.MultiDevice
                 try
                 {
                     // see if the key can be converted
-                    byte[]? X25519PublicKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey);
+                    byte[]? X25519PublicKey = Sodium.ConvertEd25519PublicKeyToX25519(devicePublicKey).ToArray();
                     if (X25519PublicKey != null)
                     {
                         devicePublicKey = X25519PublicKey;
@@ -669,7 +664,7 @@ namespace LibEmiddle.MultiDevice
                 // Then try Ed25519 format as fallback
                 else if (revocationMessage.RevokedDeviceKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                 {
-                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(revocationMessage.RevokedDeviceKey);
+                    normalizedKey = Sodium.ConvertEd25519PublicKeyToX25519(revocationMessage.RevokedDeviceKey).ToArray();
                 }
                 else
                 {
@@ -756,7 +751,7 @@ namespace LibEmiddle.MultiDevice
                 byte[] key = DeriveKeyFromPassword(password, salt);
 
                 // Encrypt
-                byte[] nonce = NonceGenerator.GenerateNonce();
+                byte[] nonce = Nonce.GenerateNonce();
                 byte[] ciphertext = AES.AESEncrypt(data, key, nonce);
                 SecureMemory.SecureClear(key);
 
@@ -841,32 +836,7 @@ namespace LibEmiddle.MultiDevice
 
                 if (importData == null || !importData.ContainsKey("devices"))
                     throw new FormatException("Invalid import data format");
-
-                // Check protocol version compatibility if present
-                if (importData.TryGetValue("protocolVersion", out var versionElement) &&
-                    versionElement.ValueKind == JsonValueKind.String)
-                {
-                    string? versionStr = versionElement.GetString();
-                    if (!string.IsNullOrEmpty(versionStr))
-                    {
-                        string[] parts = versionStr.Split('/');
-                        if (parts.Length == 2 && parts[1].StartsWith("v"))
-                        {
-                            string version = parts[1].Substring(1);
-                            string[] versionParts = version.Split('.');
-                            if (versionParts.Length == 2 &&
-                                int.TryParse(versionParts[0], out int majorVersion) &&
-                                int.TryParse(versionParts[1], out int minorVersion))
-                            {
-                                if (!ProtocolVersion.IsCompatible(majorVersion, minorVersion))
-                                {
-                                    throw new ProtocolVersionException($"Incompatible protocol version: {versionStr}");
-                                }
-                            }
-                        }
-                    }
-                }
-
+                
                 // Process revoked devices list first (if present)
                 if (importData.TryGetValue("revokedDevices", out var revokedDevicesElement) &&
                     revokedDevicesElement.ValueKind == JsonValueKind.Object)

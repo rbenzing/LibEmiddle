@@ -3,7 +3,9 @@ using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.Domain.Enums;
 using LibEmiddle.KeyExchange;
+using LibEmiddle.Protocol;
 
 namespace LibEmiddle.Messaging.Transport
 {
@@ -160,7 +162,7 @@ namespace LibEmiddle.Messaging.Transport
         /// <param name="messageType">The type of message</param>
         /// <param name="timeToLive">How long the message should be valid (0 for no expiration)</param>
         /// <returns>The message ID</returns>
-        public string SendMessage(byte[] recipientKey, string message, Enums.MessageType messageType = Enums.MessageType.Chat, long timeToLive = 0)
+        public string SendMessage(byte[] recipientKey, string message, MessageType messageType = MessageType.Chat, long timeToLive = 0)
         {
             if (recipientKey == null || recipientKey.Length == 0)
                 throw new ArgumentException("Recipient key cannot be null or empty", nameof(recipientKey));
@@ -173,7 +175,7 @@ namespace LibEmiddle.Messaging.Transport
             DoubleRatchetSession session = GetOrCreateSession(recipientId, recipientKey);
 
             // Encrypt the message
-            var (updatedSession, encryptedPayload) = DoubleRatchet.DoubleRatchetEncrypt(session, message);
+            var (updatedSession, encryptedPayload) = DoubleRatchetProtocol.Encrypt(session, message);
 
             ArgumentNullException.ThrowIfNull(updatedSession, nameof(updatedSession));
             ArgumentNullException.ThrowIfNull(encryptedPayload, nameof(encryptedPayload));
@@ -209,7 +211,7 @@ namespace LibEmiddle.Messaging.Transport
         /// <param name="messageType">Optional type filter</param>
         /// <param name="onlyUnread">Whether to get only unread messages</param>
         /// <returns>List of messages with their decrypted content</returns>
-        public List<(MailboxMessage Message, string? Content)> GetMessages(Enums.MessageType? messageType = null, bool onlyUnread = false)
+        public List<(MailboxMessage Message, string? Content)> GetMessages(MessageType? messageType = null, bool onlyUnread = false)
         {
             var results = new List<(MailboxMessage, string?)>();
 
@@ -351,7 +353,7 @@ namespace LibEmiddle.Messaging.Transport
                 contactKey;
 
             // Perform key exchange  
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(contactX25519Key, x25519PrivateKey);
+            byte[] sharedSecret = Sodium.ScalarMult(contactX25519Key, x25519PrivateKey);
 
             // Initialize Double Ratchet
             var (rootKey, chainKey) = DoubleRatchet.DeriveDoubleRatchet(sharedSecret);
@@ -533,7 +535,7 @@ namespace LibEmiddle.Messaging.Transport
             string json = System.Text.Json.JsonSerializer.Serialize(receiptData);
 
             // Send as a normal message
-            Enums.MessageType receiptType = isDeliveryReceipt ? Enums.MessageType.DeliveryReceipt : Enums.MessageType.ReadReceipt;
+            MessageType receiptType = isDeliveryReceipt ? MessageType.DeliveryReceipt : MessageType.ReadReceipt;
             SendMessage(originalMessage.SenderKey, json, receiptType);
         }
 

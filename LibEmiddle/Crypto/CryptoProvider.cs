@@ -1,411 +1,681 @@
+using System.Security.Cryptography;
+using System.Text;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
-using System.Security.Cryptography;
+using LibEmiddle.Domain.Enums;
+using LibEmiddle.KeyExchange;
 
 namespace LibEmiddle.Crypto
 {
     /// <summary>
-    /// Implementation of ICryptoProvider using libsodium for cryptographic operations.
+    /// Implementation of the ICryptoProvider interface that provides cryptographic
+    /// operations using modern cryptographic algorithms for secure messaging.
     /// </summary>
-    public class CryptoProvider : ICryptoProvider
+    public class CryptoProvider : ICryptoProvider, IDisposable
     {
-        private bool _isInitialized;
+        private readonly KeyStorage _keyStorage;
+        private bool _disposed;
 
         /// <summary>
-        /// Initializes the crypto provider and libsodium.
+        /// Initializes a new instance of the CryptoProvider class.
         /// </summary>
-        public void Initialize()
+        public CryptoProvider()
         {
-            if (!_isInitialized)
+            _keyStorage = new KeyStorage();
+        }
+
+        /// <summary>
+        /// Generates a random cryptographically secure key pair.
+        /// </summary>
+        /// <param name="keyType">The type of key pair to generate.</param>
+        /// <returns>A newly generated key pair.</returns>
+        public Task<KeyPair> GenerateKeyPairAsync(KeyType keyType)
+        {
+            try
             {
-                Sodium.Initialize();
-                _isInitialized = true;
+                KeyPair keyPair;
+
+                switch (keyType)
+                {
+                    case KeyType.Ed25519:
+                        keyPair = Sodium.GenerateEd25519KeyPair();
+                        break;
+
+                    case KeyType.X25519:
+                        keyPair = Sodium.GenerateX25519KeyPair();
+                        break;
+
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(keyType), "Unsupported key type.");
+                }
+
+                return Task.FromResult(keyPair);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error generating key pair: {ex.Message}");
+                throw;
             }
         }
 
         /// <summary>
-        /// Gets whether the provider has been initialized.
+        /// Derives a public key from a private key.
         /// </summary>
-        public bool IsInitialized => _isInitialized;
-
-        /// <summary>
-        /// Encrypts data using AES-GCM.
-        /// </summary>
-        public byte[] Encrypt(
-            byte[] plaintext,
-            byte[] key, 
-            byte[] nonce,
-            byte[]? additionalData = null)
+        /// <param name="privateKey">The private key to derive from.</param>
+        /// <param name="keyType">The type of key to derive.</param>
+        /// <returns>The derived public key.</returns>
+        public Span<byte> DerivePublicKey(Span<byte> privateKey, KeyType keyType)
         {
-            Initialize();
-            return AES.AESEncrypt(plaintext, key, nonce, additionalData);
-        }
+            if (privateKey == null)
+                throw new ArgumentNullException(nameof(privateKey));
 
-        /// <summary>
-        /// Decrypts data using AES-GCM.
-        /// </summary>
-        public byte[] Decrypt(
-            byte[] ciphertext, 
-            byte[] key, 
-            byte[] nonce, 
-            byte[]? additionalData = null)
-        {
-            Initialize();
-            return AES.AESDecrypt(ciphertext, key, nonce, additionalData);
-        }
-
-        /// <summary>
-        /// Generates a key pair of the specified type.
-        /// </summary>
-        public KeyPair GenerateKeyPair(KeyType keyType)
-        {
-            Initialize();
-
-            if (keyType == KeyType.Ed25519)
+            try
             {
-                return KeyAuth.GenerateSigningKeyPair();
+                switch (keyType)
+                {
+                    case KeyType.Ed25519:
+                        return Sodium.ConvertEd25519PrivateKeyToX25519(privateKey);
+
+                    case KeyType.X25519:
+                        return Sodium.ScalarMultBase(privateKey);
+
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(keyType), "Unsupported key type.");
+                }
             }
-            else if (keyType == KeyType.X25519)
+            catch (Exception ex)
             {
-                return Sodium.GenerateX25519KeyPair();
-            }
-            else
-            {
-                throw new ArgumentException($"Unsupported key type: {keyType}", nameof(keyType));
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error deriving public key: {ex.Message}");
+                throw;
             }
         }
 
         /// <summary>
-        /// Generates a nonce of the specified size.
+        /// Generates a specified number of random bytes.
         /// </summary>
-        public byte[] GenerateNonce(uint size = 12)
+        /// <param name="count">The number of random bytes to generate.</param>
+        /// <returns>An array of random bytes.</returns>
+        public byte[] GenerateRandomBytes(int count)
         {
-            ArgumentNullException.ThrowIfNullOrEmpty(size.ToString(), nameof(size));
+            if (count <= 0)
+                throw new ArgumentOutOfRangeException(nameof(count), "Count must be greater than zero.");
 
-            Initialize();
-            return NonceGenerator.GenerateNonce(size);
+            try
+            {
+                return RandomNumberGenerator.GetBytes(count);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error generating random bytes: {ex.Message}");
+                throw;
+            }
         }
 
         /// <summary>
-        /// HMAC-SHA256 on the input data (normalizedPublicKey) using the provided key (existingSharedKey).
+        /// Signs data using a private key.
         /// </summary>
-        /// <param name="normalizedPublicKey"></param>
-        /// <param name="existingSharedKey"></param>
+        /// <param name="data">The data to sign.</param>
+        /// <param name="privateKey">The private key to sign with.</param>
+        /// <returns>The signature.</returns>
+        public byte[] Sign(byte[] data, byte[] privateKey)
+        {
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+
+            if (privateKey == null)
+                throw new ArgumentNullException(nameof(privateKey));
+
+            try
+            {
+                return Sodium.SignDetached(data, privateKey);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error signing data: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Async signs data using a private key.
+        /// </summary>
+        /// <param name="data"></param>
+        /// <param name="privateKey"></param>
         /// <returns></returns>
-        public byte[] GenerateHmacSha256(byte[] normalizedPublicKey, byte[] existingSharedKey)
+        public Task<byte[]> SignAsync(byte[] data, byte[] privateKey)
         {
-            Initialize();
-            return Sodium.GenerateHmacSha256(normalizedPublicKey, existingSharedKey);
+            return Task.Run(() => Sign(data, privateKey));
         }
 
         /// <summary>
-        /// Derives a key using HKDF.
+        /// Verifies a signature against data using a public key.
         /// </summary>
-        public byte[] DeriveKey(
-            byte[] ikm, 
-            byte[]? salt = null, 
-            byte[]? info = null, 
-            int length = 32)
+        /// <param name="data">The data that was signed.</param>
+        /// <param name="signature">The signature to verify.</param>
+        /// <param name="publicKey">The public key to verify with.</param>
+        /// <returns>True if the signature is valid, false otherwise.</returns>
+        public bool VerifySignature(byte[] data, byte[] signature, byte[] publicKey)
         {
-            Initialize();
-            return Sodium.HkdfDerive(ikm, salt, info, length);
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+
+            if (signature == null)
+                throw new ArgumentNullException(nameof(signature));
+
+            if (publicKey == null)
+                throw new ArgumentNullException(nameof(publicKey));
+
+            try
+            {
+                return Sodium.SignVerifyDetached(data, signature, publicKey);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error verifying signature: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
-        /// Signs a message using Ed25519.
+        /// Encrypts data using a key and nonce.
         /// </summary>
-        public byte[] Sign(byte[] message, byte[] privateKey)
+        /// <param name="plaintext">The data to encrypt.</param>
+        /// <param name="key">The encryption key.</param>
+        /// <param name="nonce">The nonce for encryption.</param>
+        /// <param name="associatedData">Optional associated data for AEAD encryption.</param>
+        /// <returns>The encrypted data.</returns>
+        public byte[] Encrypt(byte[] plaintext, byte[] key, byte[] nonce, byte[]? associatedData)
         {
-            Initialize();
-            return Sodium.SignDetached(message, privateKey);
+            if (plaintext == null)
+                throw new ArgumentNullException(nameof(plaintext));
+
+            if (key == null)
+                throw new ArgumentNullException(nameof(key));
+
+            if (nonce == null)
+                throw new ArgumentNullException(nameof(nonce));
+
+            try
+            {
+                // Use AES-GCM for encryption
+                return AES.AESEncrypt(plaintext, key, nonce, associatedData);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error encrypting data: {ex.Message}");
+                throw;
+            }
         }
 
         /// <summary>
-        /// Verifies a signature using Ed25519.
+        /// Decrypts data using a key and nonce.
         /// </summary>
-        public bool Verify(byte[] message, byte[] signature, byte[] publicKey)
+        /// <param name="ciphertext">The data to decrypt.</param>
+        /// <param name="key">The decryption key.</param>
+        /// <param name="nonce">The nonce for decryption.</param>
+        /// <param name="associatedData">Optional associated data for AEAD decryption.</param>
+        /// <returns>The decrypted data.</returns>
+        public byte[] Decrypt(byte[] ciphertext, byte[] key, byte[] nonce, byte[]? associatedData)
         {
-            Initialize();
-            return Sodium.VerifyDetached(signature, message, publicKey);
+            if (ciphertext == null)
+                throw new ArgumentNullException(nameof(ciphertext));
+
+            if (key == null)
+                throw new ArgumentNullException(nameof(key));
+
+            if (nonce == null)
+                throw new ArgumentNullException(nameof(nonce));
+
+            try
+            {
+                // Use AES-GCM for decryption
+                return AES.AESDecrypt(ciphertext, key, nonce, associatedData);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error decrypting data: {ex.Message}");
+                throw;
+            }
         }
 
         /// <summary>
-        /// Converts an Ed25519 public key to X25519.
+        /// Performs scalar multiplication (X25519).
         /// </summary>
-        public byte[] ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey)
+        /// <param name="privateKey">The private key.</param>
+        /// <param name="publicKey">The public key.</param>
+        /// <returns>The shared secret.</returns>
+        public byte[] ScalarMult(byte[] privateKey, byte[] publicKey)
         {
-            Initialize();
-            return Sodium.ConvertEd25519PublicKeyToX25519(ed25519PublicKey);
+            if (privateKey == null)
+                throw new ArgumentNullException(nameof(privateKey));
+
+            if (publicKey == null)
+                throw new ArgumentNullException(nameof(publicKey));
+
+            try
+            {
+                return Sodium.ScalarMult(privateKey, publicKey);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error performing scalar multiplication: {ex.Message}");
+                throw;
+            }
         }
 
         /// <summary>
-        /// Derives an X25519 private key from an Ed25519 private key.
+        /// Derives a key from input key material.
         /// </summary>
-        public byte[] DeriveX25519PrivateKeyFromEd25519(ReadOnlySpan<byte> ed25519PrivateKey)
+        /// <param name="inputKeyMaterial">The input key material.</param>
+        /// <param name="salt">Optional salt.</param>
+        /// <param name="info">Optional context info.</param>
+        /// <param name="length">The desired output length.</param>
+        /// <returns>The derived key.</returns>
+        public byte[] DeriveKey(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length)
         {
-            Initialize();
-            return KeyConversion.DeriveX25519PrivateKeyFromEd25519(ed25519PrivateKey);
+            if (inputKeyMaterial == null)
+                throw new ArgumentNullException(nameof(inputKeyMaterial));
+
+            if (length <= 0)
+                throw new ArgumentOutOfRangeException(nameof(length), "Length must be greater than zero.");
+
+            try
+            {
+                // Use HKDF for key derivation
+                return Sodium.HkdfDerive(inputKeyMaterial, salt, info, length);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error deriving key: {ex.Message}");
+                throw;
+            }
         }
 
         /// <summary>
-        /// Generates an Ed25519 key pair from a 32-byte seed.
+        /// Asynchronously derives a key from input key material.
         /// </summary>
-        /// <param name="seed"></param>
-        /// <returns></returns>
-        public KeyPair GenerateEd25519KeyPairFromSeed(byte[] seed)
+        /// <param name="inputKeyMaterial">The input key material.</param>
+        /// <param name="salt">Optional salt.</param>
+        /// <param name="info">Optional context info.</param>
+        /// <param name="length">The desired output length.</param>
+        /// <returns>The derived key.</returns>
+        public Task<byte[]> DeriveKeyAsync(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length)
         {
-            Initialize();
-            return Sodium.GenerateEd25519KeyPairFromSeed(seed);
+            return Task.Run(() => DeriveKey(inputKeyMaterial, salt, info, length));
         }
 
         /// <summary>
-        /// Derrives the Double Ratchet keypair from a shared key (typically from X3DH).
-        /// Creates the initial root key and chain key for the Double Ratchet session.
+        /// Derives a key from a password.
         /// </summary>
-        /// <param name="sharedKey">32-byte shared secret derived from X3DH key agreement.</param>
-        /// <returns>A tuple containing (rootKey, chainKey) used to initialize the Double Ratchet session.</returns>
-        /// <exception cref="ArgumentException">Thrown when sharedKey is empty or has invalid length.</exception>
-        /// <exception cref="CryptographicException">Thrown when key derivation fails.</exception>
-        public (byte[] rootKey, byte[] chainKey) DeriveDoubleRatchet(byte[] sharedKey)
+        /// <param name="password">The password.</param>
+        /// <returns>The derived key.</returns>
+        public byte[] DeriveKeyFromPassword(string password)
         {
-            Initialize();
-            return DoubleRatchet.DeriveDoubleRatchet(sharedKey);
+            if (string.IsNullOrEmpty(password))
+                throw new ArgumentException("Password cannot be null or empty.", nameof(password));
+
+            try
+            {
+                // Use Argon2id for password-based hashing
+                 return Encoding.UTF8.GetBytes(Sodium.Argon2id(password));
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error deriving key from password: {ex.Message}");
+                throw;
+            }
         }
 
         /// <summary>
-        /// Initializes a Double Ratchet session for the initiator (Sender)
-        /// using the shared key from X3DH.
+        /// Asynchronously derives a key from a password.
         /// </summary>
-        /// <param name="sharedKeyFromX3DH">The 32-byte shared secret (SK) derived from X3DHExchange.InitiateSessionAsSender.</param>
-        /// <param name="senderIdentityKeyPair">Sender's own identity key pair (needed for initial DH calculation in DR init).</param>
-        /// <param name="recipientSignedPreKeyPublic">The recipient's public Signed PreKey (X25519) used in the X3DH exchange.</param>
-        /// <param name="sessionId">A unique identifier for this session.</param>
-        /// <returns>The initial DoubleRatchetSession state for the sender.</returns>
-        public DoubleRatchetSession InitializeSessionAsSender(
-            byte[] sharedKeyFromX3DH,
-            KeyPair senderIdentityKeyPair,
-            byte[] recipientSignedPreKeyPublic,
-            string sessionId)
+        /// <param name="password">The password.</param>
+        /// <returns>The derived key.</returns>
+        public Task<byte[]> DeriveKeyFromPasswordAsync(string password)
         {
-            Initialize();
-            return DoubleRatchet.InitializeDoubleRatchet(sharedKeyFromX3DH, senderIdentityKeyPair, 
-                recipientSignedPreKeyPublic, sessionId, true);
+            return Task.Run(() => DeriveKeyFromPassword(password));
         }
 
         /// <summary>
-        /// Initializes a Double Ratchet session for the responder (Receiver)
-        /// using the shared key from X3DH and the sender's initial ephemeral key.
+        /// Converts an Ed25519 public key to an X25519 public key.
         /// </summary>
-        /// <param name="sharedKeyFromX3DH">The 32-byte shared secret (SK) derived from X3DHExchange.EstablishSessionAsReceiver.</param>
-        /// <param name="receiverSignedPreKeyPair">The receiver's Signed PreKey PAIR corresponding to the SPK ID used by the sender.</param>
-        /// <param name="senderEphemeralKeyPublic">The sender's public Ephemeral Key (EKA_pub) from the initial message.</param>
-        /// <param name="sessionId">A unique identifier for this session.</param>
-        /// <returns>The initial DoubleRatchetSession state for the receiver.</returns>
-        public DoubleRatchetSession InitializeSessionAsReceiver(
-             byte[] sharedKeyFromX3DH,
-             KeyPair receiverSignedPreKeyPair,
-             byte[] senderEphemeralKeyPublic,
-             string sessionId)
+        /// <param name="ed25519PublicKey">The Ed25519 public key.</param>
+        /// <returns>The X25519 public key.</returns>
+        public byte[] ConvertEd25519PublicKeyToX25519(byte[] ed25519PublicKey)
         {
-            Initialize();
-            return DoubleRatchet.InitializeDoubleRatchet(sharedKeyFromX3DH, receiverSignedPreKeyPair,
-                senderEphemeralKeyPublic, sessionId, false);
+            if (ed25519PublicKey == null)
+                throw new ArgumentNullException(nameof(ed25519PublicKey));
+
+            if (ed25519PublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+                throw new ArgumentException($"Ed25519 public key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(ed25519PublicKey));
+
+            try
+            {
+                return Sodium.ConvertEd25519PublicKeyToX25519(ed25519PublicKey).ToArray();
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error converting Ed25519 public key to X25519: {ex.Message}");
+                throw;
+            }
         }
 
         /// <summary>
-        /// Resumes a Double Ratchet session, optionally marking a previously processed message ID.
-        /// This is useful after deserializing a persisted session to ensure replay protection logic is maintained.
+        /// Converts an Ed25519 private key to an X25519 private key.
         /// </summary>
-        /// <param name="session">The session to resume.</param>
-        /// <param name="lastProcessedMessageId">Optional last processed message ID to mark as processed.</param>
-        /// <returns>A new session instance with updated state.</returns>
-        /// <exception cref="ArgumentNullException">Thrown if session is null.</exception>
-        public DoubleRatchetSession ResumeSession(
-            DoubleRatchetSession session, 
-            Guid? lastProcessedMessageId = null)
+        /// <param name="ed25519PrivateKey">The Ed25519 private key.</param>
+        /// <returns>The X25519 private key.</returns>
+        public byte[] ConvertEd25519PrivateKeyToX25519(byte[] ed25519PrivateKey)
         {
-            Initialize();
-            return DoubleRatchet.ResumeSession(session, lastProcessedMessageId);
+            if (ed25519PrivateKey == null)
+                throw new ArgumentNullException(nameof(ed25519PrivateKey));
+
+            if (ed25519PrivateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
+                throw new ArgumentException($"Ed25519 private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(ed25519PrivateKey));
+
+            try
+            {
+                return Sodium.ConvertEd25519PrivateKeyToX25519(ed25519PrivateKey).ToArray();
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error converting Ed25519 private key to X25519: {ex.Message}");
+                throw;
+            }
         }
 
         /// <summary>
-        /// Validates that a DoubleRatchetSession is properly initialized with required keys and valid state.
-        /// Used to verify session integrity before performing cryptographic operations.
+        /// Validates that an Ed25519 public key is properly formatted.
         /// </summary>
-        /// <param name="session">The DoubleRatchetSession to validate.</param>
-        /// <returns>True if the session is valid and can be used for cryptographic operations, false otherwise.</returns>
-        public bool ValidateSession(DoubleRatchetSession? session)
+        /// <param name="publicKey">The public key to validate.</param>
+        /// <returns>True if the key is valid, false otherwise.</returns>
+        public bool ValidateEd25519PublicKey(byte[] publicKey)
         {
-            Initialize();
-            return DoubleRatchet.ValidateSession(session);
+            if (publicKey == null)
+                return false;
+
+            if (publicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+                return false;
+
+            try
+            {
+                return Sodium.ValidateEd25519PublicKey(publicKey);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error validating Ed25519 public key: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
-        /// Performs a Diffie-Hellman ratchet step with improved key derivation
+        /// Validates that an X25519 public key is properly formatted.
         /// </summary>
-        /// <param name="rootKey">Current root key</param>
-        /// <param name="dhOutput">Output from new Diffie-Hellman exchange</param>
-        /// <returns>New root key and chain key</returns>
-        public (byte[] newRootKey, byte[] newChainKey) DHRatchetStep(
-            byte[] rootKey, 
-            byte[] dhOutput)
-        {
-            Initialize();
-            return DoubleRatchet.DHRatchetStep(rootKey, dhOutput);
-        }
-
-        /// <summary>
-        /// Performs a step in the Double Ratchet to derive new keys
-        /// </summary>
-        /// <param name="chainKey">Current chain key</param>
-        /// <param name="sessionId">Session ID for tracking</param>
-        /// <param name="strategy">Key rotation strategy</param>
-        /// <returns>New chain key and message key</returns>
-        public (byte[] newChainKey, byte[] messageKey) RatchetStep(
-            byte[] chainKey,
-            string sessionId,
-            Enums.KeyRotationStrategy strategy = Enums.KeyRotationStrategy.Standard)
-        {
-            Initialize();
-            return DoubleRatchet.RatchetStep(chainKey, sessionId, strategy);
-        }
-
-        /// <summary>
-        /// Encrypts a message using the Double Ratchet algorithm.
-        /// </summary>
-        /// <param name="session"></param>
-        /// <param name="message"></param>
-        /// <param name="rotationStrategy"></param>
-        /// <returns></returns>
-        public (DoubleRatchetSession updatedSession, EncryptedMessage encryptedMessage) DoubleRatchetEncrypt(
-            DoubleRatchetSession session, 
-            string message, 
-            Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
-        {
-            Initialize();
-            return DoubleRatchet.DoubleRatchetEncrypt(session, message, rotationStrategy);
-        }
-
-        /// <summary>
-        /// Decrypts a message using the Double Ratchet algorithm.
-        /// </summary>
-        /// <param name="session"></param>
-        /// <param name="encryptedMessage"></param>
-        /// <returns></returns>
-        public (DoubleRatchetSession? updatedSession, string? decryptedMessage) DoubleRatchetDecrypt(
-            DoubleRatchetSession session, 
-            EncryptedMessage encryptedMessage)
-        {
-            ArgumentNullException.ThrowIfNullOrEmpty(session.ToString(), nameof(session));
-
-            Initialize();
-            return DoubleRatchet.DoubleRatchetDecrypt(session, encryptedMessage);
-        }
-
-        /// <summary>
-        /// Encrypts a message using the Double Ratchet algorithm asynchronously.
-        /// </summary>
-        /// <param name="session"></param>
-        /// <param name="message"></param>
-        /// <param name="rotationStrategy"></param>
-        /// <returns></returns>
-        public async Task<(DoubleRatchetSession? updatedSession, EncryptedMessage? encryptedMessage)> DoubleRatchetEncryptAsync(
-            DoubleRatchetSession session, 
-            string message, 
-            Enums.KeyRotationStrategy rotationStrategy = Enums.KeyRotationStrategy.Standard)
-        {
-            ArgumentNullException.ThrowIfNullOrEmpty(session.ToString(), nameof(session));
-
-            Initialize();
-            return (await DoubleRatchet.DoubleRatchetEncryptAsync(session, message, rotationStrategy));
-        }
-
-        /// <summary>
-        /// Decrypts a message using the Double Ratchet algorithm asynchronously.
-        /// </summary>
-        /// <param name="session"></param>
-        /// <param name="encryptedMessage"></param>
-        /// <returns></returns>
-        public async Task<(DoubleRatchetSession? updatedSession, string? decryptedMessage)> DoubleRatchetDecryptAsync(
-            DoubleRatchetSession session, 
-            EncryptedMessage encryptedMessage)
-        {
-            ArgumentNullException.ThrowIfNullOrEmpty(session.ToString(), nameof(session));
-
-            Initialize();
-            return (await DoubleRatchet.DoubleRatchetDecryptAsync(session, encryptedMessage));
-        }
-
-        /// <summary>
-        /// Validates an X25519 public key to ensure it's not an invalid or dangerous value
-        /// </summary>
-        /// <param name="publicKey"></param>
-        /// <returns></returns>
+        /// <param name="publicKey">The public key to validate.</param>
+        /// <returns>True if the key is valid, false otherwise.</returns>
         public bool ValidateX25519PublicKey(byte[] publicKey)
         {
-            return Sodium.ValidateX25519PublicKey(publicKey);
+            if (publicKey == null)
+                return false;
+
+            if (publicKey.Length != Constants.X25519_KEY_SIZE)
+                return false;
+
+            try
+            {
+                return Sodium.ValidateX25519PublicKey(publicKey);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error validating X25519 public key: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
-        /// Exports a key to a secure Base64 string representation
+        /// Stores a key in the platform's secure key storage.
         /// </summary>
-        /// <param name="key"></param>
-        /// <returns></returns>
-        public string ExportKeyToBase64(byte[] key)
+        /// <param name="keyId">The identifier for the key.</param>
+        /// <param name="key">The key to store.</param>
+        /// <param name="password">Optional password for additional protection.</param>
+        /// <returns>True if the key was stored successfully.</returns>
+        public Task<bool> StoreKeyAsync(string keyId, byte[] key, string? password = null)
         {
-            return KeyConversion.ExportKeyToBase64(key);
+            if (string.IsNullOrEmpty(keyId))
+                throw new ArgumentException("Key ID cannot be null or empty.", nameof(keyId));
+
+            if (key == null)
+                throw new ArgumentNullException(nameof(key));
+
+            try
+            {
+                if (password != null)
+                {
+                    // Encrypt the key before storage
+                    byte[] encryptionKey = DeriveKeyFromPassword(password);
+                    try
+                    {
+                        byte[] nonce = GenerateRandomBytes(Constants.NONCE_SIZE);
+                        byte[] encryptedKey = Encrypt(key, encryptionKey, nonce, null);
+
+                        // Store encrypted key with nonce
+                        byte[] combinedData = new byte[nonce.Length + encryptedKey.Length];
+                        Buffer.BlockCopy(nonce, 0, combinedData, 0, nonce.Length);
+                        Buffer.BlockCopy(encryptedKey, 0, combinedData, nonce.Length, encryptedKey.Length);
+
+                        return Task.FromResult(_keyStorage.StoreKey(keyId, combinedData));
+                    }
+                    finally
+                    {
+                        SecureMemory.SecureClear(encryptionKey);
+                    }
+                }
+                else
+                {
+                    // Store the key directly
+                    return Task.FromResult(_keyStorage.StoreKey(keyId, key));
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error storing key {keyId}: {ex.Message}");
+                return Task.FromResult(false);
+            }
         }
 
         /// <summary>
-        /// Imports a key from a Base64 string representation
+        /// Retrieves a key from the platform's secure key storage.
         /// </summary>
-        /// <param name="base64Key"></param>
-        /// <returns></returns>
-        public byte[] ImportKeyFromBase64(string base64Key)
+        /// <param name="keyId">The identifier for the key.</param>
+        /// <param name="password">Optional password if the key was protected with one.</param>
+        /// <returns>The retrieved key, or null if not found.</returns>
+        public Task<byte[]?> RetrieveKeyAsync(string keyId, string? password = null)
         {
-            return KeyConversion.ImportKeyFromBase64(base64Key);
+            if (string.IsNullOrEmpty(keyId))
+                throw new ArgumentException("Key ID cannot be null or empty.", nameof(keyId));
+
+            try
+            {
+                byte[]? storedData = _keyStorage.RetrieveKey(keyId);
+                if (storedData == null)
+                    return Task.FromResult<byte[]?>(null);
+
+                if (password != null)
+                {
+                    // Key is encrypted, decrypt it
+                    byte[] encryptionKey = DeriveKeyFromPassword(password);
+                    try
+                    {
+                        // Extract nonce and encrypted key
+                        byte[] nonce = new byte[Constants.NONCE_SIZE];
+                        byte[] encryptedKey = new byte[storedData.Length - Constants.NONCE_SIZE];
+
+                        Buffer.BlockCopy(storedData, 0, nonce, 0, Constants.NONCE_SIZE);
+                        Buffer.BlockCopy(storedData, Constants.NONCE_SIZE, encryptedKey, 0, encryptedKey.Length);
+
+                        // Decrypt the key
+                        return Task.FromResult<byte[]?>(Decrypt(encryptedKey, encryptionKey, nonce, null));
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggingManager.LogError(nameof(CryptoProvider), $"Error decrypting key {keyId}: {ex.Message}");
+                        return Task.FromResult<byte[]?>(null);
+                    }
+                    finally
+                    {
+                        SecureMemory.SecureClear(encryptionKey);
+                    }
+                }
+                else
+                {
+                    // Key is not encrypted
+                    return Task.FromResult<byte[]?>(storedData);
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error retrieving key {keyId}: {ex.Message}");
+                return Task.FromResult<byte[]?>(null);
+            }
         }
 
         /// <summary>
-        /// Securely stores a key to a file with optional password protection and salt rotation
+        /// Deletes a key from the platform's secure key storage.
         /// </summary>
-        /// <param name="key">Key to store</param>
-        /// <param name="filePath">Path where the key will be stored</param>
-        /// <param name="password">Optional password for additional encryption</param>
-        /// <param name="saltRotationDays">Number of days after which the salt should be rotated (default: 30)</param>
-        public void StoreKeyToFile(byte[] key, string filePath, string? password = null, int saltRotationDays = 30)
+        /// <param name="keyId">The identifier for the key.</param>
+        /// <returns>True if the key was deleted successfully.</returns>
+        public Task<bool> DeleteKeyAsync(string keyId)
         {
-            KeyStorage.StoreKeyToFile(key, filePath, password, saltRotationDays);
+            if (string.IsNullOrEmpty(keyId))
+                throw new ArgumentException("Key ID cannot be null or empty.", nameof(keyId));
+
+            try
+            {
+                return Task.FromResult(_keyStorage.DeleteKey(keyId));
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error deleting key {keyId}: {ex.Message}");
+                return Task.FromResult(false);
+            }
         }
 
         /// <summary>
-        /// Loads a key from a file, decrypting it if it was password-protected
-        /// and handling salt rotation if needed
+        /// Stores a JSON string in the platform's secure storage.
         /// </summary>
-        /// <param name="filePath">Path to the stored key</param>
-        /// <param name="password">Password if the key was encrypted</param>
-        /// <param name="forceRotation">Force salt rotation regardless of time elapsed</param>
-        /// <returns>The loaded key</returns>
-        public byte[] LoadKeyFromFile(string filePath, string? password = null, bool forceRotation = false)
+        /// <param name="keyId">The identifier for the data.</param>
+        /// <param name="jsonData">The JSON data to store.</param>
+        /// <returns>True if the data was stored successfully.</returns>
+        public Task<bool> StoreJsonAsync(string keyId, string jsonData)
         {
-            return KeyStorage.LoadKeyFromFile(filePath, password, forceRotation);
+            return StoreAsync(keyId, jsonData);
         }
 
         /// <summary>
-        /// Securely clears sensitive data from memory.
+        /// Retrieves a JSON string from the platform's secure storage.
         /// </summary>
-        public void SecureClear(byte[] data)
+        /// <param name="keyId">The identifier for the data.</param>
+        /// <returns>The retrieved JSON data, or null if not found.</returns>
+        public Task<string?> RetrieveJsonAsync(string keyId)
         {
-            SecureMemory.SecureClear(data);
+            return RetrieveAsync(keyId);
         }
 
         /// <summary>
-        /// Securely compares two byte arrays in constant time.
+        /// Stores data in the platform's secure storage.
         /// </summary>
-        public bool SecureCompare(byte[] a, byte[] b)
+        /// <param name="keyId">The identifier for the data.</param>
+        /// <param name="data">The data to store.</param>
+        /// <returns>True if the data was stored successfully.</returns>
+        public Task<bool> StoreAsync(string keyId, string data)
         {
-            return SecureMemory.SecureCompare(a, b);
+            if (string.IsNullOrEmpty(keyId))
+                throw new ArgumentException("Key ID cannot be null or empty.", nameof(keyId));
+
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+
+            try
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(data);
+                return Task.FromResult(_keyStorage.StoreData(keyId, bytes));
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error storing data for key {keyId}: {ex.Message}");
+                return Task.FromResult(false);
+            }
+        }
+
+        /// <summary>
+        /// Retrieves data from the platform's secure storage.
+        /// </summary>
+        /// <param name="keyId">The identifier for the data.</param>
+        /// <returns>The retrieved data, or null if not found.</returns>
+        public Task<string?> RetrieveAsync(string keyId)
+        {
+            if (string.IsNullOrEmpty(keyId))
+                throw new ArgumentException("Key ID cannot be null or empty.", nameof(keyId));
+
+            try
+            {
+                byte[]? bytes = _keyStorage.RetrieveData(keyId);
+                if (bytes == null)
+                    return Task.FromResult<string?>(null);
+
+                return Task.FromResult<string?>(Encoding.UTF8.GetString(bytes));
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error retrieving data for key {keyId}: {ex.Message}");
+                return Task.FromResult<string?>(null);
+            }
+        }
+
+        /// <summary>
+        /// Compares two byte arrays in constant time to prevent timing attacks.
+        /// </summary>
+        /// <param name="a">The first array.</param>
+        /// <param name="b">The second array.</param>
+        /// <returns>True if the arrays are equal, false otherwise.</returns>
+        public bool ConstantTimeEquals(byte[] a, byte[] b)
+        {
+            try
+            {
+                return Sodium.ConstantTimeEquals(a, b);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error comparing arrays: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Disposes of resources used by the CryptoProvider.
+        /// </summary>
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        /// <summary>
+        /// Disposes of resources used by the CryptoProvider.
+        /// </summary>
+        /// <param name="disposing">True if disposing, false if finalizing.</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+                return;
+
+            if (disposing)
+            {
+                _keyStorage.Dispose();
+            }
+
+            _disposed = true;
         }
     }
-} 
+}

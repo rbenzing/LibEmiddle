@@ -2,7 +2,8 @@ LibEmiddle/
 ├── src/
 │   ├── LibEmiddle/
 │   │   ├── API/
-│   │   │   └── LibEmiddleClient.cs 
+│   │   │   ├── LibEmiddleClient.cs
+│   │   │   └── LibEmiddleClientOptions.cs 
 │   │   ├── Core/
 │   │   │   ├── LoggingManager.cs
 │   │   │   ├── SecureMemory.cs
@@ -10,18 +11,15 @@ LibEmiddle/
 │   │   ├── Crypto/
 │   │   │   ├── AES.cs
 │   │   │   ├── CryptoProvider.cs
-│   │   │   ├── DoubleRatchet.cs
-│   │   │   ├── KeyAuth.cs
-│   │   │   ├── KeyStorage.cs
-│   │   │   ├── KeyValidation.cs
-│   │   │   └── NonceGenerator.cs
-│   │   ├── KeyExchange/
-│   │   │   ├── SessionPersistence.cs
-│   │   │   └── X3DHExchange.cs
+│   │   │   └── Nonce.cs
+│   │   ├── KeyManagement/
+│   │   │   ├── KeyManager.cs
+│   │   │   └── KeyStorage.cs
 │   │   ├── Messaging/
 │   │   │   ├── Chat/
 │   │   │   │   ├── ChatSession.cs
-│   │   │   │   └── ChatSessionManager.cs
+│   │   │   │   ├── ChatSessionManager.cs
+│   │   │   │   └── ChatSessionOptions.cs
 │   │   │   ├── Group/
 │   │   │   │   ├── GroupChatManager.cs
 │   │   │   │   ├── GroupKeyManager.cs
@@ -29,6 +27,7 @@ LibEmiddle/
 │   │   │   │   ├── GroupMessageCrypto.cs
 │   │   │   │   ├── GroupSecurityValidator.cs
 │   │   │   │   ├── GroupSession.cs
+│   │   │   │   ├── GroupSessionOptions.cs
 │   │   │   │   ├── GroupSessionPersistence.cs
 │   │   │   │   └── SenderKeyDistribution.cs
 │   │   │   └── Transport/
@@ -38,30 +37,51 @@ LibEmiddle/
 │   │   │       ├── MessageSigning.cs
 │   │   │       ├── SecureWebSocketClient.cs
 │   │   │       └── StandardWebSocketClient.cs
-│   │   ├── Models/
-│   │   │   ├── DeviceRevocationMessage.cs
-│   │   │   ├── DeviceSyncMessage.cs
-│   │   │   ├── X3DHKeyBundle.cs
-│   │   │   ├── X3DHPublicBundle.cs
-│   │   │   └── X3DHSession.cs
 │   │   ├── MultiDevice/
 │   │   │   ├── DeviceLinking.cs
-│   │   │   └── DeviceManager.cs
+│   │   │   ├── DeviceManager.cs
+│   │   │   ├── DeviceRevocationMessage.cs
+│   │   │   └── DeviceSyncMessage.cs
+│   │   ├── Protocol/
+│   │   │   ├── DoubleRatchetProtocol.cs
+│   │   │   └── X3DHProtocol.cs
+│   │   ├── Sessions/
+│   │   │   ├── SessionManager.cs
+│   │   │   └── SessionPersistenceManager.cs
 │   │   └── LibEmiddle.csproj
 │   ├── LibEmiddle.Abstractions/
+│   │   ├── IChatSession.cs
 │   │   ├── ICryptoProvider.cs
+│   │   ├── IDoubleRatchetProtocol.cs
+│   │   ├── IGroupSession.cs
+│   │   ├── IKeyManager.cs
 │   │   ├── IMailboxTransport.cs
+│   │   ├── ISesion.cs
+│   │   ├── ISessionManager.cs
+│   │   ├── IStorageProvider.cs
 │   │   ├── IWebSocketClient.cs
+│   │   ├── IX3DHProtocol.cs
 │   │   └── LibEmiddle.Abstractions.csproj
 │   ├── LibEmiddle.Domain/
 │   │   ├── Constants/
 │   │   │   ├── Constants.cs
 │   │   │   └── ProtocolVersion.cs 
 │   │   ├── DTO/
+│   │   │   ├── DoubleRatchetSessionDto.cs
 │   │   │   ├── GroupSessionDto.cs
-│   │   │   └── SerializedSessionData.cs 
+│   │   │   ├── KeyPairDto.cs
+│   │   │   ├── MailboxMessageDto.cs
+│   │   │   ├── SerializableSessionData.cs
+│   │   │   ├── SerializedSessionData.cs
+│   │   │   ├── SkippedMessageKeyDto.cs
+│   │   │   └── X3DHKeyBundleDto.cs 
 │   │   ├── Enums/
-│   │   │   └── Enums.cs 
+│   │   │   ├── KeyRotationStrategy.cs
+│   │   │   ├── KeyType.cs
+│   │   │   ├── MemberRole.cs
+│   │   │   ├── MessageType.cs
+│   │   │   ├── SessionState.cs
+│   │   │   └── SessionType.cs 
 │   │   ├── Helpers/
 │   │   │   ├── Helpers.cs
 │   │   │   └── JsonSerialization.cs 
@@ -76,6 +96,11 @@ LibEmiddle/
 │   │   ├── MessageRecord.cs
 │   │   ├── SenderKeyDistributionMessage.cs
 │   │   ├── SenderSessionResult.cs
+│   │   ├── SessionStateChangedEventArgs.cs
+│   │   ├── SkippedMessageKey.cs
+│   │   ├── X3DHKeyBundle.cs
+│   │   ├── X3DHPublicBundle.cs
+│   │   ├── X3DHSession.cs
 │   │   └── LibEmiddle.Domain.csproj
 │   └── Directory.Build.props
 ├── tests/

@@ -46,7 +46,7 @@ namespace LibEmiddle.Tests.Unit
                     RecipientKey = _testIdentityKeyPair.PublicKey,
                     SenderKey = Sodium.GenerateEd25519KeyPair().PublicKey,
                     IsRead = false,
-                    Type = Enums.MessageType.Chat,
+                    Type = MessageType.Chat,
                     EncryptedPayload = new EncryptedMessage
                     {
                         Ciphertext = new byte[16],
@@ -64,7 +64,7 @@ namespace LibEmiddle.Tests.Unit
                     RecipientKey = _testIdentityKeyPair.PublicKey,
                     SenderKey = Sodium.GenerateEd25519KeyPair().PublicKey,
                     IsRead = true,
-                    Type = Enums.MessageType.DeviceSync,
+                    Type = MessageType.DeviceSync,
                     EncryptedPayload = new EncryptedMessage
                     {
                         Ciphertext = new byte[16],
@@ -147,7 +147,7 @@ namespace LibEmiddle.Tests.Unit
                 string messageId = mailboxManager.SendMessage(
                     recipientKeyPair.PublicKey,
                     "Test message content",
-                    Enums.MessageType.Chat);
+                    MessageType.Chat);
 
                 // Process outgoing messages directly using our test method
                 await mailboxManager.TestProcessOutgoingMessagesAsync(CancellationToken.None);
@@ -333,7 +333,7 @@ namespace LibEmiddle.Tests.Unit
                     mailboxManager.SendMessage(
                         recipientKeyPair.PublicKey,
                         $"Test message {i}",
-                        Enums.MessageType.Chat);
+                        MessageType.Chat);
                 }
 
                 // Act
@@ -380,7 +380,7 @@ namespace LibEmiddle.Tests.Unit
             using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
             {
                 // Send a message to create a session
-                mailboxManager.SendMessage(recipientKeyPair.PublicKey, "Test message", Enums.MessageType.Chat);
+                mailboxManager.SendMessage(recipientKeyPair.PublicKey, "Test message", MessageType.Chat);
 
                 // Act
                 byte[] sessionData = mailboxManager.ExportSession(recipientId);
@@ -395,7 +395,7 @@ namespace LibEmiddle.Tests.Unit
                     Assert.IsTrue(result, "Session import should succeed");
 
                     // Verify we can now send messages with the imported session
-                    string messageId = newMailboxManager.SendMessage(recipientKeyPair.PublicKey, "Test with imported session", Enums.MessageType.Chat);
+                    string messageId = newMailboxManager.SendMessage(recipientKeyPair.PublicKey, "Test with imported session", MessageType.Chat);
                     Assert.IsFalse(string.IsNullOrEmpty(messageId), "Should be able to send messages with imported session");
                 }
             }
@@ -436,7 +436,7 @@ namespace LibEmiddle.Tests.Unit
             using (var sourceManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
             {
                 // Send a message to create a session
-                sourceManager.SendMessage(recipientKeyPair.PublicKey, "Test message", Enums.MessageType.Chat);
+                sourceManager.SendMessage(recipientKeyPair.PublicKey, "Test message", MessageType.Chat);
 
                 // Export with the correct key
                 byte[] sessionData = sourceManager.ExportSession(recipientId, correctKey);
@@ -488,7 +488,7 @@ namespace LibEmiddle.Tests.Unit
                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     MessageId = Guid.NewGuid()
                 },
-                Type = Enums.MessageType.Chat,
+                Type = MessageType.Chat,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds() // Not expired
             };
@@ -507,7 +507,7 @@ namespace LibEmiddle.Tests.Unit
                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     MessageId = Guid.NewGuid()
                 },
-                Type = Enums.MessageType.Chat,
+                Type = MessageType.Chat,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds() // Already expired
             };

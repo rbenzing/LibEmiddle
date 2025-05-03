@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace LibEmiddle.Domain
+﻿namespace LibEmiddle.Domain
 {
     /// <summary>
     /// Result of the sender initiating an X3DH session.

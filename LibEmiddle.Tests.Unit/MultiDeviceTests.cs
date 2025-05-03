@@ -251,7 +251,7 @@ namespace LibEmiddle.Tests.Unit
                 Sodium.ComputePublicKey(mainDeviceX25519Public, _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
 
                 // Now manually perform X3DH key exchange for encryption between devices
-                byte[] sharedSecret = X3DHExchange.PerformX25519DH(
+                byte[] sharedSecret = Sodium.ScalarMult(
                     secondDeviceX25519Public,
                     mainDeviceX25519Public);
                 Trace.TraceWarning($"Performed X3DH key exchange, shared secret length: {sharedSecret.Length}");
@@ -274,7 +274,7 @@ namespace LibEmiddle.Tests.Unit
 
                 // Verify we can decrypt it manually
                 Trace.TraceWarning("Verifying manual decryption works...");
-                byte[] sharedSecret2 = X3DHExchange.PerformX25519DH(
+                byte[] sharedSecret2 = Sodium.ScalarMult(
                     mainDeviceKeyPair.PublicKey,
                     secondDeviceKeyPair.PrivateKey);
                 byte[] decryptedBytes = _cryptoProvider.Decrypt(encryptedMessage.Ciphertext, sharedSecret2, encryptedMessage.Nonce);
@@ -516,7 +516,7 @@ namespace LibEmiddle.Tests.Unit
             var messageForSecondDevice = syncMessages[Convert.ToBase64String(secondDeviceX25519Public)];
 
             // Manually create a custom sync message with an old timestamp (more than 5 minutes old)
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(secondDeviceX25519Public,
+            byte[] sharedSecret = Sodium.ScalarMult(secondDeviceX25519Public,
                 _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(mainDeviceKeyPair.PrivateKey));
 
             // Create sync message with timestamp that's too old

@@ -31,7 +31,7 @@ namespace LibEmiddle.Tests.Unit
             var senderPrivate = _identityKeyPair.PrivateKey;
 
             // Act - should throw ArgumentNullException
-            X3DHExchange.PerformX25519DH(null, senderPrivate);
+            Sodium.ScalarMult(null, senderPrivate);
         }
 
         [TestMethod]
@@ -43,7 +43,7 @@ namespace LibEmiddle.Tests.Unit
             var recipientPublic = _identityKeyPair.PublicKey;
 
             // Act - should throw ArgumentNullException
-            X3DHExchange.PerformX25519DH(recipientPublic, null);
+            Sodium.ScalarMult(recipientPublic, null);
         }
 
         [TestMethod]
@@ -56,7 +56,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] invalidLengthKey = new byte[16]; // Invalid length (should be 32)
 
             // Act - should throw ArgumentException
-            X3DHExchange.PerformX25519DH(invalidLengthKey, senderPrivate);
+            Sodium.ScalarMult(invalidLengthKey, senderPrivate);
         }
 
         [TestMethod]
@@ -69,7 +69,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] invalidLengthKey = new byte[16]; // Invalid length (should be 32)
 
             // Act - should throw ArgumentException
-            X3DHExchange.PerformX25519DH(recipientPublic, invalidLengthKey);
+            Sodium.ScalarMult(recipientPublic, invalidLengthKey);
         }
 
         [TestMethod]
@@ -223,7 +223,7 @@ namespace LibEmiddle.Tests.Unit
                 if (i % 2 == 1)
                 {
                     var ephemeralKeyPair = Sodium.GenerateX25519KeyPair();
-                    var dh = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, ephemeralKeyPair.PrivateKey);
+                    var dh = Sodium.ScalarMult(bobKeyPair.PublicKey, ephemeralKeyPair.PrivateKey);
                     var (newRootKey, nextChainKey) = _cryptoProvider.DHRatchetStep(currentRootKey, dh);
 
                     currentRootKey = newRootKey;
@@ -273,7 +273,7 @@ namespace LibEmiddle.Tests.Unit
 
             // --- Signature Verification ---
             // Verify the signature on the signed pre-key using the identity (Ed25519) public key.
-            bool validSignature = Sodium.VerifyDetached(
+            bool validSignature = Sodium.SignVerifyDetached(
                  bundle.SignedPreKeySignature,
                  bundle.SignedPreKey,
                  bundle.IdentityKey);

@@ -1,343 +1,132 @@
-﻿using System.Text.RegularExpressions;
-using LibEmiddle.Core;
+﻿using LibEmiddle.Core;
 using LibEmiddle.Domain;
+using LibEmiddle.Abstractions;
 
 namespace LibEmiddle.Messaging.Group
 {
     /// <summary>
-    /// Validates security parameters for group operations
+    /// Validates the security properties of group messaging operations,
+    /// ensuring integrity, authenticity, and proper permissions.
     /// </summary>
     public class GroupSecurityValidator
     {
-        // Regular expression for valid group IDs (letters, numbers, underscores, hyphens)
-        // 4-64 characters, starting with a letter or number
-        private static readonly Regex _validGroupIdRegex = new("^[a-zA-Z0-9][a-zA-Z0-9_-]{3,63}$", RegexOptions.Compiled);
+        private readonly ICryptoProvider _cryptoProvider;
+        private readonly GroupMemberManager _memberManager;
 
-        // Maximum age for messages in milliseconds (5 minutes)
-        // This helps prevent replay attacks
-        private const long MAX_MESSAGE_AGE_MS = 5 * 60 * 1000;
-
-        // Maximum future timestamp skew allowance (30 seconds)
-        // This helps prevent attackers from creating messages with future timestamps
-        // while allowing for some clock skew between devices
-        private const long MAX_FUTURE_SKEW_MS = 30 * 1000;
-
-        // Minimum group ID length for security
-        private const int MIN_GROUP_ID_LENGTH = 4;
-
-        // Maximum group ID length
-        private const int MAX_GROUP_ID_LENGTH = 64;
+        // Cache of known public keys for validation
+        private readonly Dictionary<string, byte[]> _knownPublicKeys = new Dictionary<string, byte[]>();
 
         /// <summary>
-        /// Validates a group ID
+        /// Initializes a new instance of the GroupSecurityValidator class.
         /// </summary>
-        /// <param name="groupId">Group identifier to validate</param>
-        /// <exception cref="ArgumentException">Thrown if the group ID is invalid</exception>
-        public void ValidateGroupId(string groupId)
+        /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
+        /// <param name="memberManager">The group member manager.</param>
+        public GroupSecurityValidator(ICryptoProvider cryptoProvider, GroupMemberManager memberManager)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-
-            if (!IsValidGroupId(groupId))
-            {
-                throw new ArgumentException(
-                    $"Group ID must be {MIN_GROUP_ID_LENGTH}-{MAX_GROUP_ID_LENGTH} characters, " +
-                    "containing only letters, numbers, underscores and hyphens, " +
-                    "and must start with a letter or number",
-                    nameof(groupId));
-            }
+            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
+            _memberManager = memberManager ?? throw new ArgumentNullException(nameof(memberManager));
         }
 
         /// <summary>
-        /// Checks if a group ID is valid
+        /// Validates a group operation based on the actor's permissions.
         /// </summary>
-        /// <param name="groupId">Group identifier to check</param>
-        /// <returns>True if the group ID is valid</returns>
-        public bool IsValidGroupId(string groupId)
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="actorPublicKey">The public key of the actor.</param>
+        /// <param name="operation">The operation to validate.</param>
+        /// <returns>True if the operation is allowed.</returns>
+        public bool ValidateGroupOperation(string groupId, byte[] actorPublicKey, GroupOperation operation)
         {
             if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            if (actorPublicKey == null || actorPublicKey.Length == 0)
+                throw new ArgumentException("Actor public key cannot be null or empty.", nameof(actorPublicKey));
+
+            // Check if the actor is a member of the group
+            if (!_memberManager.IsMember(groupId, actorPublicKey))
             {
+                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
+                    $"Non-member attempting {operation} operation on group {groupId}");
                 return false;
             }
 
-            if (groupId.Length < MIN_GROUP_ID_LENGTH || groupId.Length > MAX_GROUP_ID_LENGTH)
+            // Check if the actor has the required permissions
+            switch (operation)
             {
-                return false;
-            }
+                case GroupOperation.Send:
+                    // All members can send messages
+                    return true;
 
-            return _validGroupIdRegex.IsMatch(groupId);
+                case GroupOperation.AddMember:
+                case GroupOperation.RemoveMember:
+                case GroupOperation.PromoteAdmin:
+                case GroupOperation.DemoteAdmin:
+                    // Only admins can perform membership operations
+                    return _memberManager.IsGroupAdmin(groupId, actorPublicKey);
+
+                case GroupOperation.RotateKey:
+                    // Check if the actor has key rotation permission
+                    return _memberManager.HasKeyRotationPermission(groupId, actorPublicKey);
+
+                case GroupOperation.DeleteGroup:
+                    // Only the group owner can delete the group
+                    var groupInfo = _memberManager.GetGroupInfo(groupId);
+                    if (groupInfo?.CreatorPublicKey == null)
+                        return false;
+
+                    return ComparePublicKeys(groupInfo.CreatorPublicKey, actorPublicKey);
+
+                default:
+                    LoggingManager.LogWarning(nameof(GroupSecurityValidator),
+                        $"Unknown operation {operation} requested for group {groupId}");
+                    return false;
+            }
         }
 
         /// <summary>
-        /// Validates a distribution message
+        /// Validates a sender key distribution message.
         /// </summary>
-        /// <param name="distribution">Distribution message to validate</param>
-        /// <returns>True if the distribution message is valid</returns>
+        /// <param name="distribution">The distribution message to validate.</param>
+        /// <returns>True if the distribution message is valid.</returns>
         public bool ValidateDistributionMessage(SenderKeyDistributionMessage distribution)
         {
-            // Check for null
-            if (distribution == null)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Null distribution message");
-                return false;
-            }
+            if (distribution == null || distribution.GroupId == null)
+                throw new ArgumentNullException(nameof(distribution));
 
-            // Check for required fields
-            if (string.IsNullOrEmpty(distribution.GroupId))
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Missing group ID");
-                return false;
-            }
+            string groupId = distribution.GroupId;
+            byte[]? senderIdentityKey = distribution.SenderIdentityKey;
 
-            if (distribution.ChainKey == null || distribution.ChainKey.Length != Constants.AES_KEY_SIZE)
+            // Check if sender identity key is present
+            if (senderIdentityKey == null || senderIdentityKey.Length == 0)
             {
                 LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Invalid chain key length: {distribution.ChainKey?.Length ?? 0}, expected {Constants.AES_KEY_SIZE}");
+                    $"Missing sender identity key in distribution message for group {groupId}");
                 return false;
             }
 
-            if (distribution.SenderIdentityKey == null ||
-                distribution.SenderIdentityKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+            // Check if the sender is a member of the group
+            if (!_memberManager.IsMember(groupId, senderIdentityKey))
             {
                 LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Invalid sender identity key length: {distribution.SenderIdentityKey?.Length ?? 0}, expected {Constants.ED25519_PUBLIC_KEY_SIZE}");
+                    $"Non-member attempting to distribute sender key for group {groupId}");
                 return false;
             }
 
-            if (distribution.Signature == null ||
-                distribution.Signature.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
+            // Verify the signature if present
+            if (distribution.Signature != null)
             {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Invalid signature length: {distribution.Signature?.Length ?? 0}, expected {Constants.ED25519_PRIVATE_KEY_SIZE}");
-                return false;
-            }
-
-            // Validate group ID format
-            if (!IsValidGroupId(distribution.GroupId))
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Invalid group ID format");
-                return false;
-            }
-
-            // Check message freshness
-            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-            // Check for future timestamps (with allowed clock skew)
-            if (distribution.Timestamp > currentTime + MAX_FUTURE_SKEW_MS)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Message timestamp is in the future: {distribution.Timestamp}, current time: {currentTime}");
-                return false;
-            }
-
-            // Check for old messages (replay protection)
-            if (currentTime - distribution.Timestamp > MAX_MESSAGE_AGE_MS)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Message is too old: {distribution.Timestamp}, current time: {currentTime}");
-                return false;
-            }
-
-            // Validate message ID (should not be empty)
-            if (string.IsNullOrEmpty(distribution.MessageId))
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Missing message ID");
-                return false;
-            }
-
-            return true;
-        }
-
-        /// <summary>
-        /// Validates an encrypted group message
-        /// </summary>
-        /// <param name="encryptedMessage">Encrypted message to validate</param>
-        /// <returns>True if the message is valid</returns>
-        public bool ValidateEncryptedMessage(EncryptedGroupMessage encryptedMessage)
-        {
-            // Check for null
-            if (encryptedMessage == null)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Null encrypted message");
-                return false;
-            }
-
-            // Check for required fields
-            if (string.IsNullOrEmpty(encryptedMessage.GroupId))
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Missing group ID");
-                return false;
-            }
-
-            if (encryptedMessage.Ciphertext == null || encryptedMessage.Ciphertext.Length == 0)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Missing or empty ciphertext");
-                return false;
-            }
-
-            if (encryptedMessage.Nonce == null ||
-                encryptedMessage.Nonce.Length != Constants.NONCE_SIZE)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Invalid nonce length: {encryptedMessage.Nonce?.Length ?? 0}, expected {Constants.NONCE_SIZE}");
-                return false;
-            }
-
-            if (encryptedMessage.SenderIdentityKey == null ||
-                encryptedMessage.SenderIdentityKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Invalid sender identity key length: {encryptedMessage.SenderIdentityKey?.Length ?? 0}, expected {Constants.ED25519_PUBLIC_KEY_SIZE}");
-                return false;
-            }
-
-            // Validate group ID format
-            if (!IsValidGroupId(encryptedMessage.GroupId))
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Invalid group ID format");
-                return false;
-            }
-
-            // Check message freshness for replay protection
-            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-            if (encryptedMessage.Timestamp <= 0)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Invalid timestamp (zero or negative)");
-                return false;
-            }
-
-            // Check for old messages
-            if (currentTime - encryptedMessage.Timestamp > MAX_MESSAGE_AGE_MS)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Message is too old: {encryptedMessage.Timestamp}, current time: {currentTime}");
-                return false;
-            }
-
-            // Check for future timestamps (with clock skew allowance)
-            if (encryptedMessage.Timestamp > currentTime + MAX_FUTURE_SKEW_MS)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Message timestamp is in the future: {encryptedMessage.Timestamp}, current time: {currentTime}");
-                return false;
-            }
-
-            // Validate message ID (should not be empty)
-            if (string.IsNullOrEmpty(encryptedMessage.MessageId))
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Missing message ID");
-                return false;
-            }
-
-            return true;
-        }
-
-        /// <summary>
-        /// Validates a chain key
-        /// </summary>
-        /// <param name="chainKey">Chain key to validate</param>
-        /// <returns>True if the chain key is valid</returns>
-        public bool ValidateChainKey(byte[] chainKey)
-        {
-            // Check for null or empty
-            if (chainKey == null || chainKey.Length == 0)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Null or empty chain key");
-                return false;
-            }
-
-            // Check key length
-            if (chainKey.Length != Constants.AES_KEY_SIZE)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Invalid chain key length: {chainKey.Length}, expected {Constants.AES_KEY_SIZE}");
-                return false;
-            }
-
-            // Check for all zeros (invalid key)
-            bool allZeros = true;
-            for (int i = 0; i < chainKey.Length; i++)
-            {
-                if (chainKey[i] != 0)
+                byte[] dataToSign = GetDataToSign(distribution);
+                if (!_cryptoProvider.Verify(dataToSign, distribution.Signature, senderIdentityKey))
                 {
-                    allZeros = false;
-                    break;
+                    LoggingManager.LogWarning(nameof(GroupSecurityValidator),
+                        $"Invalid signature on distribution message for group {groupId}");
+                    return false;
                 }
             }
-
-            if (allZeros)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Chain key contains all zeros");
-                return false;
-            }
-
-            // Check for key entropy (optional, can be implemented if needed)
-            // This would check if the key has sufficient randomness
-
-            return true;
-        }
-
-        /// <summary>
-        /// Validates a group session
-        /// </summary>
-        /// <param name="session">Group session to validate</param>
-        /// <returns>True if the session is valid</returns>
-        public bool ValidateGroupSession(GroupSession session)
-        {
-            // Check for null
-            if (session == null)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Null group session");
-                return false;
-            }
-
-            // Validate group ID
-            if (!IsValidGroupId(session.GroupId))
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Invalid group ID format");
-                return false;
-            }
-
-            // Validate chain key
-            if (!ValidateChainKey(session.ChainKey))
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Invalid chain key");
-                return false;
-            }
-
-            // Validate creator identity key
-            if (session.CreatorIdentityKey == null ||
-                session.CreatorIdentityKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+            else
             {
                 LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Invalid creator identity key length: {session.CreatorIdentityKey?.Length ?? 0}, expected {Constants.ED25519_PUBLIC_KEY_SIZE}");
-                return false;
-            }
-
-            // Validate timestamps
-            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-            // Creation timestamp shouldn't be in the future
-            if (session.CreationTimestamp > currentTime + MAX_FUTURE_SKEW_MS)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Creation timestamp is in the future: {session.CreationTimestamp}, current time: {currentTime}");
-                return false;
-            }
-
-            // Key establishment timestamp shouldn't be in the future
-            if (session.KeyEstablishmentTimestamp > currentTime + MAX_FUTURE_SKEW_MS)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Key establishment timestamp is in the future: {session.KeyEstablishmentTimestamp}, current time: {currentTime}");
-                return false;
-            }
-
-            // Key establishment shouldn't be before creation
-            if (session.KeyEstablishmentTimestamp < session.CreationTimestamp)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Key establishment timestamp ({session.KeyEstablishmentTimestamp}) is before creation timestamp ({session.CreationTimestamp})");
+                    $"Missing signature on distribution message for group {groupId}");
                 return false;
             }
 
@@ -345,67 +134,179 @@ namespace LibEmiddle.Messaging.Group
         }
 
         /// <summary>
-        /// Validates a message ID for uniqueness (replay protection)
+        /// Validates an encrypted group message.
         /// </summary>
-        /// <param name="messageId">Message ID to check</param>
-        /// <param name="processedIds">Set of already processed IDs</param>
-        /// <returns>True if the message ID is new</returns>
-        public bool IsMessageIdUnique(string messageId, HashSet<string> processedIds)
+        /// <param name="message">The encrypted message to validate.</param>
+        /// <returns>True if the message is valid.</returns>
+        public bool ValidateGroupMessage(EncryptedGroupMessage message)
         {
-            if (string.IsNullOrEmpty(messageId))
-            {
-                return false;
-            }
+            if (message == null || message.GroupId == null || message.SenderIdentityKey == null)
+                throw new ArgumentNullException(nameof(message));
 
-            lock (processedIds)
-            {
-                return !processedIds.Contains(messageId);
-            }
-        }
+            string groupId = message.GroupId;
+            byte[] senderIdentityKey = message.SenderIdentityKey;
 
-        /// <summary>
-        /// Validates a member public key
-        /// </summary>
-        /// <param name="memberPublicKey">Member public key to validate</param>
-        /// <returns>True if the key is valid</returns>
-        public bool ValidateMemberPublicKey(byte[] memberPublicKey)
-        {
-            // Check for null or empty
-            if (memberPublicKey == null || memberPublicKey.Length == 0)
-            {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Null or empty member public key");
-                return false;
-            }
-
-            // Check key length for Ed25519 public key
-            if (memberPublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+            // Check if the sender is a member of the group
+            if (!_memberManager.IsMember(groupId, senderIdentityKey))
             {
                 LoggingManager.LogWarning(nameof(GroupSecurityValidator),
-                    $"Invalid member public key length: {memberPublicKey.Length}, expected {Constants.ED25519_PUBLIC_KEY_SIZE}");
+                    $"Non-member attempting to send message to group {groupId}");
                 return false;
             }
 
-            // Check for all zeros (invalid key)
-            bool allZeros = true;
-            for (int i = 0; i < memberPublicKey.Length; i++)
+            // Verify the signature if present
+            if (message.Signature != null)
             {
-                if (memberPublicKey[i] != 0)
+                byte[] dataToSign = GetDataToSign(message);
+                if (!_cryptoProvider.Verify(dataToSign, message.Signature, senderIdentityKey))
                 {
-                    allZeros = false;
-                    break;
+                    LoggingManager.LogWarning(nameof(GroupSecurityValidator),
+                        $"Invalid signature on message for group {groupId}");
+                    return false;
                 }
             }
-
-            if (allZeros)
+            else
             {
-                LoggingManager.LogWarning(nameof(GroupSecurityValidator), "Member public key contains all zeros");
+                LoggingManager.LogWarning(nameof(GroupSecurityValidator),
+                    $"Missing signature on message for group {groupId}");
                 return false;
             }
 
-            // Additional key validation could be added here (like checking point is on curve)
-            // This would require specific Ed25519 validation code
-
             return true;
         }
+
+        /// <summary>
+        /// Gets the data to sign for a distribution message.
+        /// </summary>
+        /// <param name="distribution">The distribution message.</param>
+        /// <returns>The data to sign.</returns>
+        private byte[] GetDataToSign(SenderKeyDistributionMessage distribution)
+        {
+            if (distribution.GroupId == null)
+                throw new ArgumentNullException(nameof(distribution.GroupId));
+            if (distribution.ChainKey == null)
+                throw new ArgumentNullException(nameof(distribution.ChainKey));
+
+            // Combine all relevant fields for signing
+            using var ms = new System.IO.MemoryStream();
+            using var writer = new System.IO.BinaryWriter(ms);
+
+            writer.Write(System.Text.Encoding.UTF8.GetBytes(distribution.GroupId));
+            writer.Write(distribution.ChainKey);
+            writer.Write(distribution.Iteration);
+            writer.Write(distribution.Timestamp);
+            if (distribution.SenderIdentityKey != null)
+            {
+                writer.Write(distribution.SenderIdentityKey);
+            }
+
+            return ms.ToArray();
+        }
+
+        /// <summary>
+        /// Gets the data to sign for an encrypted message.
+        /// </summary>
+        /// <param name="message">The encrypted message.</param>
+        /// <returns>The data to sign.</returns>
+        private byte[] GetDataToSign(EncryptedGroupMessage message)
+        {
+            if (message.GroupId == null)
+                throw new ArgumentNullException(nameof(message.GroupId));
+            if (message.SenderIdentityKey == null)
+                throw new ArgumentNullException(nameof(message.SenderIdentityKey));
+            if (message.Ciphertext == null)
+                throw new ArgumentNullException(nameof(message.Ciphertext));
+            if (message.Nonce == null)
+                throw new ArgumentNullException(nameof(message.Nonce));
+
+            // Combine all relevant fields for signing
+            using var ms = new System.IO.MemoryStream();
+            using var writer = new System.IO.BinaryWriter(ms);
+
+            writer.Write(System.Text.Encoding.UTF8.GetBytes(message.GroupId));
+            writer.Write(message.SenderIdentityKey);
+            writer.Write(message.Ciphertext);
+            writer.Write(message.Nonce);
+            writer.Write(message.Timestamp);
+            writer.Write(message.RotationEpoch);
+            writer.Write(System.Text.Encoding.UTF8.GetBytes(message.MessageId ?? string.Empty));
+
+            return ms.ToArray();
+        }
+
+        /// <summary>
+        /// Registers a public key for validation.
+        /// </summary>
+        /// <param name="identifier">The identifier for the public key.</param>
+        /// <param name="publicKey">The public key to register.</param>
+        public void RegisterPublicKey(string identifier, byte[] publicKey)
+        {
+            if (string.IsNullOrEmpty(identifier))
+                throw new ArgumentException("Identifier cannot be null or empty.", nameof(identifier));
+
+            if (publicKey == null || publicKey.Length == 0)
+                throw new ArgumentException("Public key cannot be null or empty.", nameof(publicKey));
+
+            _knownPublicKeys[identifier] = publicKey.ToArray(); // Create a copy
+        }
+
+        /// <summary>
+        /// Compares two public keys for equality.
+        /// </summary>
+        /// <param name="key1">The first public key.</param>
+        /// <param name="key2">The second public key.</param>
+        /// <returns>True if the keys are equal.</returns>
+        private bool ComparePublicKeys(byte[] key1, byte[] key2)
+        {
+            if (key1 == null || key2 == null)
+                return false;
+
+            if (key1.Length != key2.Length)
+                return false;
+
+            // Use a constant-time comparison to prevent timing attacks
+            return SecureMemory.SecureCompare(key1, key2);
+        }
+    }
+
+    /// <summary>
+    /// Represents the types of operations that can be performed on a group.
+    /// </summary>
+    public enum GroupOperation
+    {
+        /// <summary>
+        /// Send a message to the group.
+        /// </summary>
+        Send,
+
+        /// <summary>
+        /// Add a member to the group.
+        /// </summary>
+        AddMember,
+
+        /// <summary>
+        /// Remove a member from the group.
+        /// </summary>
+        RemoveMember,
+
+        /// <summary>
+        /// Promote a member to admin.
+        /// </summary>
+        PromoteAdmin,
+
+        /// <summary>
+        /// Demote an admin to regular member.
+        /// </summary>
+        DemoteAdmin,
+
+        /// <summary>
+        /// Rotate the group key.
+        /// </summary>
+        RotateKey,
+
+        /// <summary>
+        /// Delete the group.
+        /// </summary>
+        DeleteGroup
     }
 }

@@ -129,7 +129,7 @@ namespace LibEmiddle.Messaging.Group
             {
                 // Generate salt and nonce
                 byte[] salt = SecureMemory.CreateSecureBuffer(Constants.DEFAULT_SALT_SIZE);
-                byte[] nonce = NonceGenerator.GenerateNonce();
+                byte[] nonce = Nonce.GenerateNonce();
 
                 // Derive key from password
                 using var deriveBytes = new Rfc2898DeriveBytes(
@@ -339,7 +339,7 @@ namespace LibEmiddle.Messaging.Group
             // Encrypt if a key is provided
             if (encryptionKey != null && encryptionKey.Length == Constants.AES_KEY_SIZE)
             {
-                byte[] nonce = NonceGenerator.GenerateNonce();
+                byte[] nonce = Nonce.GenerateNonce();
                 byte[] encryptedData = AES.AESEncrypt(data, encryptionKey, nonce);
 
                 // Combine nonce and encrypted data

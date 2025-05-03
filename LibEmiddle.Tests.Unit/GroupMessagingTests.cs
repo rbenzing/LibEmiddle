@@ -528,10 +528,10 @@ namespace LibEmiddle.Tests.Unit
             var daveManager = new GroupChatManager(daveKeyPair);
 
             // 1. Alice creates the group
-            aliceManager.CreateGroup(groupId, Enums.KeyRotationStrategy.Standard);
+            aliceManager.CreateGroup(groupId, KeyRotationStrategy.Standard);
 
             // 2. Bob creates his group
-            bobManager.CreateGroup(groupId, Enums.KeyRotationStrategy.Standard);
+            bobManager.CreateGroup(groupId, KeyRotationStrategy.Standard);
 
             // 3. Alice and Bob add each other to their member lists
             aliceManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
@@ -552,7 +552,7 @@ namespace LibEmiddle.Tests.Unit
 
             // 6. Dave joins the group
             Thread.Sleep(100); // Ensure timestamp separation for clarity
-            daveManager.CreateGroup(groupId, Enums.KeyRotationStrategy.Standard);
+            daveManager.CreateGroup(groupId, KeyRotationStrategy.Standard);
 
             // 7. Add Dave to member lists
             aliceManager.AddGroupMember(groupId, daveKeyPair.PublicKey);
@@ -565,13 +565,13 @@ namespace LibEmiddle.Tests.Unit
 
             // Alice recreates her group and restores members
             aliceManager.DeleteGroup(groupId);
-            aliceManager.CreateGroup(groupId, Enums.KeyRotationStrategy.Standard);
+            aliceManager.CreateGroup(groupId, KeyRotationStrategy.Standard);
             aliceManager.AddGroupMember(groupId, bobKeyPair.PublicKey);
             aliceManager.AddGroupMember(groupId, daveKeyPair.PublicKey);
 
             // Bob recreates his group and restores members
             bobManager.DeleteGroup(groupId);
-            bobManager.CreateGroup(groupId, Enums.KeyRotationStrategy.Standard);
+            bobManager.CreateGroup(groupId, KeyRotationStrategy.Standard);
             bobManager.AddGroupMember(groupId, aliceKeyPair.PublicKey);
             bobManager.AddGroupMember(groupId, daveKeyPair.PublicKey);
 

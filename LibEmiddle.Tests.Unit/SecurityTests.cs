@@ -32,7 +32,7 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
+            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             // Create a session ID to be used consistently
@@ -217,7 +217,7 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
+            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             // Create a session ID

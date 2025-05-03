@@ -7,6 +7,7 @@ using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.KeyExchange;
 using LibEmiddle.Models;
+using LibEmiddle.Protocol;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -14,11 +15,13 @@ namespace LibEmiddle.Tests.Unit
     public class KeyExchangeTests
     {
         private CryptoProvider _cryptoProvider;
+        private X3DHProtocol _x3DHProtocol;
 
         [TestInitialize]
         public void Setup()
         {
             _cryptoProvider = new CryptoProvider();
+            _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
         }
 
         [TestMethod]
@@ -34,8 +37,8 @@ namespace LibEmiddle.Tests.Unit
             var bobPrivate = _bobIdentityKeyPair.PrivateKey;
 
             // Act
-            byte[] aliceSharedSecret = X3DHExchange.PerformX25519DH(bobPublic, alicePrivate);
-            byte[] bobSharedSecret = X3DHExchange.PerformX25519DH(alicePublic, bobPrivate);
+            byte[] aliceSharedSecret = _cryptoProvider.ScalarMult(alicePrivate, bobPublic);
+            byte[] bobSharedSecret = _cryptoProvider.ScalarMult(bobPrivate, alicePublic);
 
             // Assert
             CollectionAssert.AreEqual(aliceSharedSecret, bobSharedSecret);
@@ -45,7 +48,8 @@ namespace LibEmiddle.Tests.Unit
         public void CreateX3DHKeyBundle_ShouldReturnValidBundle()
         {
             // Act
-            var bundle = X3DHExchange.CreateX3DHKeyBundle();
+            KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bundle = _x3DHProtocol.CreateKeyBundleAsync(_identityKeyPair).GetAwaiter().GetResult();
 
             // Assert
             Assert.IsNotNull(bundle);
@@ -57,10 +61,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(bundle.GetSignedPreKeyPrivate());
             Assert.IsTrue(bundle.OneTimePreKeys.Count > 0);
 
-            // The issue is in the parameter order - the first parameter should be the message (SignedPreKey in this case)
-            // In the KeyAuth class and MessageSigning class, the order is:
-            // (message, signature, publicKey) not (signature, message, publicKey)
-            bool validSignature = _cryptoProvider.Verify(
+            bool validSignature = _cryptoProvider.VerifySignature(
                 bundle.SignedPreKey,  // This is the message that was signed
                 bundle.SignedPreKeySignature,  // This is the signature
                 bundle.IdentityKey    // This is the public key used to verify
@@ -76,28 +77,26 @@ namespace LibEmiddle.Tests.Unit
         public void InitiateX3DHSession_ShouldReturnValidSessionData()
         {
             // Arrange
-            var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
+            var bobBundle = _x3DHProtocol.CreateKeyBundleAsync().GetAwaiter().GetResult();
             KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
             var alicePublic = _aliceIdentityKeyPair.PublicKey;
             var alicePrivate = _aliceIdentityKeyPair.PrivateKey;
-
             var bobPublicBundle = new X3DHPublicBundle
             {
                 IdentityKey = bobBundle.IdentityKey,
                 SignedPreKey = bobBundle.SignedPreKey,
                 SignedPreKeySignature = bobBundle.SignedPreKeySignature,
-                OneTimePreKeys = bobBundle.OneTimePreKeys
+                OneTimePreKeys = bobBundle.OneTimePreKeys,
+                // Add the missing properties:
+                SignedPreKeyId = bobBundle.SignedPreKeyId,
+                OneTimePreKeyIds = bobBundle.OneTimePreKeyIds
             };
-
             // Act
-            var session = X3DHExchange.InitiateX3DHSession(bobPublicBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
-
+            var session = _x3DHProtocol.InitiateSessionAsSenderAsync(bobPublicBundle, _aliceIdentityKeyPair).GetAwaiter().GetResult();
             // Assert
             Assert.IsNotNull(session);
-            Assert.IsNotNull(session.RootKey);
-            Assert.IsNotNull(session.ChainKey);
-            CollectionAssert.AreEqual(bobBundle.IdentityKey, session.RecipientIdentityKey);
-            CollectionAssert.AreEqual(alicePublic, session.SenderIdentityKey);
+            Assert.IsNotNull(session.SharedKey);
+            Assert.IsNotNull(session.MessageDataToSend);
         }
 
         [TestMethod]
@@ -106,34 +105,36 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
-            
+
             // Act & Assert - Should throw ArgumentNullException
-            X3DHExchange.InitiateX3DHSession(null, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
+            _x3DHProtocol.InitiateSessionAsSenderAsync(null, _aliceIdentityKeyPair).GetAwaiter().GetResult();
         }
 
         [TestMethod]
         public void InitiateX3DHSession_WithoutOneTimePreKeys_ShouldStillWork()
         {
             // Arrange
-            var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
+            var bobBundle = _x3DHProtocol.CreateKeyBundleAsync().GetAwaiter().GetResult();
             KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
-
             var bobPublicBundle = new X3DHPublicBundle
             {
                 IdentityKey = bobBundle.IdentityKey,
                 SignedPreKey = bobBundle.SignedPreKey,
                 SignedPreKeySignature = bobBundle.SignedPreKeySignature,
-                OneTimePreKeys = null // No one-time pre-keys available
+                SignedPreKeyId = bobBundle.SignedPreKeyId, // Make sure this is set
+                OneTimePreKeys = null, // No one-time pre-keys available
+                OneTimePreKeyIds = null // No one-time pre-key IDs needed
             };
 
             // Act
-            var session = X3DHExchange.InitiateX3DHSession(bobPublicBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
+            var session = _x3DHProtocol.InitiateSessionAsSenderAsync(bobPublicBundle, _aliceIdentityKeyPair).GetAwaiter().GetResult();
 
             // Assert
             Assert.IsNotNull(session);
             Assert.IsNotNull(session.RootKey);
             Assert.IsNotNull(session.ChainKey);
             Assert.IsFalse(session.UsedOneTimePreKey, "Should not have used a one-time pre-key");
+            Assert.IsNull(usedOneTimePreKeyId, "Should not have a one-time pre-key ID");
         }
 
         [TestMethod]

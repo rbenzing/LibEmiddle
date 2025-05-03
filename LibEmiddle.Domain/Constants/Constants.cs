@@ -24,6 +24,21 @@ namespace LibEmiddle.Domain
         public const int AES_KEY_SIZE = 32;
 
         /// <summary>
+        /// Size of the DoubleRatchet chain key (32 bytes)
+        /// </summary>
+        public const int CHAIN_KEY_SIZE = 32;
+
+        /// <summary>
+        /// Size of the DoubleRatchet root key (32 bytes)
+        /// </summary>
+        public const int ROOT_KEY_SIZE = 32;
+
+        /// <summary>
+        /// Size of the DoubleRatchet message key (32 bytes)
+        /// </summary>
+        public const int MESSAGE_KEY_SIZE = 32;
+
+        /// <summary>
         /// Size of authentication tag in AES-GCM (16 bytes)
         /// </summary>
         public const int AUTH_TAG_SIZE = 16;
@@ -84,13 +99,28 @@ namespace LibEmiddle.Domain
         public const int DEFAULT_SALT_ROTATION_DAYS = 30;
 
         /// <summary>
-        /// Default number of days before group key rotation
+        /// Default number of days before key rotation
         /// </summary>
         public const int DEFAULT_KEY_ROTATION_DAILY = 7;
 
         /// <summary>
-        /// Default number of hours before group key rotation
+        /// Default number of hours before key rotation
         /// </summary>
         public const int DEFAULT_KEY_ROTATION_HOURLY = 1;
+
+        /// <summary>
+        /// Default number of messages before key rotation
+        /// </summary>
+        public const int DEFAULT_KEY_ROTATION = 20;
+
+        /// <summary>
+        /// Default number of days in miliseconds to rotate keys (7 days)
+        /// </summary>
+        public const long SIGNED_PREKEY_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000;
+
+        /// <summary>
+        /// Default number of days until key rotation (6 days)
+        /// </summary>
+        public const long SIGNED_PREKEY_ROTATION_MS = 6L * 24 * 60 * 60 * 1000;
     }
 }

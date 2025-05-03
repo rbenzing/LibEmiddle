@@ -7,9 +7,9 @@ namespace LibEmiddle.Crypto
     /// Provides functionality for generating secure nonces for cryptographic operations
     /// using libsodium's high-quality random number generation.
     /// </summary>
-    internal static class NonceGenerator
+    internal static class Nonce
     {
-        private static readonly object _nonceLock = new object();
+        private static readonly object _nonceLock = new();
         private static nuint _nonceCounter = 0;
         private static byte[]? _noncePrefix = null;
 
@@ -23,9 +23,6 @@ namespace LibEmiddle.Crypto
         {
             if (size <= 0)
                 throw new ArgumentException("Nonce size must be positive", nameof(size));
-
-            // Initialize libsodium
-            Sodium.Initialize();
 
             // Generate a completely random nonce using libsodium's secure CSPRNG
             byte[] nonce = SecureMemory.CreateSecureBuffer(size);
@@ -82,25 +79,6 @@ namespace LibEmiddle.Crypto
         {
             // XChaCha20-Poly1305 uses 24-byte nonces
             return GenerateNonce(24);
-        }
-
-        /// <summary>
-        /// Increments a nonce by one in constant time.
-        /// Useful for stream applications where nonces need to be sequential.
-        /// </summary>
-        /// <param name="nonce">The nonce to increment</param>
-        public static void IncrementNonce(byte[] nonce)
-        {
-            if (nonce == null || nonce.Length == 0)
-                throw new ArgumentException("Nonce cannot be null or empty", nameof(nonce));
-
-            // Increment nonce atomically - this MUST happen to ensure uniqueness
-            bool carry = true;
-            for (int i = 0; i < nonce.Length && carry; i++)
-            {
-                nonce[i]++;
-                carry = nonce[i] == 0;
-            }
         }
     }
 }

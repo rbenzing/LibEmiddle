@@ -2,8 +2,7 @@
 using System.Security.Cryptography;
 using LibEmiddle.Core;
 using LibEmiddle.KeyExchange;
-using LibEmiddle.Crypto;
-using LibEmiddle.Models;
+using LibEmiddle.Sessions;
 using LibEmiddle.Domain;
 using Microsoft.Extensions.Logging;
 
@@ -203,7 +202,7 @@ namespace LibEmiddle.Messaging.Chat
                     sharedKeyFromX3DH: sharedKey,
                     // Pass our identity keypair - Check if DR init *needs* IK or just generates its own ratchet key pair.
                     // If it only generates internally, this argument might be removable from InitializeSessionAsSender signature.
-                    recipientSignedPreKeyPublic: recipientBundle.SignedPreKey ?? throw new InvalidOperationException("Recipient bundle missing SignedPreKey required for DR initialization."), // Bob's SPK is initial DHr
+                    recipientInitialPublicKey: recipientBundle.SignedPreKey ?? throw new InvalidOperationException("Recipient bundle missing SignedPreKey required for DR initialization."), // Bob's SPK is initial DHr
                     sessionId: sessionId
                 );
                 LogMessage($"Double Ratchet session {sessionId} initialized.", LogLevel.Debug);
@@ -331,7 +330,7 @@ namespace LibEmiddle.Messaging.Chat
                 string sessionId = $"session-{Guid.NewGuid()}"; // Unique ID for this DR session instance
                 DoubleRatchetSession initialDrSession = DoubleRatchet.InitializeSessionAsReceiver(
                     sharedKeyFromX3DH: sharedKey,
-                    receiverSignedPreKeyPair: receiverSignedPreKeyPair, // Our SPK pair is our initial DHs
+                    receiverInitialKeyPair: receiverSignedPreKeyPair, // Our SPK pair is our initial DHs
                     senderEphemeralKeyPublic: initialMessage.SenderEphemeralKeyPublic, // Alice's EK is her initial DHr
                     sessionId: sessionId
                 );
@@ -447,7 +446,7 @@ namespace LibEmiddle.Messaging.Chat
                 // Get the underlying DoubleRatchetSession state
                 DoubleRatchetSession cryptoState = session.GetCryptoSessionState(); // Assumes method exists
 
-                serializedData = SessionPersistence.SerializeSession(
+                serializedData = SessionPersistenceManager.SerializeSession(
                     cryptoState,
                     _sessionEncryptionKey
                 );

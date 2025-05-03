@@ -4,7 +4,6 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using LibEmiddle.API;
 using LibEmiddle.Messaging.Transport;
 using LibEmiddle.Core;
-using LibEmiddle.Abstractions;
 using LibEmiddle.Domain;
 using LibEmiddle.Crypto;
 

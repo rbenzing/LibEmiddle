@@ -11,6 +11,7 @@ using LibEmiddle.MultiDevice;
 using LibEmiddle.Messaging.Group;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
+using System.Linq;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -111,7 +112,7 @@ namespace LibEmiddle.Tests.Unit
             var bobX25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(bobKeyPair.PrivateKey);
 
             // Create a shared secret (simulating X3DH)
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobX25519Public, identityX25519Private);
+            byte[] sharedSecret = Sodium.ScalarMult(bobX25519Public, identityX25519Private);
 
             // Initialize Double Ratchet
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
@@ -131,11 +132,10 @@ namespace LibEmiddle.Tests.Unit
 
             // Act
             DoubleRatchetSession currentSession = aliceSession;
-            // Make sure our KeyRotationStrategy is Standard (rotate every 20 messages)
-            var rotationStrategy = Enums.KeyRotationStrategy.Standard;
+            var rotationStrategy = KeyRotationStrategy.Standard;
 
-            // Capture various keys for comparison
-            byte[] initialSendingChainKey = aliceSession.SendingChainKey;
+            // Capture arrays for comparison and logging
+            byte[] initialSendingChainKey = aliceSession.SendingChainKey?.ToArray();
             byte[] keyAt5Messages = null;
             byte[] keyAt19Messages = null;
             byte[] keyAt20Messages = null;
@@ -144,6 +144,15 @@ namespace LibEmiddle.Tests.Unit
             // Send 25 messages to trigger rotation
             for (int i = 0; i < 25; i++)
             {
+                Console.WriteLine($"Message {i}: Key before encrypt = {Convert.ToBase64String(currentSession.SendingChainKey)}");
+
+                // Save current key BEFORE encryption
+                if (i == 4) keyAt5Messages = currentSession.SendingChainKey?.ToArray();
+                if (i == 18) keyAt19Messages = currentSession.SendingChainKey?.ToArray();
+                if (i == 19) keyAt20Messages = currentSession.SendingChainKey?.ToArray();
+                if (i == 20) keyAt21Messages = currentSession.SendingChainKey?.ToArray();
+
+                // Encrypt message
                 var (updatedSession, _) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentSession,
                     $"Test message {i}",
@@ -151,16 +160,14 @@ namespace LibEmiddle.Tests.Unit
                 );
 
                 currentSession = updatedSession;
-
-                // Capture keys at specific points
-                if (i == 4) keyAt5Messages = currentSession.SendingChainKey;
-                if (i == 18) keyAt19Messages = currentSession.SendingChainKey;
-                if (i == 19) keyAt20Messages = currentSession.SendingChainKey;
-                if (i == 20) keyAt21Messages = currentSession.SendingChainKey;
+                Console.WriteLine($"Message {i}: Key after encrypt = {Convert.ToBase64String(currentSession.SendingChainKey)}");
             }
 
+            // Log the specific keys we're comparing in the failing assertion
+            Console.WriteLine($"Key at message 19: {Convert.ToBase64String(keyAt19Messages)}");
+            Console.WriteLine($"Key at message 20: {Convert.ToBase64String(keyAt20Messages)}");
+
             // Assert
-            // Keys should change with every message due to the ratchet
             Assert.AreNotEqual(
                 Convert.ToBase64String(initialSendingChainKey),
                 Convert.ToBase64String(keyAt5Messages),
@@ -179,7 +186,6 @@ namespace LibEmiddle.Tests.Unit
                 "Sending chain key should change after message 20"
             );
 
-            // Additional check: Verify message numbers are tracked to prevent replay attacks
             Assert.IsTrue(currentSession.MessageNumberSending > 0,
                 "Session should increment message number");
         }
@@ -193,7 +199,7 @@ namespace LibEmiddle.Tests.Unit
             var charlieKeyPair = Sodium.GenerateX25519KeyPair(); // Third key pair to simulate rotation
 
             // Create a shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
+            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
 
             // Initialize Double Ratchet
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
@@ -207,7 +213,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Then, perform another step with a different DH output
             // to simulate a key rotation with a new device or key
-            byte[] newSharedSecret = X3DHExchange.PerformX25519DH(charlieKeyPair.PublicKey, aliceKeyPair.PrivateKey);
+            byte[] newSharedSecret = Sodium.ScalarMult(charlieKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (newRootKey2, newChainKey2) = _cryptoProvider.DHRatchetStep(
                 newRootKey1,
                 newSharedSecret
@@ -339,7 +345,7 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
+            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             string sessionId = Guid.NewGuid().ToString();
@@ -380,7 +386,7 @@ namespace LibEmiddle.Tests.Unit
                 var (updatedSession, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentAliceSession,
                     original,
-                    Enums.KeyRotationStrategy.Standard
+                    KeyRotationStrategy.Standard
                 );
 
                 messages.Add((original, encrypted));
@@ -391,7 +397,7 @@ namespace LibEmiddle.Tests.Unit
             var aliceNewKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Exchange new DH key and update
-            byte[] newSharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceNewKeyPair.PrivateKey);
+            byte[] newSharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceNewKeyPair.PrivateKey);
             var (newRootKey, newChainKey) = _cryptoProvider.DHRatchetStep(currentAliceSession.RootKey, newSharedSecret);
 
             // 3. Create a new session with the new key pair but preserve session state
@@ -413,7 +419,7 @@ namespace LibEmiddle.Tests.Unit
                 var (updatedSession, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentAliceSession,
                     original,
-                    Enums.KeyRotationStrategy.Standard
+                    KeyRotationStrategy.Standard
                 );
 
                 messages.Add((original, encrypted));
@@ -462,7 +468,7 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
+            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             string sessionId = Guid.NewGuid().ToString();
@@ -521,7 +527,7 @@ namespace LibEmiddle.Tests.Unit
             var bobNewKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Generate new shared secret with new keys
-            byte[] newSharedSecret = X3DHExchange.PerformX25519DH(bobNewKeyPair.PublicKey, aliceNewKeyPair.PrivateKey);
+            byte[] newSharedSecret = Sodium.ScalarMult(bobNewKeyPair.PublicKey, aliceNewKeyPair.PrivateKey);
 
             // Alice updates her session with the new key pair
             currentAliceSession = new DoubleRatchetSession(
@@ -676,7 +682,7 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create shared secret and initialize Double Ratchet
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
+            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             // Create three sessions with different session IDs for testing different strategies
@@ -730,21 +736,21 @@ namespace LibEmiddle.Tests.Unit
                 var (updatedStandardSession, _) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentStandardSession,
                     $"Standard message {i + 1}",
-                    Enums.KeyRotationStrategy.Standard
+                    KeyRotationStrategy.Standard
                 );
 
                 // Hourly session
                 var (updatedHourlySession, _) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentHourlySession,
                     $"Hourly message {i + 1}",
-                    Enums.KeyRotationStrategy.Hourly
+                    KeyRotationStrategy.Hourly
                 );
 
                 // Daily session
                 var (updatedDailySession, _) = _cryptoProvider.DoubleRatchetEncrypt(
                     currentDailySession,
                     $"Daily message {i + 1}",
-                    Enums.KeyRotationStrategy.Daily
+                    KeyRotationStrategy.Daily
                 );
 
                 // Track sending chain key changes

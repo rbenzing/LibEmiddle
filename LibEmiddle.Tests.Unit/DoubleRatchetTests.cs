@@ -38,7 +38,7 @@ namespace LibEmiddle.Tests.Unit
             var alicePrivateKey = Sodium.ConvertEd25519PrivateKeyToX25519(aliceKeyPair.PrivateKey);
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, alicePrivateKey);
+            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, alicePrivateKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             // Create a session ID
@@ -234,7 +234,6 @@ namespace LibEmiddle.Tests.Unit
             // Store initial key states for comparison
             byte[] initialAliceSendingChainKey = new byte[aliceSession.SendingChainKey.Length];
             Array.Copy(aliceSession.SendingChainKey, initialAliceSendingChainKey, initialAliceSendingChainKey.Length);
-
             byte[] initialBobSendingChainKey = new byte[bobSession.SendingChainKey.Length];
             Array.Copy(bobSession.SendingChainKey, initialBobSendingChainKey, initialBobSendingChainKey.Length);
 
@@ -242,38 +241,49 @@ namespace LibEmiddle.Tests.Unit
             const int messageCount = 100;
             for (int i = 0; i < messageCount; i++)
             {
-                // Alternate messages between Alice and Bob
-                if (i % 2 == 0)
+                try
                 {
-                    // Alice sends message to Bob
-                    string message = $"Alice message {i}";
-                    var (updatedAliceSession, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(currentAliceSession, message);
-                    AddSecurityFields(encrypted, sessionId);
-                    var (updatedBobSession, decrypted) = _cryptoProvider.DoubleRatchetDecrypt(currentBobSession, encrypted);
+                    // Alternate messages between Alice and Bob
+                    if (i % 2 == 0)
+                    {
+                        // Alice sends message to Bob
+                        string message = $"Alice message {i}";
+                        var (updatedAliceSession, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(currentAliceSession, message, KeyRotationStrategy.Standard);
+                        Assert.IsNotNull(updatedAliceSession, $"Alice's session update failed at message {i}");
+                        Assert.IsNotNull(encrypted, $"Message encryption failed at message {i}");
 
-                    Assert.IsNotNull(updatedAliceSession, $"Alice's session update failed at message {i}");
-                    Assert.IsNotNull(updatedBobSession, $"Bob's session update failed at message {i}");
-                    Assert.IsNotNull(decrypted, $"Decryption failed at message {i}");
-                    Assert.AreEqual(message, decrypted, $"Message content mismatch at message {i}");
+                        AddSecurityFields(encrypted, sessionId);
+                        var (updatedBobSession, decrypted) = _cryptoProvider.DoubleRatchetDecrypt(currentBobSession, encrypted);
 
-                    currentAliceSession = updatedAliceSession;
-                    currentBobSession = updatedBobSession;
+                        Assert.IsNotNull(updatedBobSession, $"Bob's session update failed at message {i}");
+                        Assert.IsNotNull(decrypted, $"Decryption failed at message {i}");
+                        Assert.AreEqual(message, decrypted, $"Message content mismatch at message {i}");
+
+                        currentAliceSession = updatedAliceSession;
+                        currentBobSession = updatedBobSession;
+                    }
+                    else
+                    {
+                        // Bob sends message to Alice
+                        string message = $"Bob message {i}";
+                        var (updatedBobSession, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(currentBobSession, message, KeyRotationStrategy.Standard);
+                        Assert.IsNotNull(updatedBobSession, $"Bob's session update failed at message {i}");
+                        Assert.IsNotNull(encrypted, $"Message encryption failed at message {i}");
+
+                        AddSecurityFields(encrypted, sessionId);
+                        var (updatedAliceSession, decrypted) = _cryptoProvider.DoubleRatchetDecrypt(currentAliceSession, encrypted);
+
+                        Assert.IsNotNull(updatedAliceSession, $"Alice's session update failed at message {i}");
+                        Assert.IsNotNull(decrypted, $"Decryption failed at message {i}");
+                        Assert.AreEqual(message, decrypted, $"Message content mismatch at message {i}");
+
+                        currentBobSession = updatedBobSession;
+                        currentAliceSession = updatedAliceSession;
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    // Bob sends message to Alice
-                    string message = $"Bob message {i}";
-                    var (updatedBobSession, encrypted) = _cryptoProvider.DoubleRatchetEncrypt(currentBobSession, message);
-                    AddSecurityFields(encrypted, sessionId);
-                    var (updatedAliceSession, decrypted) = _cryptoProvider.DoubleRatchetDecrypt(currentAliceSession, encrypted);
-
-                    Assert.IsNotNull(updatedBobSession, $"Bob's session update failed at message {i}");
-                    Assert.IsNotNull(updatedAliceSession, $"Alice's session update failed at message {i}");
-                    Assert.IsNotNull(decrypted, $"Decryption failed at message {i}");
-                    Assert.AreEqual(message, decrypted, $"Message content mismatch at message {i}");
-
-                    currentBobSession = updatedBobSession;
-                    currentAliceSession = updatedAliceSession;
+                    Assert.Fail($"Exception at message {i}: {ex.Message}\nStack trace: {ex.StackTrace}");
                 }
 
                 // Periodically force garbage collection to test memory safety
@@ -289,9 +299,6 @@ namespace LibEmiddle.Tests.Unit
                 "Alice's sending chain key should have changed during the conversation");
             Assert.IsFalse(SecureMemory.SecureCompare(initialBobSendingChainKey, currentBobSession.SendingChainKey),
                 "Bob's sending chain key should have changed during the conversation");
-
-            // Note: We're not checking root keys anymore since they might only change during DH ratchet steps,
-            // which might not occur during normal conversation without explicit key changes
         }
 
         [TestMethod]

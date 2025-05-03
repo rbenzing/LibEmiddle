@@ -38,7 +38,7 @@ namespace LibEmiddle.MultiDevice
                 // Try to convert assuming it is a valid Ed25519 public key.
                 if (newDevicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
                 {
-                    normalizedPublicKey = Sodium.ConvertEd25519PublicKeyToX25519(newDevicePublicKey);
+                    normalizedPublicKey = Sodium.ConvertEd25519PublicKeyToX25519(newDevicePublicKey).ToArray();
                     keyFormat = "Ed25519";
                 }
                 else if (newDevicePublicKey.Length == Constants.X25519_KEY_SIZE)
@@ -94,13 +94,13 @@ namespace LibEmiddle.MultiDevice
             ArgumentNullException.ThrowIfNull(newDevicePublicKey, nameof(newDevicePublicKey));
 
             // Convert main device's Ed25519 private key to X25519.
-            byte[] mainDeviceX25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(mainDeviceKeyPair.PrivateKey);
+            byte[] mainDeviceX25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(mainDeviceKeyPair.PrivateKey).ToArray();
 
             // Convert new device's Ed25519 public key to X25519.
             byte[] newDeviceX25519Public;
             try
             {
-                newDeviceX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(newDevicePublicKey);
+                newDeviceX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(newDevicePublicKey).ToArray();
             }
             catch (Exception ex)
             {
@@ -108,10 +108,10 @@ namespace LibEmiddle.MultiDevice
             }
 
             // Compute the shared secret using X3DH.
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(mainDeviceX25519Private, newDeviceX25519Public);
+            byte[] sharedSecret = Sodium.ScalarMult(mainDeviceX25519Private, newDeviceX25519Public);
 
             // Sign the new device's original Ed25519 public key using the main device's Ed25519 private key.
-            byte[] signature = MessageSigning.SignMessage(newDevicePublicKey, mainDeviceKeyPair.PrivateKey);
+            byte[] signature = Sodium.Sign(newDevicePublicKey, mainDeviceKeyPair.PrivateKey);
 
             // Build the payload.
             var payload = new
@@ -121,11 +121,11 @@ namespace LibEmiddle.MultiDevice
             };
             string json = System.Text.Json.JsonSerializer.Serialize(payload);
             byte[] plaintext = Encoding.UTF8.GetBytes(json);
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            byte[] nonce = Nonce.GenerateNonce();
             byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
 
             // FIXED: Use the main device's X25519 public key for SenderDHKey
-            byte[] mainDeviceX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(mainDeviceKeyPair.PublicKey);
+            byte[] mainDeviceX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(mainDeviceKeyPair.PublicKey).ToArray();
 
             return new EncryptedMessage
             {
@@ -172,7 +172,7 @@ namespace LibEmiddle.MultiDevice
                 }
 
                 // Convert the new device's Ed25519 private key to X25519.
-                byte[] newDeviceX25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(newDeviceKeyPair.PrivateKey);
+                byte[] newDeviceX25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(newDeviceKeyPair.PrivateKey).ToArray();
 
                 // Retrieve the main device's X25519 public key from SenderDHKey.
                 byte[] mainDeviceX25519Public = encryptedMessage.SenderDHKey;
@@ -183,7 +183,7 @@ namespace LibEmiddle.MultiDevice
                 }
 
                 // Compute the shared secret.
-                byte[] sharedSecret = X3DHExchange.PerformX25519DH(newDeviceX25519Private, mainDeviceX25519Public);
+                byte[] sharedSecret = Sodium.ScalarMult(newDeviceX25519Private, mainDeviceX25519Public);
 
                 // Decrypt the ciphertext.
                 byte[] plaintext;

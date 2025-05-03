@@ -1,316 +1,246 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text;
 using LibEmiddle.Core;
-using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.Abstractions;
 
 namespace LibEmiddle.Messaging.Group
 {
     /// <summary>
-    /// Handles encryption and decryption of group messages
+    /// Handles cryptographic operations for group messages, including encryption,
+    /// decryption, and authentication for group communication.
     /// </summary>
     public class GroupMessageCrypto
     {
-        // Track counters for each group to prevent replay attacks
-        private readonly ConcurrentDictionary<string, long> _messageCounters = new ConcurrentDictionary<string, long>();
+        private readonly ICryptoProvider _cryptoProvider;
 
-        // Store message IDs that have been processed to prevent replay attacks
-        private readonly ConcurrentDictionary<string, ConcurrentHashSet<string>> _processedMessageIds =
-            new ConcurrentDictionary<string, ConcurrentHashSet<string>>();
-
-        // Track when we joined groups to enforce backward secrecy
-        private readonly ConcurrentDictionary<string, long> _groupJoinTimestamps =
-            new ConcurrentDictionary<string, long>();
-
-        // Use a lock per group for the message counter increments only
-        private readonly ConcurrentDictionary<string, object> _groupLocks =
-            new ConcurrentDictionary<string, object>();
-
-        // Add new field to track when keys were last rotated
-        private readonly ConcurrentDictionary<string, long> _lastKeyRotationTimestamps =
-            new ConcurrentDictionary<string, long>();
+        // Records of when users joined groups, used for replay protection
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _groupJoinTimestamps =
+            new ConcurrentDictionary<string, ConcurrentDictionary<string, long>>();
 
         /// <summary>
-        /// Encrypts a message for a group using the provided message key
+        /// Initializes a new instance of the GroupMessageCrypto class.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="message">Message to encrypt</param>
-        /// <param name="messageKey">Message key for this specific message (from ratchet)</param>
-        /// <param name="identityKeyPair">Sender's identity key pair for signing</param>
-        /// <param name="keyRotationTimestamp">The key rotation timestamp</param>
-        /// <returns>Encrypted group message</returns>
-        public EncryptedGroupMessage EncryptMessage(string groupId, string message, byte[] messageKey,
-    KeyPair identityKeyPair, long keyRotationTimestamp = 0)
+        /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
+        public GroupMessageCrypto(ICryptoProvider cryptoProvider)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(message, nameof(message));
-            ArgumentNullException.ThrowIfNull(messageKey, nameof(messageKey));
-            ArgumentNullException.ThrowIfNull(identityKeyPair.PublicKey, nameof(identityKeyPair.PublicKey));
+            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
+        }
 
-            // Get current message counter for the group, or initialize to 0
-            // We need a lock here because we're doing a read-increment-write operation
-            long counter;
-            var counterLock = _groupLocks.GetOrAdd(groupId, _ => new object());
+        /// <summary>
+        /// Encrypts a message for a group using a message key.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="message">The plaintext message to encrypt.</param>
+        /// <param name="messageKey">The message key to use for encryption.</param>
+        /// <param name="senderKeyPair">The sender's key pair for signing.</param>
+        /// <param name="rotationTimestamp">Timestamp of the last key rotation.</param>
+        /// <returns>The encrypted group message.</returns>
+        public EncryptedGroupMessage EncryptMessage(
+            string groupId,
+            string message,
+            byte[] messageKey,
+            KeyPair senderKeyPair,
+            long rotationTimestamp)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-            lock (counterLock)
-            {
-                counter = _messageCounters.GetOrAdd(groupId, 0);
-                counter++;
-                _messageCounters[groupId] = counter;
-            }
+            if (string.IsNullOrEmpty(message))
+                throw new ArgumentException("Message cannot be null or empty.", nameof(message));
 
-            // Generate a random nonce
-            byte[] nonce = NonceGenerator.GenerateNonce();
+            if (messageKey == null || messageKey.Length != Constants.MESSAGE_KEY_SIZE)
+                throw new ArgumentException($"Message key must be {Constants.MESSAGE_KEY_SIZE} bytes.", nameof(messageKey));
 
-            // Convert message to bytes
-            byte[] plaintext = System.Text.Encoding.UTF8.GetBytes(message);
+            if (senderKeyPair.PrivateKey == null || senderKeyPair.PublicKey == null)
+                throw new ArgumentException("Sender key pair is incomplete.", nameof(senderKeyPair));
 
             try
             {
-                // Encrypt the message with authenticated encryption
-                byte[] ciphertext = AES.AESEncrypt(plaintext, messageKey, nonce);
+                // Generate a random nonce
+                byte[] nonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
+
+                // Encode the message
+                byte[] plaintext = Encoding.UTF8.GetBytes(message);
+
+                // Create associated data (group ID and timestamp)
+                byte[] associatedData = Encoding.UTF8.GetBytes($"{groupId}:{rotationTimestamp}");
+
+                // Encrypt the message
+                byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, messageKey, nonce, associatedData);
 
                 // Create the encrypted message
                 var encryptedMessage = new EncryptedGroupMessage
                 {
                     GroupId = groupId,
-                    SenderIdentityKey = identityKeyPair.PublicKey,
+                    SenderIdentityKey = senderKeyPair.PublicKey,
                     Ciphertext = ciphertext,
                     Nonce = nonce,
                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    MessageId = Guid.NewGuid().ToString(),
-                    // Use the provided rotation timestamp, tracking in our internal state for the future
-                    KeyRotationTimestamp = keyRotationTimestamp
+                    RotationEpoch = rotationTimestamp,
+                    MessageId = Guid.NewGuid().ToString("N")
                 };
 
-                // Update our internal tracking
-                if (keyRotationTimestamp > 0)
-                {
-                    _lastKeyRotationTimestamps[groupId] = keyRotationTimestamp;
-                }
+                // Sign the message
+                byte[] messageData = GetDataToSign(encryptedMessage);
+                encryptedMessage.Signature = _cryptoProvider.Sign(messageData, senderKeyPair.PrivateKey);
 
                 return encryptedMessage;
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError(nameof(GroupMessageCrypto), $"Encryption failed: {ex.Message}");
+                LoggingManager.LogError(nameof(GroupMessageCrypto), $"Error encrypting message for group {groupId}: {ex.Message}");
                 throw;
             }
         }
 
         /// <summary>
-        /// Records that we've joined a group at the current time 
+        /// Decrypts a group message using a sender key.
         /// </summary>
-        /// <param name="groupId">The group ID</param>
-        public void RecordGroupJoin(string groupId)
+        /// <param name="encryptedMessage">The encrypted message to decrypt.</param>
+        /// <param name="senderKey">The sender key for decryption.</param>
+        /// <returns>The decrypted message content.</returns>
+        public string? DecryptMessage(EncryptedGroupMessage encryptedMessage, byte[] senderKey)
         {
-            _groupJoinTimestamps[groupId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        }
+            if (encryptedMessage == null)
+                throw new ArgumentNullException(nameof(encryptedMessage));
 
-        /// <summary>
-        /// Decrypts a group message using the provided message key
-        /// </summary>
-        /// <param name="encryptedMessage">Message to decrypt</param>
-        /// <param name="messageKey">Message key for this specific message (from ratchet)</param>
-        /// <returns>Decrypted message text, or null if decryption fails</returns>
-        public string? DecryptMessage(EncryptedGroupMessage encryptedMessage, byte[] messageKey)
-        {
-            ArgumentNullException.ThrowIfNull(encryptedMessage, nameof(encryptedMessage));
-            ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, nameof(encryptedMessage.Ciphertext));
-            ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce, nameof(encryptedMessage.Nonce));
-            ArgumentNullException.ThrowIfNull(messageKey, nameof(messageKey));
+            if (senderKey == null || senderKey.Length != Constants.MESSAGE_KEY_SIZE)
+                throw new ArgumentException($"Sender key must be {Constants.MESSAGE_KEY_SIZE} bytes.", nameof(senderKey));
 
             try
             {
-                // Check for message replay
-                if (IsReplayedMessage(encryptedMessage))
+                string groupId = encryptedMessage.GroupId;
+
+                // Verify the message
+                if (!VerifyMessage(encryptedMessage))
                 {
-                    LoggingManager.LogWarning(nameof(GroupMessageCrypto),
-                        $"Rejecting replayed message with ID {encryptedMessage.MessageId}");
+                    LoggingManager.LogWarning(nameof(GroupMessageCrypto), $"Message signature verification failed for group {groupId}");
                     return null;
                 }
 
-                // Forward secrecy check - don't decrypt messages sent before joining the group
-                if (encryptedMessage.GroupId != null &&
-                    _groupJoinTimestamps.TryGetValue(encryptedMessage.GroupId, out long joinTimestamp))
+                // Check for replay attack
+                if (!ValidateMessageTimestamp(groupId, encryptedMessage.SenderIdentityKey, encryptedMessage.Timestamp))
                 {
-                    // If message was sent before we joined the group, reject it
-                    if (encryptedMessage.Timestamp < joinTimestamp)
-                    {
-                        LoggingManager.LogWarning(nameof(GroupMessageCrypto),
-                            $"Rejecting message sent before joining group: message timestamp {encryptedMessage.Timestamp}, joined at {joinTimestamp}");
-                        return null;
-                    }
+                    LoggingManager.LogWarning(nameof(GroupMessageCrypto), $"Possible replay attack detected in group {groupId}");
+                    return null;
                 }
 
-                // Decrypt the message with authenticated decryption
-                byte[] plaintext = AES.AESDecrypt(encryptedMessage.Ciphertext, messageKey, encryptedMessage.Nonce);
+                // Create associated data (group ID and rotation epoch)
+                byte[] associatedData = Encoding.UTF8.GetBytes($"{groupId}:{encryptedMessage.RotationEpoch}");
 
-                // Convert to string
-                return System.Text.Encoding.UTF8.GetString(plaintext);
-            }
-            catch (CryptographicException ex)
-            {
-                // Decryption failed - likely due to authentication failure or wrong key
-                LoggingManager.LogWarning(nameof(GroupMessageCrypto),
-                    $"Decryption failed: {ex.Message}");
-                return null;
+                // Decrypt the message
+                byte[] decrypted = _cryptoProvider.Decrypt(
+                    encryptedMessage.Ciphertext,
+                    senderKey,
+                    encryptedMessage.Nonce,
+                    associatedData);
+
+                // Decode the message
+                return Encoding.UTF8.GetString(decrypted);
             }
             catch (Exception ex)
             {
-                // Other unexpected errors
-                LoggingManager.LogError(nameof(GroupMessageCrypto),
-                    $"Unexpected error during decryption: {ex.Message}");
+                LoggingManager.LogError(nameof(GroupMessageCrypto), $"Error decrypting message for group {encryptedMessage.GroupId}: {ex.Message}");
                 return null;
             }
         }
 
         /// <summary>
-        /// Checks if a message is a replay of an earlier message
+        /// Records when the user joined a group for message validation.
         /// </summary>
-        /// <param name="message">Message to check</param>
-        /// <returns>True if the message appears to be a replay</returns>
-        private bool IsReplayedMessage(EncryptedGroupMessage message)
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <returns>The join timestamp.</returns>
+        public long RecordGroupJoin(string groupId)
         {
-            if (string.IsNullOrEmpty(message.MessageId) || string.IsNullOrEmpty(message.GroupId))
-            {
-                LoggingManager.LogWarning(nameof(GroupMessageCrypto),
-                    "Message rejected - missing ID or group ID");
-                return true; // Reject messages without proper ID
-            }
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-            // Get or create a concurrent set of processed IDs for this group
-            var processedIds = _processedMessageIds.GetOrAdd(message.GroupId, _ => new ConcurrentHashSet<string>());
+            var joinTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-            // Try to add the message ID to the set - returns false if it was already there
-            bool isNewMessage = processedIds.Add(message.MessageId);
+            // Record the join timestamp
+            var groupTimestamps = _groupJoinTimestamps.GetOrAdd(groupId, _ => new ConcurrentDictionary<string, long>());
+            groupTimestamps[Constants.SELF_USER_ID] = joinTimestamp;
 
-            // If we've successfully added it, it's not a replay
-            if (isNewMessage)
-            {
-                // Periodically trim the set to prevent unbounded growth
-                if (processedIds.Count > Constants.MAX_TRACKED_MESSAGE_IDS)
-                {
-                    TrimMessageIds(message.GroupId, processedIds);
-                }
+            return joinTimestamp;
+        }
 
+        /// <summary>
+        /// Verifies the signature of a group message.
+        /// </summary>
+        /// <param name="message">The encrypted message to verify.</param>
+        /// <returns>True if the signature is valid.</returns>
+        private bool VerifyMessage(EncryptedGroupMessage message)
+        {
+            if (message.Signature == null || message.SenderIdentityKey == null)
                 return false;
+
+            // Get the data that was signed
+            byte[] messageData = GetDataToSign(message);
+
+            // Verify the signature
+            return _cryptoProvider.VerifySignature(messageData, message.Signature, message.SenderIdentityKey);
+        }
+
+        /// <summary>
+        /// Gets the data to sign for a group message.
+        /// </summary>
+        /// <param name="message">The encrypted message.</param>
+        /// <returns>The data to sign.</returns>
+        private byte[] GetDataToSign(EncryptedGroupMessage message)
+        {
+            // Combine all relevant fields for signing
+            using var ms = new System.IO.MemoryStream();
+            using var writer = new System.IO.BinaryWriter(ms);
+
+            writer.Write(Encoding.UTF8.GetBytes(message.GroupId));
+            writer.Write(message.SenderIdentityKey);
+            writer.Write(message.Ciphertext);
+            writer.Write(message.Nonce);
+            writer.Write(message.Timestamp);
+            writer.Write(message.RotationEpoch);
+            writer.Write(Encoding.UTF8.GetBytes(message.MessageId));
+
+            return ms.ToArray();
+        }
+
+        /// <summary>
+        /// Validates a message timestamp to prevent replay attacks.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="senderPublicKey">The sender's public key.</param>
+        /// <param name="messageTimestamp">The message timestamp to validate.</param>
+        /// <returns>True if the timestamp is valid.</returns>
+        private bool ValidateMessageTimestamp(string groupId, byte[] senderPublicKey, long messageTimestamp)
+        {
+            // Get our join timestamp for this group
+            if (_groupJoinTimestamps.TryGetValue(groupId, out var groupTimestamps) &&
+                groupTimestamps.TryGetValue(Constants.SELF_USER_ID, out var joinTimestamp))
+            {
+                // Allow a small tolerance for clock skew
+                const long CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000; // 5 minutes
+
+                // Check if the message is too old (before we joined)
+                if (messageTimestamp < joinTimestamp - CLOCK_SKEW_TOLERANCE_MS)
+                {
+                    LoggingManager.LogWarning(nameof(GroupMessageCrypto),
+                        $"Message from before we joined group {groupId}: message={messageTimestamp}, join={joinTimestamp}");
+                    return false;
+                }
+
+                // Check if the message is too far in the future
+                long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                if (messageTimestamp > now + CLOCK_SKEW_TOLERANCE_MS)
+                {
+                    LoggingManager.LogWarning(nameof(GroupMessageCrypto),
+                        $"Message from the future in group {groupId}: message={messageTimestamp}, now={now}");
+                    return false;
+                }
             }
 
-            // If we couldn't add it, it was already there, so it's a replay
             return true;
-        }
-
-        /// <summary>
-        /// Trims the processed message IDs set to prevent unbounded growth
-        /// </summary>
-        private void TrimMessageIds(string groupId, ConcurrentHashSet<string> processedIds)
-        {
-            // Only one thread should do the trimming at a time
-            var trimLock = _groupLocks.GetOrAdd(groupId + "_trim", _ => new object());
-
-            // Try to get the lock without blocking
-            if (Monitor.TryEnter(trimLock, 0))
-            {
-                try
-                {
-                    // We got the lock, now check again if trimming is still needed
-                    if (processedIds.Count > Constants.MAX_TRACKED_MESSAGE_IDS)
-                    {
-                        // Take a snapshot of the current IDs
-                        var currentIds = processedIds.ToArray();
-
-                        // Remove half of the oldest IDs (a simple approximation)
-                        int toRemove = currentIds.Length / 2;
-
-                        // In a real implementation, we would use timestamps or a FIFO queue
-                        // Here we just remove the first half of the array as a simple solution
-                        for (int i = 0; i < toRemove; i++)
-                        {
-                            processedIds.TryRemove(currentIds[i]);
-                        }
-                    }
-                }
-                finally
-                {
-                    // Always release the lock
-                    Monitor.Exit(trimLock);
-                }
-            }
-            // If we couldn't get the lock, another thread is already doing the trimming or it will happen later
-        }
-
-        /// <summary>
-        /// Extracts iteration information from a message ID if encoded in the format "iter:{iteration}:{originalId}"
-        /// </summary>
-        /// <param name="messageId">Message ID to parse</param>
-        /// <returns>Extracted iteration number or 0 if not found</returns>
-        public uint ExtractIterationFromMessageId(string? messageId)
-        {
-            if (string.IsNullOrEmpty(messageId) || !messageId.StartsWith("iter:"))
-            {
-                return 0;
-            }
-
-            string[] parts = messageId.Split(':', 3);
-            if (parts.Length >= 2 && uint.TryParse(parts[1], out uint parsedIteration))
-            {
-                return parsedIteration;
-            }
-
-            return 0;
-        }
-    }
-
-    /// <summary>
-    /// A thread-safe hash set implementation using ConcurrentDictionary
-    /// </summary>
-    internal class ConcurrentHashSet<T> where T : notnull
-    {
-        private readonly ConcurrentDictionary<T, byte> _dictionary = new ConcurrentDictionary<T, byte>();
-
-        /// <summary>
-        /// Adds an item to the set
-        /// </summary>
-        /// <param name="item">Item to add</param>
-        /// <returns>True if the item was added, false if it was already present</returns>
-        public bool Add(T item)
-        {
-            return _dictionary.TryAdd(item, 0);
-        }
-
-        /// <summary>
-        /// Checks if the set contains an item
-        /// </summary>
-        /// <param name="item">Item to check</param>
-        /// <returns>True if the item is in the set</returns>
-        public bool Contains(T item)
-        {
-            return _dictionary.ContainsKey(item);
-        }
-
-        /// <summary>
-        /// Tries to remove an item from the set
-        /// </summary>
-        /// <param name="item">Item to remove</param>
-        /// <returns>True if the item was removed</returns>
-        public bool TryRemove(T item)
-        {
-            return _dictionary.TryRemove(item, out _);
-        }
-
-        /// <summary>
-        /// Gets the number of items in the set
-        /// </summary>
-        public int Count => _dictionary.Count;
-
-        /// <summary>
-        /// Gets an array of all items in the set
-        /// </summary>
-        /// <returns>Array of items</returns>
-        public T[] ToArray()
-        {
-            return _dictionary.Keys.ToArray();
         }
     }
 }

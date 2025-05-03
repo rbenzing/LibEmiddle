@@ -3,7 +3,7 @@ using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Transport;
 
-namespace LibEmiddle.Models
+namespace LibEmiddle.MultiDevice
 {
     /// <summary>
     /// Represents a message used to synchronize data between multiple devices.

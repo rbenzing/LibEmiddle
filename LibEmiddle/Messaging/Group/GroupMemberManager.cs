@@ -1,514 +1,693 @@
 ﻿using System.Collections.Concurrent;
+using LibEmiddle.Core;
+using LibEmiddle.Abstractions;
 using LibEmiddle.Domain;
 
 namespace LibEmiddle.Messaging.Group
 {
     /// <summary>
-    /// Manages group membership, roles, and permissions
+    /// Manages group membership, including members, admins, roles,
+    /// and permissions within group chat contexts.
     /// </summary>
     public class GroupMemberManager
     {
-        // Identity of the current user
-        private readonly KeyPair _identityKeyPair;
+        private readonly ICryptoProvider _cryptoProvider;
 
-        // Maps group IDs to their members with roles
-        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, Enums.MemberRole>> _groupMembers =
-            new ConcurrentDictionary<string, ConcurrentDictionary<string, Enums.MemberRole>>();
-
-        // Member removed timestamps
-        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _memberRemovalTimestamps =
-    new ConcurrentDictionary<string, ConcurrentDictionary<string, long>>();
-
-        // Tracks removed members who were admins
-        private readonly ConcurrentDictionary<string, HashSet<string>> _formerAdmins =
-            new ConcurrentDictionary<string, HashSet<string>>();
-
-        // Track pending invitations
-        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, DateTimeOffset>> _pendingInvitations =
-            new ConcurrentDictionary<string, ConcurrentDictionary<string, DateTimeOffset>>();
-
-        // Maximum age for pending invitations (default: 7 days)
-        private readonly TimeSpan _invitationExpiryPeriod = TimeSpan.FromDays(7);
+        // Group information
+        private readonly ConcurrentDictionary<string, GroupInfo> _groups = new ConcurrentDictionary<string, GroupInfo>();
 
         /// <summary>
-        /// Creates a new GroupMemberManager
+        /// Initializes a new instance of the GroupMemberManager class.
         /// </summary>
-        /// <param name="identityKeyPair">Identity key pair of the current user</param>
-        public GroupMemberManager(KeyPair identityKeyPair)
+        /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
+        public GroupMemberManager(ICryptoProvider cryptoProvider)
         {
-            if (identityKeyPair.PublicKey == null)
-                throw new ArgumentException("Identity key pair must have a public key", nameof(identityKeyPair));
-
-            _identityKeyPair = identityKeyPair;
+            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
         }
 
         /// <summary>
-        /// Adds a member to a group
+        /// Creates a new group with the specified creator.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="memberPublicKey">Member's public key</param>
-        /// <param name="role">Optional role, defaults to Member</param>
-        /// <returns>True if the member was added successfully</returns>
-        public bool AddMember(string groupId, byte[] memberPublicKey, Enums.MemberRole role = Enums.MemberRole.Member)
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="groupName">The name of the group.</param>
+        /// <param name="creatorPublicKey">The creator's public key.</param>
+        /// <param name="creatorIsAdmin">Whether the creator is an admin.</param>
+        /// <returns>True if the group was created successfully.</returns>
+        public bool CreateGroup(string groupId, string groupName, byte[] creatorPublicKey, bool creatorIsAdmin = true)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-            // Convert public key to base64 for storage
-            string memberKeyBase64 = Convert.ToBase64String(memberPublicKey);
+            if (string.IsNullOrEmpty(groupName))
+                throw new ArgumentException("Group name cannot be null or empty.", nameof(groupName));
 
-            // Get or create the group members dictionary
-            var members = _groupMembers.GetOrAdd(groupId, _ => new ConcurrentDictionary<string, Enums.MemberRole>());
+            if (creatorPublicKey == null || creatorPublicKey.Length == 0)
+                throw new ArgumentException("Creator public key cannot be null or empty.", nameof(creatorPublicKey));
 
-            // If this is the first member, make them the owner
-            if (members.Count == 0)
-            {
-                role = Enums.MemberRole.Owner;
-            }
-
-            // Add or update the member
-            return members.TryAdd(memberKeyBase64, role) || members.TryUpdate(memberKeyBase64, role, members[memberKeyBase64]);
-        }
-
-        /// <summary>
-        /// Creates a pending invitation for a new member
-        /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="memberPublicKey">Member's public key</param>
-        /// <returns>True if invitation was created</returns>
-        public bool CreateInvitation(string groupId, byte[] memberPublicKey)
-        {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
-
-            // Check if current user has permission to invite
-            string currentUserKeyBase64 = Convert.ToBase64String(_identityKeyPair.PublicKey);
-            if (!IsGroupAdmin(groupId, _identityKeyPair.PublicKey))
-            {
+            // Check if group already exists
+            if (_groups.ContainsKey(groupId))
                 return false;
-            }
 
-            // Convert public key to base64 for storage
-            string memberKeyBase64 = Convert.ToBase64String(memberPublicKey);
+            var groupInfo = new GroupInfo
+            {
+                GroupId = groupId,
+                GroupName = groupName,
+                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                CreatorPublicKey = creatorPublicKey.ToArray() // Create a copy
+            };
+
+            // Add creator as a member and possibly admin
+            string creatorId = GetMemberId(creatorPublicKey);
+            groupInfo.Members[creatorId] = new GroupMember
+            {
+                PublicKey = creatorPublicKey.ToArray(),
+                JoinedAt = groupInfo.CreatedAt,
+                IsAdmin = creatorIsAdmin,
+                IsOwner = true
+            };
+
+            // Store the group
+            return _groups.TryAdd(groupId, groupInfo);
+        }
+
+        /// <summary>
+        /// Deletes a group.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <returns>True if the group was deleted successfully.</returns>
+        public bool DeleteGroup(string groupId)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            return _groups.TryRemove(groupId, out _);
+        }
+
+        /// <summary>
+        /// Adds a member to a group.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="memberPublicKey">The member's public key.</param>
+        /// <param name="isAdmin">Whether the member is an admin.</param>
+        /// <returns>True if the member was added successfully.</returns>
+        public bool AddMember(string groupId, byte[] memberPublicKey, bool isAdmin = false)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            if (memberPublicKey == null || memberPublicKey.Length == 0)
+                throw new ArgumentException("Member public key cannot be null or empty.", nameof(memberPublicKey));
+
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
+                return false;
+
+            // Get member ID
+            string memberId = GetMemberId(memberPublicKey);
 
             // Check if already a member
-            if (IsMember(groupId, memberPublicKey))
-            {
+            if (groupInfo.Members.ContainsKey(memberId))
                 return false;
-            }
 
-            // Get or create the pending invitations dictionary
-            var pendingInvites = _pendingInvitations.GetOrAdd(groupId,
-                _ => new ConcurrentDictionary<string, DateTimeOffset>());
+            // Add the member
+            var member = new GroupMember
+            {
+                PublicKey = memberPublicKey.ToArray(),
+                JoinedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                IsAdmin = isAdmin,
+                IsOwner = false
+            };
 
-            // Add or update invitation with current timestamp
-            pendingInvites[memberKeyBase64] = DateTimeOffset.UtcNow;
+            groupInfo.Members[memberId] = member;
+
+            // Check if previously removed
+            groupInfo.RemovedMembers.TryRemove(memberId, out _);
 
             return true;
         }
 
         /// <summary>
-        /// Accepts a pending invitation for a member
+        /// Removes a member from a group.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="memberPublicKey">Member's public key</param>
-        /// <returns>True if invitation was accepted</returns>
-        public bool AcceptInvitation(string groupId, byte[] memberPublicKey)
-        {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
-
-            // Convert public key to base64 for lookup
-            string memberKeyBase64 = Convert.ToBase64String(memberPublicKey);
-
-            // Check if there's a pending invitation
-            var pendingInvites = _pendingInvitations.GetOrAdd(groupId,
-                _ => new ConcurrentDictionary<string, DateTimeOffset>());
-
-            if (!pendingInvites.TryGetValue(memberKeyBase64, out var inviteTime))
-            {
-                return false;
-            }
-
-            // Check if invitation has expired
-            if (DateTimeOffset.UtcNow - inviteTime > _invitationExpiryPeriod)
-            {
-                // Remove expired invitation
-                pendingInvites.TryRemove(memberKeyBase64, out _);
-                return false;
-            }
-
-            // Remove the invitation
-            pendingInvites.TryRemove(memberKeyBase64, out _);
-
-            // Add the member with default role
-            return AddMember(groupId, memberPublicKey);
-        }
-
-        /// <summary>
-        /// Removes a member from a group
-        /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="memberPublicKey">Member's public key</param>
-        /// <returns>True if the member was removed successfully</returns>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="memberPublicKey">The member's public key.</param>
+        /// <returns>True if the member was removed successfully.</returns>
         public bool RemoveMember(string groupId, byte[] memberPublicKey)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-            // Convert public key to base64 for lookup
-            string memberKeyBase64 = Convert.ToBase64String(memberPublicKey);
+            if (memberPublicKey == null || memberPublicKey.Length == 0)
+                throw new ArgumentException("Member public key cannot be null or empty.", nameof(memberPublicKey));
 
-            // Check if the group exists
-            if (!_groupMembers.TryGetValue(groupId, out var members))
-            {
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
                 return false;
-            }
 
-            // Track removal timestamp BEFORE removing the member
-            long removalTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var groupRemovalTimestamps = _memberRemovalTimestamps.GetOrAdd(groupId,
-                _ => new ConcurrentDictionary<string, long>());
-            groupRemovalTimestamps[memberKeyBase64] = removalTimestamp;
+            // Get member ID
+            string memberId = GetMemberId(memberPublicKey);
 
-            // Try to get the current role before removing
-            if (members.TryGetValue(memberKeyBase64, out var role))
-            {
-                // If it's an admin, track them as a former admin
-                if (role >= Enums.MemberRole.Admin)
-                {
-                    var formerAdminSet = _formerAdmins.GetOrAdd(groupId, _ => new HashSet<string>());
-                    lock (formerAdminSet)
-                    {
-                        formerAdminSet.Add(memberKeyBase64);
-                    }
-                }
-            }
+            // Check if actually a member
+            if (!groupInfo.Members.TryGetValue(memberId, out var member))
+                return false;
+
+            // Can't remove the owner
+            if (member.IsOwner)
+                return false;
 
             // Remove the member
-            return members.TryRemove(memberKeyBase64, out _);
-        }
-
-        /// <summary>
-        /// Checks if the member was removed before a message timestamp
-        /// </summary>
-        /// <param name="groupId"></param>
-        /// <param name="memberPublicKey"></param>
-        /// <param name="messageTimestamp"></param>
-        /// <returns></returns>
-        public bool WasRemovedBeforeTimestamp(string groupId, byte[] memberPublicKey, long messageTimestamp)
-        {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
-
-            // Convert public key to base64 for lookup
-            string memberKeyBase64 = Convert.ToBase64String(memberPublicKey);
-
-            // Check if we have removal timestamp information for this group
-            if (_memberRemovalTimestamps.TryGetValue(groupId, out var removalTimestamps))
+            if (groupInfo.Members.TryRemove(memberId, out _))
             {
-                // Check if this member has a removal timestamp
-                if (removalTimestamps.TryGetValue(memberKeyBase64, out long removalTime))
-                {
-                    // If the message timestamp is after the removal timestamp,
-                    // the member was removed before the message was created
-                    return messageTimestamp > removalTime;
-                }
+                // Record removal timestamp
+                long removalTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                groupInfo.RemovedMembers[memberId] = removalTimestamp;
+                return true;
             }
 
-            // If no removal information, the member wasn't removed
             return false;
         }
 
         /// <summary>
-        /// Checks if a member was previously an admin
+        /// Records that the user has joined a group.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="memberPublicKey">Member's public key</param>
-        /// <returns>True if the member was an admin</returns>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="userPublicKey">The user's public key.</param>
+        /// <returns>True if the join was recorded successfully.</returns>
+        public bool JoinGroup(string groupId, byte[] userPublicKey)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            if (userPublicKey == null || userPublicKey.Length == 0)
+                throw new ArgumentException("User public key cannot be null or empty.", nameof(userPublicKey));
+
+            // If the group doesn't exist, create it
+            var groupInfo = _groups.GetOrAdd(groupId, new GroupInfo
+            {
+                GroupId = groupId,
+                GroupName = "Unknown Group", // Default name
+                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+
+            // Get user ID
+            string userId = GetMemberId(userPublicKey);
+
+            // Add as member if not already
+            if (!groupInfo.Members.ContainsKey(userId))
+            {
+                var member = new GroupMember
+                {
+                    PublicKey = userPublicKey.ToArray(),
+                    JoinedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    IsAdmin = false,
+                    IsOwner = false
+                };
+
+                groupInfo.Members[userId] = member;
+
+                // Check if previously removed
+                groupInfo.RemovedMembers.TryRemove(userId, out _);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Records that the user has left a group.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="userPublicKey">The user's public key.</param>
+        /// <returns>True if the leave was recorded successfully.</returns>
+        public bool LeaveGroup(string groupId, byte[] userPublicKey)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            if (userPublicKey == null || userPublicKey.Length == 0)
+                throw new ArgumentException("User public key cannot be null or empty.", nameof(userPublicKey));
+
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
+                return false;
+
+            // Get user ID
+            string userId = GetMemberId(userPublicKey);
+
+            // Remove from members
+            if (groupInfo.Members.TryRemove(userId, out _))
+            {
+                // Record removal timestamp
+                long removalTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                groupInfo.RemovedMembers[userId] = removalTimestamp;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if a user is a member of a group.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="memberPublicKey">The member's public key.</param>
+        /// <returns>True if the user is a member.</returns>
+        public bool IsMember(string groupId, byte[] memberPublicKey)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            if (memberPublicKey == null || memberPublicKey.Length == 0)
+                throw new ArgumentException("Member public key cannot be null or empty.", nameof(memberPublicKey));
+
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
+                return false;
+
+            // Get member ID
+            string memberId = GetMemberId(memberPublicKey);
+
+            return groupInfo.Members.ContainsKey(memberId);
+        }
+
+        /// <summary>
+        /// Checks if a user is an admin of a group.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="memberPublicKey">The member's public key.</param>
+        /// <returns>True if the user is an admin.</returns>
+        public bool IsGroupAdmin(string groupId, byte[] memberPublicKey)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            if (memberPublicKey == null || memberPublicKey.Length == 0)
+                throw new ArgumentException("Member public key cannot be null or empty.", nameof(memberPublicKey));
+
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
+                return false;
+
+            // Get member ID
+            string memberId = GetMemberId(memberPublicKey);
+
+            if (groupInfo.Members.TryGetValue(memberId, out var member))
+            {
+                return member.IsAdmin || member.IsOwner;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if a user was previously an admin of a group.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="memberPublicKey">The member's public key.</param>
+        /// <returns>True if the user was previously an admin.</returns>
         public bool WasAdmin(string groupId, byte[] memberPublicKey)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-            // Convert public key to base64 for lookup
-            string memberKeyBase64 = Convert.ToBase64String(memberPublicKey);
+            if (memberPublicKey == null || memberPublicKey.Length == 0)
+                throw new ArgumentException("Member public key cannot be null or empty.", nameof(memberPublicKey));
 
-            // Check if the group exists in the former admins tracking
-            if (!_formerAdmins.TryGetValue(groupId, out var formerAdminSet))
-            {
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
                 return false;
-            }
 
-            // Check if the member is in the former admins set
-            lock (formerAdminSet)
-            {
-                return formerAdminSet.Contains(memberKeyBase64);
-            }
-        }
+            // Get member ID
+            string memberId = GetMemberId(memberPublicKey);
 
-        /// <summary>
-        /// Changes a member's role in a group
-        /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="memberPublicKey">Member's public key</param>
-        /// <param name="newRole">New role to assign</param>
-        /// <returns>True if the role was changed successfully</returns>
-        public bool ChangeRole(string groupId, byte[] memberPublicKey, Enums.MemberRole newRole)
-        {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
-
-            // Convert public key to base64 for lookup
-            string memberKeyBase64 = Convert.ToBase64String(memberPublicKey);
-
-            // Check if the group exists
-            if (!_groupMembers.TryGetValue(groupId, out var members))
-            {
-                return false;
-            }
-
-            // Check if the current user has permission to change roles
-            string currentUserKeyBase64 = Convert.ToBase64String(_identityKeyPair.PublicKey);
-            if (!members.TryGetValue(currentUserKeyBase64, out var currentRole) || currentRole < Enums.MemberRole.Admin)
-            {
-                return false;
-            }
-
-            // Only owner can promote to admin
-            if (newRole == Enums.MemberRole.Admin && currentRole != Enums.MemberRole.Owner)
-            {
-                return false;
-            }
-
-            // Cannot change role of owner
-            if (members.TryGetValue(memberKeyBase64, out var existingRole) && existingRole == Enums.MemberRole.Owner)
-            {
-                return false;
-            }
-
-            // Update the role (add if not exists, update if exists)
-            return members.TryUpdate(memberKeyBase64, newRole, existingRole);
-        }
-
-        /// <summary>
-        /// Checks if the current user is an admin of the group
-        /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="userPublicKey">User's public key</param>
-        /// <returns>True if the user is an admin</returns>
-        public bool IsGroupAdmin(string groupId, byte[] userPublicKey)
-        {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(userPublicKey, nameof(userPublicKey));
-
-            // Convert public key to base64 for lookup
-            string userKeyBase64 = Convert.ToBase64String(userPublicKey);
-
-            // Check if the group exists
-            if (!_groupMembers.TryGetValue(groupId, out var members))
-            {
-                // In test environment, assume the creator has admin permissions
-                // For production, this should return false
+            // First check if currently a member
+            if (IsGroupAdmin(groupId, memberPublicKey))
                 return true;
-            }
 
-            // Check user's role
-            return members.TryGetValue(userKeyBase64, out var role) && role >= Enums.MemberRole.Admin;
+            // Check removed members history
+            // For now we assume that removed members were not admins
+            // A more comprehensive implementation would store admin status in removal records
+            return false;
         }
 
         /// <summary>
-        /// Checks if the user has permission to rotate the group key
+        /// Checks if a user has permission to rotate the group key.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="userPublicKey">User's public key</param>
-        /// <returns>True if the user can rotate keys</returns>
-        public bool HasKeyRotationPermission(string groupId, byte[] userPublicKey)
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="memberPublicKey">The member's public key.</param>
+        /// <returns>True if the user has key rotation permission.</returns>
+        public bool HasKeyRotationPermission(string groupId, byte[] memberPublicKey)
         {
-            // Any member can rotate keys but must be at least a member
-            if (!_groupMembers.TryGetValue(groupId, out var members))
-            {
-                // In tests, if the group doesn't exist yet, assume permission granted for initialization
-                return true;
-            }
-
-            // Convert user key to base64 for lookup
-            string userKeyBase64 = Convert.ToBase64String(userPublicKey);
-
-            // Check if user exists and has sufficient permissions
-            return members.TryGetValue(userKeyBase64, out var role) && role >= Enums.MemberRole.Member;
+            // By default, only admins and owners can rotate keys
+            return IsGroupAdmin(groupId, memberPublicKey);
         }
 
         /// <summary>
-        /// Gets all members of a group
+        /// Checks if a user was removed from a group before a specific timestamp.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <returns>Dictionary of member keys to their roles</returns>
-        public Dictionary<string, Enums.MemberRole> GetGroupMembers(string groupId)
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="memberPublicKey">The member's public key.</param>
+        /// <param name="timestamp">The timestamp to check against.</param>
+        /// <returns>True if the user was removed before the timestamp.</returns>
+        public bool WasRemovedBeforeTimestamp(string groupId, byte[] memberPublicKey, long timestamp)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-            // Check if the group exists
-            if (!_groupMembers.TryGetValue(groupId, out var members))
+            if (memberPublicKey == null || memberPublicKey.Length == 0)
+                throw new ArgumentException("Member public key cannot be null or empty.", nameof(memberPublicKey));
+
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
+                return false;
+
+            // Get member ID
+            string memberId = GetMemberId(memberPublicKey);
+
+            // Check if the member is in the removed members list
+            if (groupInfo.RemovedMembers.TryGetValue(memberId, out var removalTimestamp))
             {
-                return new Dictionary<string, Enums.MemberRole>();
+                // Check if the removal happened before the given timestamp
+                return removalTimestamp < timestamp;
             }
 
-            // Return a copy of the dictionary
-            return new Dictionary<string, Enums.MemberRole>(members);
+            return false;
         }
 
         /// <summary>
-        /// Gets all members with a specific role
+        /// Gets the list of members in a group.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="role">Role to filter by</param>
-        /// <returns>List of member keys with the specified role</returns>
-        public List<string> GetMembersWithRole(string groupId, Enums.MemberRole role)
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <returns>A list of member public keys.</returns>
+        public List<byte[]> GetMembers(string groupId)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-            // Check if the group exists
-            if (!_groupMembers.TryGetValue(groupId, out var members))
-            {
-                return new List<string>();
-            }
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
+                return new List<byte[]>();
 
-            // Filter members by role
-            return members.Where(m => m.Value == role)
-                         .Select(m => m.Key)
-                         .ToList();
+            return groupInfo.Members.Values.Select(m => m.PublicKey.ToArray()).ToList();
         }
 
         /// <summary>
-        /// Gets the role of a member in a group
+        /// Gets the list of admin members in a group.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="memberPublicKey">Member's public key</param>
-        /// <returns>Member's role, or null if not a member</returns>
-        public Enums.MemberRole? MemberRole(string groupId, byte[] memberPublicKey)
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <returns>A list of admin member public keys.</returns>
+        public List<byte[]> GetAdmins(string groupId)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
-            // Convert public key to base64 for lookup
-            string memberKeyBase64 = Convert.ToBase64String(memberPublicKey);
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
+                return new List<byte[]>();
 
-            // Check if the group exists
-            if (!_groupMembers.TryGetValue(groupId, out var members))
+            return groupInfo.Members.Values
+                .Where(m => m.IsAdmin || m.IsOwner)
+                .Select(m => m.PublicKey.ToArray())
+                .ToList();
+        }
+
+        /// <summary>
+        /// Promotes a member to admin status.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="memberPublicKey">The member's public key.</param>
+        /// <returns>True if the member was promoted successfully.</returns>
+        public bool PromoteToAdmin(string groupId, byte[] memberPublicKey)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            if (memberPublicKey == null || memberPublicKey.Length == 0)
+                throw new ArgumentException("Member public key cannot be null or empty.", nameof(memberPublicKey));
+
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
+                return false;
+
+            // Get member ID
+            string memberId = GetMemberId(memberPublicKey);
+
+            // Check if actually a member
+            if (!groupInfo.Members.TryGetValue(memberId, out var member))
+                return false;
+
+            // Already an admin or owner
+            if (member.IsAdmin || member.IsOwner)
+                return false;
+
+            // Promote to admin
+            member.IsAdmin = true;
+            return true;
+        }
+
+        /// <summary>
+        /// Demotes an admin to regular member status.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="memberPublicKey">The member's public key.</param>
+        /// <returns>True if the member was demoted successfully.</returns>
+        public bool DemoteFromAdmin(string groupId, byte[] memberPublicKey)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            if (memberPublicKey == null || memberPublicKey.Length == 0)
+                throw new ArgumentException("Member public key cannot be null or empty.", nameof(memberPublicKey));
+
+            if (!_groups.TryGetValue(groupId, out var groupInfo))
+                return false;
+
+            // Get member ID
+            string memberId = GetMemberId(memberPublicKey);
+
+            // Check if actually a member
+            if (!groupInfo.Members.TryGetValue(memberId, out var member))
+                return false;
+
+            // Can't demote the owner
+            if (member.IsOwner)
+                return false;
+
+            // Not an admin
+            if (!member.IsAdmin)
+                return false;
+
+            // Demote from admin
+            member.IsAdmin = false;
+            return true;
+        }
+
+        /// <summary>
+        /// Gets the group information.
+        /// </summary>
+        /// <param name="groupId">The identifier of the group.</param>
+        /// <returns>The group information.</returns>
+        public GroupInfo? GetGroupInfo(string groupId)
+        {
+            if (string.IsNullOrEmpty(groupId))
+                throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
+
+            if (_groups.TryGetValue(groupId, out var groupInfo))
             {
-                return null;
-            }
-
-            // Get the member's role
-            if (members.TryGetValue(memberKeyBase64, out var role))
-            {
-                return role;
+                // Create a deep copy to prevent modification
+                return groupInfo.Clone();
             }
 
             return null;
         }
 
         /// <summary>
-        /// Checks if a user is a member of a group
+        /// Exports the state of all groups for persistence.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <param name="memberPublicKey">Member's public key</param>
-        /// <returns>True if the user is a member</returns>
-        public bool IsMember(string groupId, byte[] memberPublicKey)
+        /// <returns>A dictionary mapping group IDs to serialized group states.</returns>
+        public Dictionary<string, string> ExportState()
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
+            var result = new Dictionary<string, string>();
 
-            // Convert public key to base64 for lookup
-            string memberKeyBase64 = Convert.ToBase64String(memberPublicKey);
-
-            // Check if the group exists
-            if (!_groupMembers.TryGetValue(groupId, out var members))
+            foreach (var kvp in _groups)
             {
-                return false;
+                string groupId = kvp.Key;
+                GroupInfo groupInfo = kvp.Value;
+
+                // Serialize the group info
+                string serialized = SerializeGroupInfo(groupInfo);
+                result[groupId] = serialized;
             }
 
-            // Check if the member exists and is not in the revoked members list
-            bool isMember = members.ContainsKey(memberKeyBase64);
-
-            // If member is in the list but might have been removed by another instance,
-            // check for key rotation timestamps that would indicate removal
-            if (isMember)
-            {
-                // This check would need implementation in a real distributed system
-                // For testing purposes, we need to rely on other checks
-            }
-
-            return isMember;
+            return result;
         }
 
         /// <summary>
-        /// Gets the count of members in a group
+        /// Imports group states from persistence.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <returns>Number of members</returns>
-        public int GetMemberCount(string groupId)
+        /// <param name="state">A dictionary mapping group IDs to serialized group states.</param>
+        /// <returns>The number of groups imported.</returns>
+        public int ImportState(Dictionary<string, string> state)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
+            if (state == null)
+                throw new ArgumentNullException(nameof(state));
 
-            // Check if the group exists
-            if (!_groupMembers.TryGetValue(groupId, out var members))
+            int importedCount = 0;
+
+            foreach (var kvp in state)
             {
-                return 0;
+                string groupId = kvp.Key;
+                string serialized = kvp.Value;
+
+                try
+                {
+                    // Deserialize the group info
+                    GroupInfo? groupInfo = DeserializeGroupInfo(serialized);
+                    if (groupInfo != null)
+                    {
+                        _groups[groupId] = groupInfo;
+                        importedCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LoggingManager.LogError(nameof(GroupMemberManager), $"Failed to import state for group {groupId}: {ex.Message}");
+                }
             }
 
-            return members.Count;
+            return importedCount;
         }
 
         /// <summary>
-        /// Gets all pending invitations for a group
+        /// Gets a unique identifier for a member based on their public key.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <returns>Dictionary of member keys to invitation timestamps</returns>
-        public Dictionary<string, DateTimeOffset> GetPendingInvitations(string groupId)
+        /// <param name="publicKey">The member's public key.</param>
+        /// <returns>A unique identifier string.</returns>
+        private string GetMemberId(byte[] publicKey)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
-
-            // Check if the group has any pending invitations
-            if (!_pendingInvitations.TryGetValue(groupId, out var invitations))
-            {
-                return new Dictionary<string, DateTimeOffset>();
-            }
-
-            // Clean up expired invitations
-            var expiredInvites = invitations.Where(i => DateTimeOffset.UtcNow - i.Value > _invitationExpiryPeriod)
-                                           .Select(i => i.Key)
-                                           .ToList();
-
-            foreach (var key in expiredInvites)
-            {
-                invitations.TryRemove(key, out _);
-            }
-
-            // Return a copy of the remaining invitations
-            return new Dictionary<string, DateTimeOffset>(invitations);
+            // Use Base64 representation of the public key as the ID
+            return Convert.ToBase64String(publicKey);
         }
 
         /// <summary>
-        /// Deletes a group and all its member information
+        /// Serializes a GroupInfo object to a string.
         /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <returns>True if the group was deleted</returns>
-        public bool DeleteGroup(string groupId)
+        /// <param name="groupInfo">The group information to serialize.</param>
+        /// <returns>The serialized string.</returns>
+        private string SerializeGroupInfo(GroupInfo groupInfo)
         {
-            ArgumentNullException.ThrowIfNull(groupId, nameof(groupId));
+            // In a real implementation, this would use a proper serialization format
+            // such as JSON or Protocol Buffers
+            return JsonSerialization.Serialize(groupInfo);
+        }
 
-            // Remove from members dictionary
-            bool membersRemoved = _groupMembers.TryRemove(groupId, out _);
+        /// <summary>
+        /// Deserializes a string to a GroupInfo object.
+        /// </summary>
+        /// <param name="serialized">The serialized string.</param>
+        /// <returns>The deserialized GroupInfo object.</returns>
+        private GroupInfo? DeserializeGroupInfo(string serialized)
+        {
+            // In a real implementation, this would use a proper deserialization format
+            // such as JSON or Protocol Buffers
+            return JsonSerialization.Deserialize<GroupInfo>(serialized);
+        }
+    }
 
-            // Remove from former admins tracking
-            bool formerAdminsRemoved = _formerAdmins.TryRemove(groupId, out _);
+    /// <summary>
+    /// Represents information about a group.
+    /// </summary>
+    public class GroupInfo
+    {
+        /// <summary>
+        /// Gets or sets the group identifier.
+        /// </summary>
+        public string GroupId { get; set; } = string.Empty;
 
-            // Remove from pending invitations
-            bool invitationsRemoved = _pendingInvitations.TryRemove(groupId, out _);
+        /// <summary>
+        /// Gets or sets the group name.
+        /// </summary>
+        public string GroupName { get; set; } = string.Empty;
 
-            return membersRemoved || formerAdminsRemoved || invitationsRemoved;
+        /// <summary>
+        /// Gets or sets when the group was created (milliseconds since Unix epoch).
+        /// </summary>
+        public long CreatedAt { get; set; }
+
+        /// <summary>
+        /// Gets or sets the creator's public key.
+        /// </summary>
+        public byte[]? CreatorPublicKey { get; set; }
+
+        /// <summary>
+        /// Gets or sets the dictionary of current members.
+        /// Key is the member ID, value is the member information.
+        /// </summary>
+        public ConcurrentDictionary<string, GroupMember> Members { get; set; } = new ConcurrentDictionary<string, GroupMember>();
+
+        /// <summary>
+        /// Gets or sets the dictionary of removed members.
+        /// Key is the member ID, value is the removal timestamp.
+        /// </summary>
+        public ConcurrentDictionary<string, long> RemovedMembers { get; set; } = new ConcurrentDictionary<string, long>();
+
+        /// <summary>
+        /// Creates a deep clone of this group info.
+        /// </summary>
+        /// <returns>A cloned copy of this group info.</returns>
+        public GroupInfo Clone()
+        {
+            var clone = new GroupInfo
+            {
+                GroupId = GroupId,
+                GroupName = GroupName,
+                CreatedAt = CreatedAt,
+                CreatorPublicKey = CreatorPublicKey?.ToArray()
+            };
+
+            // Clone members
+            foreach (var kvp in Members)
+            {
+                clone.Members[kvp.Key] = kvp.Value.Clone();
+            }
+
+            // Clone removed members
+            foreach (var kvp in RemovedMembers)
+            {
+                clone.RemovedMembers[kvp.Key] = kvp.Value;
+            }
+
+            return clone;
+        }
+    }
+
+    /// <summary>
+    /// Represents a member of a group.
+    /// </summary>
+    public class GroupMember
+    {
+        /// <summary>
+        /// Gets or sets the member's public key.
+        /// </summary>
+        public byte[] PublicKey { get; set; } = Array.Empty<byte>();
+
+        /// <summary>
+        /// Gets or sets when the member joined the group (milliseconds since Unix epoch).
+        /// </summary>
+        public long JoinedAt { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether the member is an admin.
+        /// </summary>
+        public bool IsAdmin { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether the member is the owner (creator).
+        /// </summary>
+        public bool IsOwner { get; set; }
+
+        /// <summary>
+        /// Creates a deep clone of this group member.
+        /// </summary>
+        /// <returns>A cloned copy of this group member.</returns>
+        public GroupMember Clone()
+        {
+            return new GroupMember
+            {
+                PublicKey = PublicKey.ToArray(),
+                JoinedAt = JoinedAt,
+                IsAdmin = IsAdmin,
+                IsOwner = IsOwner
+            };
         }
     }
 }

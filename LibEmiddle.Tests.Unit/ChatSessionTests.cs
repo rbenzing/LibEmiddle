@@ -7,6 +7,7 @@ using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.KeyExchange;
 using LibEmiddle.Messaging.Chat;
+using LibEmiddle.Domain.Enums;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -33,7 +34,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] _alicePrivateKey = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(_aliceKeyPair.PrivateKey);
 
             // Create a shared secret (simulating X3DH)
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(_alicePrivateKey, _bobKeyPair.PublicKey);
+            byte[] sharedSecret = Sodium.ScalarMult(_alicePrivateKey, _bobKeyPair.PublicKey);
 
             // Initialize Double Ratchet
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
@@ -76,7 +77,7 @@ namespace LibEmiddle.Tests.Unit
         public void ChatSession_InitialState_ShouldBeInitialized()
         {
             // Assert
-            Assert.AreEqual(Enums.ChatSessionState.Initialized, _aliceChatSession.State);
+            Assert.AreEqual(SessionState.Initialized, _aliceChatSession.State);
             Assert.IsNotNull(_aliceChatSession.CreatedAt);
             Assert.IsNull(_aliceChatSession.LastActivatedAt);
             Assert.IsNull(_aliceChatSession.LastSuspendedAt);
@@ -90,7 +91,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsTrue(result);
-            Assert.AreEqual(Enums.ChatSessionState.Active, _aliceChatSession.State);
+            Assert.AreEqual(SessionState.Active, _aliceChatSession.State);
             Assert.IsNotNull(_aliceChatSession.LastActivatedAt);
         }
 
@@ -105,7 +106,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsFalse(result);
-            Assert.AreEqual(Enums.ChatSessionState.Active, _aliceChatSession.State);
+            Assert.AreEqual(SessionState.Active, _aliceChatSession.State);
         }
 
         [TestMethod]
@@ -120,7 +121,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsTrue(result);
-            Assert.AreEqual(Enums.ChatSessionState.Suspended, _aliceChatSession.State);
+            Assert.AreEqual(SessionState.Suspended, _aliceChatSession.State);
             Assert.IsNotNull(_aliceChatSession.LastSuspendedAt);
             Assert.AreEqual(suspensionReason, _aliceChatSession.SuspensionReason);
         }
@@ -133,7 +134,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsTrue(result);
-            Assert.AreEqual(Enums.ChatSessionState.Suspended, _aliceChatSession.State);
+            Assert.AreEqual(SessionState.Suspended, _aliceChatSession.State);
         }
 
         [TestMethod]
@@ -144,7 +145,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsTrue(result);
-            Assert.AreEqual(Enums.ChatSessionState.Terminated, _aliceChatSession.State);
+            Assert.AreEqual(SessionState.Terminated, _aliceChatSession.State);
         }
 
         [TestMethod]
@@ -171,7 +172,7 @@ namespace LibEmiddle.Tests.Unit
         public async Task ChatSession_StateChangeEvents_ShouldBeRaised()
         {
             // Arrange: Create a TaskCompletionSource to await the event.
-            var tcs = new TaskCompletionSource<(Enums.ChatSessionState previous, Enums.ChatSessionState current, DateTime timestamp)>();
+            var tcs = new TaskCompletionSource<(SessionState previous, SessionState current, DateTime timestamp)>();
 
             _aliceChatSession.StateChanged += (sender, e) =>
             {
@@ -192,8 +193,8 @@ namespace LibEmiddle.Tests.Unit
             var (previousState, currentState, eventTimestamp) = await tcs.Task;
 
             // Assert: Verify that the event reflects the expected state change.
-            Assert.AreEqual(Enums.ChatSessionState.Initialized, previousState, "Expected previous state to be Initialized.");
-            Assert.AreEqual(Enums.ChatSessionState.Active, currentState, "Expected new state to be Active.");
+            Assert.AreEqual(SessionState.Initialized, previousState, "Expected previous state to be Initialized.");
+            Assert.AreEqual(SessionState.Active, currentState, "Expected new state to be Active.");
             Assert.IsTrue(eventTimestamp > DateTime.MinValue, "Expected a valid timestamp to be set.");
         }
 
@@ -208,7 +209,7 @@ namespace LibEmiddle.Tests.Unit
             EncryptedMessage encryptedMessage = await _aliceChatSession.EncryptAsync(message);
 
             // Assert
-            Assert.AreEqual(Enums.ChatSessionState.Active, _aliceChatSession.State);
+            Assert.AreEqual(SessionState.Active, _aliceChatSession.State);
             Assert.IsNotNull(_aliceChatSession.LastActivatedAt);
             Assert.IsNotNull(encryptedMessage);
         }
@@ -227,7 +228,7 @@ namespace LibEmiddle.Tests.Unit
             // Assert
             // Instead of expecting an exception, we expect the session to auto-activate.
             Assert.IsNotNull(encryptedMessage, "Encryption should succeed and return an encrypted message.");
-            Assert.AreEqual(Enums.ChatSessionState.Active, _aliceChatSession.State, "Session should be auto-activated on encryption.");
+            Assert.AreEqual(SessionState.Active, _aliceChatSession.State, "Session should be auto-activated on encryption.");
             Assert.IsNotNull(_aliceChatSession.LastActivatedAt, "LastActivatedAt should be set upon activation.");
         }
 
@@ -266,7 +267,7 @@ namespace LibEmiddle.Tests.Unit
             // Assert
             Assert.IsNotNull(decryptedMessage);
             Assert.AreEqual(originalMessage, decryptedMessage);
-            Assert.AreEqual(Enums.ChatSessionState.Suspended, bobChatSession.State, "State should remain suspended");
+            Assert.AreEqual(SessionState.Suspended, bobChatSession.State, "State should remain suspended");
         }
 
         [TestMethod]

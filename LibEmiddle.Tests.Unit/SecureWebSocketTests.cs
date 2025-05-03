@@ -34,7 +34,7 @@ namespace LibEmiddle.Tests.Unit
             // Create a test session simulating key exchange and session initialization
             var aliceKeyPair = Sodium.GenerateX25519KeyPair();
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
+            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
             string sessionId = "test-session-" + Guid.NewGuid().ToString();
 

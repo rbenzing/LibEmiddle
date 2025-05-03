@@ -1,6 +1,7 @@
 ﻿using System.Security.Cryptography;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using LibEmiddle.Domain;
 
 namespace LibEmiddle.Core
@@ -9,7 +10,7 @@ namespace LibEmiddle.Core
     /// Provides a native interface to the libsodium cryptographic library.
     /// This class ensures the library is properly initialized before use.
     /// </summary>
-    public static partial class Sodium
+    public partial class Sodium : IDisposable
     {
         // Version constants for libsodium
         private const string SODIUM_VERSION_STRING = "1.0.20";
@@ -19,6 +20,7 @@ namespace LibEmiddle.Core
         private static int s_initialized;
         private static bool s_loadAttempted;
         private static string s_libraryPath = string.Empty;
+        private bool _disposed;
 
         // Library name based on platform
         private const string LibraryName =
@@ -34,7 +36,7 @@ namespace LibEmiddle.Core
             "libsodium";
 #endif
 
-        static Sodium()
+        public Sodium()
         {
             try
             {
@@ -55,7 +57,6 @@ namespace LibEmiddle.Core
         /// Initializes the libsodium library. This method is thread-safe and ensures
         /// that initialization happens only once.
         /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Initialize()
         {
             if (s_initialized == 0)
@@ -238,7 +239,6 @@ namespace LibEmiddle.Core
         /// <returns>True if AES-GCM is available, false otherwise.</returns>
         public static bool IsAesGcmAvailable()
         {
-            Initialize();
             return crypto_aead_aes256gcm_is_available() == 1;
         }
 
@@ -270,12 +270,12 @@ namespace LibEmiddle.Core
         [LibraryImport(LibraryName, EntryPoint = "crypto_aead_aes256gcm_decrypt_afternm")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static partial int crypto_aead_aes256gcm_decrypt_afternm(
-            Span<byte> message, 
+            Span<byte> message,
             out ulong messageLength,
             Span<byte> nsec, // Always null for AES-GCM
-            ReadOnlySpan<byte> cipher, 
+            ReadOnlySpan<byte> cipher,
             ulong cipherLength,
-            ReadOnlySpan<byte> additionalData, 
+            ReadOnlySpan<byte> additionalData,
             ulong additionalDataLength,
             ReadOnlySpan<byte> nonce,
             IntPtr state);
@@ -408,13 +408,13 @@ namespace LibEmiddle.Core
         /// <param name="message">The message to authenticate.</param>
         /// <param name="key">The key to use (32 bytes recommended).</param>
         /// <returns>The 32-byte HMAC output.</returns>
-        public static byte[] GenerateHmacSha256(ReadOnlySpan<byte> message, ReadOnlySpan<byte> key)
+        public byte[] GenerateHmacSha256(ReadOnlySpan<byte> message, ReadOnlySpan<byte> key)
         {
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long.", nameof(key));
 
             Initialize();
-            
+
             byte[] output = new byte[Constants.AES_KEY_SIZE]; // SHA256 hash is 32 bytes
 
             try
@@ -450,8 +450,6 @@ namespace LibEmiddle.Core
         /// <returns>32-byte PRK (pseudorandom key).</returns>
         private static byte[] HkdfExtract(ReadOnlySpan<byte> salt, ReadOnlySpan<byte> inputKeyMaterial)
         {
-            Initialize();
-
             byte[] prk = new byte[32]; // SHA256 hash is 32 bytes
             int result = crypto_kdf_hkdf_sha256_extract(
                 prk,
@@ -491,14 +489,12 @@ namespace LibEmiddle.Core
         /// <param name="outputLength">Desired output length.</param>
         /// <returns>Output key material of the specified length.</returns>
         private static byte[] HkdfExpand(
-            ReadOnlySpan<byte> prk, 
-            ReadOnlySpan<byte> info, 
+            ReadOnlySpan<byte> prk,
+            ReadOnlySpan<byte> info,
             int outputLength)
         {
             if (outputLength <= 0)
                 throw new ArgumentException("Output length must be positive", nameof(outputLength));
-
-            Initialize();
 
             byte[] output = new byte[outputLength];
             int result = crypto_kdf_hkdf_sha256_expand(
@@ -521,9 +517,9 @@ namespace LibEmiddle.Core
         /// <param name="outputLength">Desired output length.</param>
         /// <returns>Derived key of the specified length.</returns>
         public static byte[] HkdfDerive(
-            ReadOnlySpan<byte> inputKeyMaterial, 
-            ReadOnlySpan<byte> salt = default, 
-            ReadOnlySpan<byte> info = default, 
+            ReadOnlySpan<byte> inputKeyMaterial,
+            ReadOnlySpan<byte> salt = default,
+            ReadOnlySpan<byte> info = default,
             int outputLength = 32)
         {
             byte[] prk = HkdfExtract(salt, inputKeyMaterial);
@@ -552,12 +548,46 @@ namespace LibEmiddle.Core
         /// <param name="messageLength"></param>
         /// <param name="secretKey"></param>
         /// <returns></returns>
-        [LibraryImport(LibraryName, EntryPoint = "crypto_sign_detached")]
+        [LibraryImport(LibraryName, EntryPoint = "crypto_sign")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
-        internal static partial int crypto_sign_detached(
+        internal static partial int crypto_sign(
             Span<byte> signature, out nuint signatureLength,
             ReadOnlySpan<byte> message, nuint messageLength,
             ReadOnlySpan<byte> secretKey);
+
+        /// <summary>
+        /// Signs a message using Ed25519.
+        /// </summary>
+        /// <param name="message">The message to sign.</param>
+        /// <param name="privateKey">The private key (64 bytes).</param>
+        /// <returns>The signature (64 bytes).</returns>
+        public static byte[] Sign(ReadOnlySpan<byte> message, ReadOnlySpan<byte> privateKey)
+        {
+            if (message == null)
+                throw new ArgumentNullException(nameof(message));
+            if (privateKey == null)
+                throw new ArgumentNullException(nameof(privateKey));
+            if (privateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
+                throw new ArgumentException($"Private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes. Length: {privateKey.Length}", nameof(privateKey));
+
+            Initialize();
+
+            byte[] signature = SecureMemory.CreateSecureBuffer(Constants.ED25519_PRIVATE_KEY_SIZE);
+
+            int result = crypto_sign(
+                signature,
+                out nuint signatureLength,
+                message.ToArray(),
+                (nuint)message.Length,
+                privateKey.ToArray());
+
+            if (result != 0 && signatureLength > 0)
+            {
+                throw new InvalidOperationException("Failed to create signature.");
+            }
+
+            return signature;
+        }
 
         /// <summary>
         /// Verifies that sig is a valid signature for the message m, whose length is mlen 
@@ -568,12 +598,44 @@ namespace LibEmiddle.Core
         /// <param name="messageLength"></param>
         /// <param name="publicKey"></param>
         /// <returns></returns>
-        [LibraryImport(LibraryName, EntryPoint = "crypto_sign_verify_detached")]
+        [LibraryImport(LibraryName, EntryPoint = "crypto_sign_verify")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
-        internal static partial int crypto_sign_verify_detached(
+        internal static partial int crypto_sign_verify(
             ReadOnlySpan<byte> signature,
             ReadOnlySpan<byte> message, nuint messageLength,
             ReadOnlySpan<byte> publicKey);
+
+        /// <summary>
+        /// Verifies a signature using Ed25519.
+        /// </summary>
+        /// <param name="signature">The signature to verify.</param>
+        /// <param name="message">The original message.</param>
+        /// <param name="publicKey">The public key (32 bytes).</param>
+        /// <returns>True if the signature is valid, false otherwise.</returns>
+        public static bool SignVerify(ReadOnlySpan<byte> signature, ReadOnlySpan<byte> message, ReadOnlySpan<byte> publicKey)
+        {
+            if (signature == null)
+                throw new ArgumentNullException(nameof(signature));
+            if (message == null)
+                throw new ArgumentNullException(nameof(message));
+            if (publicKey == null)
+                throw new ArgumentNullException(nameof(publicKey));
+            if (signature.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
+                throw new ArgumentException($"Signature must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(signature));
+            if (publicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+                throw new ArgumentException($"Public key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(publicKey));
+
+            Initialize();
+
+            int result = crypto_sign_verify(
+                        signature.ToArray(),
+                        message.ToArray(),
+                        (nuint)message.Length,
+                        publicKey.ToArray());
+
+            return result == 0;
+
+        }
 
         /// <summary>
         /// Randomly generates a secret key and a corresponding public key.
@@ -586,6 +648,29 @@ namespace LibEmiddle.Core
         internal static partial int crypto_sign_keypair(
             Span<byte> publicKey,
             Span<byte> secretKey);
+
+        /// <summary>
+        /// Generates a new Ed25519 key pair for signing.
+        /// </summary>
+        /// <returns>A new key pair.</returns>
+        public static KeyPair GenerateSigningKeyPair()
+        {
+            byte[] publicKey = SecureMemory.CreateSecureBuffer(Constants.ED25519_PUBLIC_KEY_SIZE);
+            byte[] privateKey = SecureMemory.CreateSecureBuffer(Constants.ED25519_PRIVATE_KEY_SIZE);
+
+            Initialize();
+
+            int result = crypto_sign_keypair(
+                publicKey,
+                privateKey
+            );
+            if (result != 0)
+            {
+                throw new InvalidOperationException("Failed to generate Ed25519 key pair.");
+            }
+
+            return new KeyPair(publicKey, privateKey);
+        }
 
         #endregion
 
@@ -652,7 +737,7 @@ namespace LibEmiddle.Core
         [LibraryImport(LibraryName, EntryPoint = "crypto_scalarmult_curve25519_base")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static partial int crypto_scalarmult_curve25519_base(
-            Span<byte> q,
+            out Span<byte> q,
             ReadOnlySpan<byte> n);
 
         /// <summary>
@@ -662,15 +747,15 @@ namespace LibEmiddle.Core
         /// <returns>The 32-byte X25519 public key.</returns>
         /// <exception cref="ArgumentException">If the key is invalid size.</exception>
         /// <exception cref="InvalidOperationException">If calculation fails.</exception>
-        public static byte[] ScalarMultBase(ReadOnlySpan<byte> secretKey)
+        public static Span<byte> ScalarMultBase(ReadOnlySpan<byte> secretKey)
         {
             if (secretKey.Length != Constants.X25519_KEY_SIZE)
                 throw new ArgumentException($"Secret key must be {Constants.X25519_KEY_SIZE} bytes.", nameof(secretKey));
 
             Initialize();
 
-            byte[] publicKey = new byte[Constants.X25519_KEY_SIZE];
-            int result = crypto_scalarmult_curve25519_base(publicKey, secretKey);
+            Span<byte> publicKey = new byte[Constants.X25519_KEY_SIZE];
+            int result = crypto_scalarmult_curve25519_base(out publicKey, secretKey);
 
             if (result != 0)
                 // Use CryptographicException
@@ -681,12 +766,96 @@ namespace LibEmiddle.Core
         }
 
         /// <summary>
+        /// Hash a password string
+        /// </summary>
+        [LibraryImport(LibraryName, EntryPoint = "crypto_pwhash_str",
+                   StringMarshalling = StringMarshalling.Utf8)]
+        [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
+        internal static partial int crypto_pwhash_str(
+            out Span<byte> outHashed,
+            string password,             // marshalled as UTF-8
+            nuint passwordLen,
+            ulong opsLimit,
+            nuint memLimit);
+
+        /// <summary>
+        /// Computes an Argon2id hash from a password.
+        /// </summary>
+        /// <param name="password"></param>
+        /// <returns></returns>
+        public static string Argon2id(string password)
+        {
+            Span<byte> buf = stackalloc byte[128];
+
+            Initialize();
+
+            try
+            {
+                int rc = crypto_pwhash_str(
+                out buf,
+                password,
+                (nuint)Encoding.UTF8.GetByteCount(password),
+                4,  // opslimit 4-10 passes - TODO: turn this into a const
+                (nuint)(256 * 1024 * 1024)); // 256MB memory limit - TODO: turn this into a const
+
+                if (rc != 0)
+                    throw new InvalidOperationException("crypto_pwhash_str failed.");
+
+                // strip final NUL
+                int len = buf.IndexOf((byte)0);
+                return Encoding.ASCII.GetString(buf[..(len < 0 ? 128 : len)]);
+            }
+            finally
+            {
+                SecureMemory.SecureClear(buf);
+            }
+        }
+
+
+        /// <summary>
+        /// Verify a hashed password string
+        /// </summary>
+        [LibraryImport(LibraryName, EntryPoint = "crypto_pwhash_str_verify",
+                   StringMarshalling = StringMarshalling.Utf8)]
+        [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
+        internal static partial int crypto_pwhash_str_verify(
+            ReadOnlySpan<byte> hashed,      // zero-terminated
+            string password,
+            nuint passwordLen);
+
+        /// <summary>
+        /// Verify an Argon2id hash string produced by.
+        /// </summary>
+        /// <param name="hash"></param>
+        /// <param name="password"></param>
+        /// <returns></returns>
+        public bool VerifyArgon2id(string hash, string password)
+        {
+            Span<byte> buf = stackalloc byte[128];
+            int rc = 1; // 1 = false
+
+            try { 
+                int written = Encoding.ASCII.GetBytes(hash, buf);
+                buf[written] = 0;                       // NUL-terminate
+                rc = crypto_pwhash_str_verify(
+                    buf[..(written + 1)],               // include NUL
+                    password,
+                    (nuint)Encoding.UTF8.GetByteCount(password));
+                } 
+            finally
+            {
+                SecureMemory.SecureClear(buf);
+            }
+            return rc == 0;
+        }
+
+        /// <summary>
         /// Converts an Ed25519 public key to an X25519 public key.
         /// </summary>
         [LibraryImport(LibraryName, EntryPoint = "crypto_sign_ed25519_pk_to_curve25519")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static partial int crypto_sign_ed25519_pk_to_curve25519(
-            Span<byte> x25519PublicKey,
+            out Span<byte> x25519PublicKey,
             ReadOnlySpan<byte> ed25519PublicKey);
 
         /// <summary>
@@ -694,20 +863,45 @@ namespace LibEmiddle.Core
         /// </summary>
         /// <param name="ed25519PublicKey">The Ed25519 public key (32 bytes).</param>
         /// <returns>The converted X25519 public key (32 bytes).</returns>
-        public static byte[] ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey)
+        public static Span<byte> ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey)
         {
             if (ed25519PublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
                 throw new ArgumentException($"Ed25519 public key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(ed25519PublicKey));
 
             Initialize();
 
-            byte[] x25519PublicKey = new byte[Constants.X25519_KEY_SIZE];
-            int result = crypto_sign_ed25519_pk_to_curve25519(x25519PublicKey, ed25519PublicKey);
+            int result = crypto_sign_ed25519_pk_to_curve25519(out Span<byte> x25519PublicKey, ed25519PublicKey);
 
             if (result != 0)
                 throw new InvalidOperationException("Failed to convert Ed25519 public key to X25519.");
 
             return x25519PublicKey;
+        }
+
+        /// <summary>
+        /// Converts an Ed25519 secret key to an X25519 public key.
+        /// </summary>
+        [LibraryImport(LibraryName, EntryPoint = "crypto_sign_ed25519_sk_to_pk")]
+        [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
+        internal static partial int crypto_sign_ed25519_sk_to_pk(
+            Span<byte> ed25519PublicKey,
+            ReadOnlySpan<byte> signedKey);
+
+        public static Span<byte> ConvertEd25519PrivateKeyToX25519PublicKey(ReadOnlySpan<byte> signedKey)
+        {
+            if (signedKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
+                throw new ArgumentException($"Ed25519 private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(signedKey));
+
+            Initialize();
+
+            Span<byte> ed25519PublicKey = SecureMemory.CreateSecureBuffer(Constants.ED25519_PUBLIC_KEY_SIZE);
+
+            int result = crypto_sign_ed25519_sk_to_pk(ed25519PublicKey, signedKey);
+
+            if (result != 0)
+                throw new InvalidOperationException("Failed to convert Ed25519 private key to X25519.");
+
+            return ed25519PublicKey;
         }
 
         /// <summary>
@@ -724,14 +918,14 @@ namespace LibEmiddle.Core
         /// </summary>
         /// <param name="ed25519PrivateKey">The Ed25519 private key (64 bytes).</param>
         /// <returns>The converted X25519 private key (32 bytes).</returns>
-        public static byte[] ConvertEd25519PrivateKeyToX25519(ReadOnlySpan<byte> ed25519PrivateKey)
+        public static Span<byte> ConvertEd25519PrivateKeyToX25519(ReadOnlySpan<byte> ed25519PrivateKey)
         {
             if (ed25519PrivateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
                 throw new ArgumentException($"Ed25519 private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(ed25519PrivateKey));
 
             Initialize();
 
-            byte[] x25519PrivateKey = new byte[Constants.X25519_KEY_SIZE];
+            Span<byte> x25519PrivateKey = new byte[Constants.X25519_KEY_SIZE];
             int result = crypto_sign_ed25519_sk_to_curve25519(x25519PrivateKey, ed25519PrivateKey);
 
             if (result != 0)
@@ -897,9 +1091,9 @@ namespace LibEmiddle.Core
         /// <summary>
         /// Signs a message using Ed25519.
         /// </summary>
-        [LibraryImport(LibraryName, EntryPoint = "crypto_sign_ed25519_detached")]
+        [LibraryImport(LibraryName, EntryPoint = "crypto_sign_detached")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
-        internal static partial int crypto_sign_ed25519_detached(
+        internal static partial int crypto_sign_detached(
             Span<byte> signature, out ulong signatureLength,
             ReadOnlySpan<byte> message, ulong messageLength,
             ReadOnlySpan<byte> secretKey);
@@ -912,13 +1106,16 @@ namespace LibEmiddle.Core
         /// <returns>The 64-byte signature.</returns>
         public static byte[] SignDetached(ReadOnlySpan<byte> message, ReadOnlySpan<byte> privateKey)
         {
+            if (privateKey == null)
+                throw new NullReferenceException(nameof(privateKey));
+
             if (privateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
                 throw new ArgumentException($"Private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(privateKey));
 
             Initialize();
 
             byte[] signature = new byte[Constants.ED25519_PRIVATE_KEY_SIZE];
-            int result = crypto_sign_ed25519_detached(
+            int result = crypto_sign_detached(
                 signature, 
                 out _, 
                 message, 
@@ -934,9 +1131,9 @@ namespace LibEmiddle.Core
         /// <summary>
         /// Verifies a message signature using Ed25519.
         /// </summary>
-        [LibraryImport(LibraryName, EntryPoint = "crypto_sign_ed25519_verify_detached")]
+        [LibraryImport(LibraryName, EntryPoint = "crypto_sign_verify_detached")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
-        internal static partial int crypto_sign_ed25519_verify_detached(
+        internal static partial int crypto_sign_verify_detached(
             ReadOnlySpan<byte> signature,
             ReadOnlySpan<byte> message, ulong messageLength,
             ReadOnlySpan<byte> publicKey);
@@ -948,7 +1145,7 @@ namespace LibEmiddle.Core
         /// <param name="message">The original message that was signed.</param>
         /// <param name="publicKey">The signer's Ed25519 public key (32 bytes).</param>
         /// <returns>True if the signature is valid, false otherwise.</returns>
-        public static bool VerifyDetached(ReadOnlySpan<byte> signature, ReadOnlySpan<byte> message, ReadOnlySpan<byte> publicKey)
+        public static bool SignVerifyDetached(ReadOnlySpan<byte> signature, ReadOnlySpan<byte> message, ReadOnlySpan<byte> publicKey)
         {
             if (signature.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
                 throw new ArgumentException($"Signature must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(signature));
@@ -958,7 +1155,7 @@ namespace LibEmiddle.Core
 
             Initialize();
 
-            int result = crypto_sign_ed25519_verify_detached(signature, message, (nuint)message.Length, publicKey);
+            int result = crypto_sign_verify_detached(signature, message, (nuint)message.Length, publicKey);
             return result == 0;
         }
 
@@ -968,7 +1165,7 @@ namespace LibEmiddle.Core
         /// <param name="output">The shared secret output (32 bytes).</param>
         /// <param name="privateKey">Your private X25519 key (32 bytes).</param>
         /// <param name="peerPublicKey">Peer's public X25519 key (32 bytes).</param>
-        public static void ComputeSharedSecret(
+        public void ComputeSharedSecret(
             Span<byte> output, 
             ReadOnlySpan<byte> privateKey, 
             ReadOnlySpan<byte> peerPublicKey)
@@ -1006,9 +1203,9 @@ namespace LibEmiddle.Core
 
             try
             {
-                int result = Sodium.crypto_scalarmult_curve25519_base(output, privateKey);
+                int result = Sodium.crypto_scalarmult_curve25519_base(out output, privateKey);
 
-                if (result != 0)
+                if (result != 0 || output == null)
                     // Using CryptographicException directly might be slightly better here
                     throw new CryptographicException("Libsodium failed to compute X25519 public key.");
             }
@@ -1074,6 +1271,7 @@ namespace LibEmiddle.Core
                 return;
 
             Initialize();
+
             sodium_free(ptr);
         }
 
@@ -1088,6 +1286,7 @@ namespace LibEmiddle.Core
                 return;
 
             Initialize();
+
             sodium_memzero(buffer, (nuint)length);
         }
 
@@ -1103,6 +1302,7 @@ namespace LibEmiddle.Core
                 return false;
 
             Initialize();
+
             return sodium_mlock(buffer, (nuint)length) == 0;
         }
 
@@ -1118,7 +1318,39 @@ namespace LibEmiddle.Core
                 return false;
 
             Initialize();
+
             return sodium_munlock(buffer, (uint)length) == 0;
+        }
+
+        #endregion
+
+        #region IDisposable Implementation
+
+        /// <summary>
+        /// Disposes of resources used by the Sodium instance.
+        /// </summary>
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        /// <summary>
+        /// Disposes of resources used by the Sodium instance.
+        /// </summary>
+        /// <param name="disposing">True if called from Dispose(), false if called from finalizer.</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+                return;
+
+            if (disposing)
+            {
+                // Dispose LibSodium??
+                
+            }
+
+            _disposed = true;
         }
 
         #endregion

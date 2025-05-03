@@ -40,7 +40,7 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            byte[] sharedSecret = Sodium.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             string sessionId = "resume-test-" + Guid.NewGuid().ToString();
@@ -90,7 +90,7 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            byte[] sharedSecret = Sodium.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             string sessionId = "resume-with-msgid-" + Guid.NewGuid().ToString();
@@ -260,7 +260,7 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            byte[] sharedSecret = Sodium.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             // Create a session ID that will be shared between Alice and Bob
@@ -378,7 +378,7 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public void SecurityVerification_PreventNonceReuse()
         {
-            // This test verifies that the NonceGenerator creates unique nonces even when called in rapid succession
+            // This test verifies that the Nonce creates unique nonces even when called in rapid succession
 
             // Arrange & Act
             const int nonceCount = 1000;
@@ -436,7 +436,7 @@ namespace LibEmiddle.Tests.Unit
                 string messageId = mailboxManager.SendMessage(
                     recipientKeyPair.PublicKey,
                     "Test message that should be retained after transport failure",
-                    Enums.MessageType.Chat);
+                    MessageType.Chat);
 
                 // Start the manager to process the outgoing queue
                 mailboxManager.Start();
@@ -481,8 +481,8 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning($"Second device X25519 public key: {Convert.ToBase64String(secondDeviceX25519Public)}");
 
             // Let's manually test the key exchange works both ways
-            byte[] sharedSecret1 = X3DHExchange.PerformX25519DH(mainDeviceX25519Private, secondDeviceX25519Public);
-            byte[] sharedSecret2 = X3DHExchange.PerformX25519DH(secondDeviceX25519Private, mainDeviceX25519Public);
+            byte[] sharedSecret1 = Sodium.ScalarMult(mainDeviceX25519Private, secondDeviceX25519Public);
+            byte[] sharedSecret2 = Sodium.ScalarMult(secondDeviceX25519Private, mainDeviceX25519Public);
 
             Trace.TraceWarning($"Manual key exchange - Shared secret 1 length: {sharedSecret1.Length}, " +
                              $"Shared secret 2 length: {sharedSecret2.Length}");
@@ -646,7 +646,7 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Initial shared secret
-            byte[] sharedSecret = X3DHExchange.PerformX25519DH(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            byte[] sharedSecret = Sodium.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
             var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
 
             string sessionId = "cross-device-" + Guid.NewGuid().ToString();

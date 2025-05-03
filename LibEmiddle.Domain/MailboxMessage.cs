@@ -1,4 +1,6 @@
-﻿namespace LibEmiddle.Domain
+﻿using LibEmiddle.Domain.Enums;
+
+namespace LibEmiddle.Domain
 {
     /// <summary>
     /// Represents a message in the mailbox system.
@@ -28,7 +30,7 @@
         /// <summary>
         /// Message type for routing
         /// </summary>
-        public Enums.MessageType Type { get; set; }
+        public MessageType Type { get; set; }
 
         /// <summary>
         /// When the message was created
