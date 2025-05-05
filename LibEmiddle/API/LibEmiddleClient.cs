@@ -2,704 +2,631 @@
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.Domain.Enums;
 using LibEmiddle.KeyExchange;
 using LibEmiddle.Messaging.Chat;
 using LibEmiddle.Messaging.Group;
 using LibEmiddle.Messaging.Transport;
-using LibEmiddle.Models;
 using LibEmiddle.MultiDevice;
+using LibEmiddle.Protocol;
 
 namespace LibEmiddle.API
 {
     /// <summary>
-    /// Main client API for LibEmiddle secure messaging.
-    /// Provides a simplified interface for end-to-end encrypted communications.
+    /// Main entry point for the E2EE library, providing a simplified API for common operations.
+    /// This class serves as a facade for the various components of the library.
     /// </summary>
     public class LibEmiddleClient : IDisposable
     {
+        private readonly GroupChatManager _groupChatManager;
+        private readonly DeviceManager _deviceManager;
+        private readonly ChatSessionManager _chatSessionManager;
         private readonly ICryptoProvider _cryptoProvider;
-        private readonly ISessionManager _sessionManager;
-        private readonly IX3DHProtocol _x3dhProtocol;
+        private readonly IX3DHProtocol _x3DHProtocol;
         private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
-        private readonly IKeyManager _keyManager;
-        private readonly IMailboxTransport _mailboxTransport;
+
         private readonly KeyPair _identityKeyPair;
-        private readonly X3DHKeyBundle _keyBundle;
-        private bool _isInitialized;
         private bool _disposed;
 
         /// <summary>
-        /// Initializes a new instance of the LibEmiddle client.
+        /// Creates a new E2EE client with an existing identity key pair
         /// </summary>
-        /// <param name="options">Configuration options for the client.</param>
-        public LibEmiddleClient(LibEmiddleClientOptions options)
+        /// <param name="identityKeyPair">Identity key pair to use</param>
+        public LibEmiddleClient(KeyPair identityKeyPair)
         {
-            ArgumentNullException.ThrowIfNull(options, nameof(options));
-
-            // Create or use provided crypto provider
-            _cryptoProvider = options.CryptoProvider ?? new CryptoProvider();
-
-            // Create or use provided mailbox transport
-            _mailboxTransport = options.MailboxTransport ?? new HttpMailboxTransport(options.ServerUrl);
-
-            // Create protocol implementations
-            _x3dhProtocol = new X3DHProtocol(_cryptoProvider);
+            // Generate an X25519 identity key pair for this client
+            _cryptoProvider = new CryptoProvider();
+            _groupChatManager = new GroupChatManager(_cryptoProvider, _identityKeyPair);
+            _deviceManager = new DeviceManager(_identityKeyPair);
+            _chatSessionManager = new ChatSessionManager(_identityKeyPair);
+            _identityKeyPair = identityKeyPair.ToString() == null ? Sodium.GenerateX25519KeyPair() : identityKeyPair;
+            _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
             _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
-            _keyManager = new KeyManager(_cryptoProvider);
+            _groupChatManager = new GroupChatManager(_cryptoProvider, _identityKeyPair);
+            _deviceManager = new DeviceManager(_identityKeyPair);
+            _chatSessionManager = new ChatSessionManager(_identityKeyPair);
+        }
 
-            // Create session manager
-            _sessionManager = new SessionManager(
-                _cryptoProvider,
-                _x3dhProtocol,
-                _doubleRatchetProtocol,
-                _keyManager,
-                null, // Will be set after identity key is loaded or created
-                options.SessionStoragePath);
+        #region Key Management
 
-            // Set client properties
-            ClientId = options.ClientId ?? Guid.NewGuid().ToString("N");
-            DeviceId = options.DeviceId ?? Guid.NewGuid().ToString("N");
+        /// <summary>
+        /// Generates an AES-GCM 32-bit sender key
+        /// </summary>
+        /// <returns>Random sender key suitable for group encryption</returns>
+        public static byte[] GenerateInitialChainKey()
+        {
+            return SecureMemory.CreateSecureBuffer(Constants.AES_KEY_SIZE);
         }
 
         /// <summary>
-        /// Gets the unique identifier for this client.
+        /// Generates an Ed25519 key pair for digital signatures
         /// </summary>
-        public string ClientId { get; }
-
-        /// <summary>
-        /// Gets the unique identifier for this device.
-        /// </summary>
-        public string DeviceId { get; }
-
-        /// <summary>
-        /// Gets the public identity key for this client.
-        /// </summary>
-        public byte[] IdentityPublicKey => _identityKeyPair.PublicKey;
-
-        /// <summary>
-        /// Initializes the client, loading or creating identity keys and registering with the server.
-        /// </summary>
-        /// <param name="password">Optional password to secure key storage.</param>
-        /// <returns>True if initialization succeeded, false otherwise.</returns>
-        public async Task<bool> InitializeAsync(string? password = null)
+        /// <returns>Tuple containing (publicKey, privateKey)</returns>
+        public static KeyPair GenerateSignatureKeyPair()
         {
-            if (_isInitialized)
-                return true;
-
-            try
-            {
-                // Load or create identity key
-                _identityKeyPair = await LoadOrCreateIdentityKeyAsync(password);
-
-                // Generate or load key bundle
-                _keyBundle = await GenerateKeyBundleAsync(_identityKeyPair);
-
-                // Register with the server
-                bool registered = await RegisterWithServerAsync();
-                if (!registered)
-                {
-                    LoggingManager.LogError(nameof(LibEmiddleClient), "Failed to register with the server");
-                    return false;
-                }
-
-                // Start message polling
-                await StartMessagePollingAsync();
-
-                _isInitialized = true;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(LibEmiddleClient), $"Initialization failed: {ex.Message}");
-                return false;
-            }
+            return Sodium.GenerateEd25519KeyPair();
         }
 
         /// <summary>
-        /// Creates a new chat session with a recipient.
+        /// Generates an X25519 key pair for secure key exchange
         /// </summary>
-        /// <param name="recipientId">The ID of the recipient.</param>
-        /// <returns>The chat session if successful, null otherwise.</returns>
-        public async Task<IChatSession?> CreateChatSessionAsync(string recipientId)
+        /// <returns>Tuple containing (publicKey, privateKey)</returns>
+        public static KeyPair GenerateKeyExchangeKeyPair()
         {
-            EnsureInitialized();
+            return Sodium.GenerateX25519KeyPair();
+        }
 
-            try
-            {
-                // Get recipient's public key bundle
-                var recipientBundle = await GetRecipientBundleAsync(recipientId);
-                if (recipientBundle == null)
-                {
-                    LoggingManager.LogError(nameof(LibEmiddleClient), $"Failed to get key bundle for recipient {recipientId}");
-                    return null;
-                }
+        #endregion
 
-                // Create the session
-                var session = await _sessionManager.CreateSessionAsync(recipientBundle.IdentityKey) as IChatSession;
-                if (session == null)
-                {
-                    LoggingManager.LogError(nameof(LibEmiddleClient), "Failed to create chat session");
-                    return null;
-                }
+        #region Encryption
 
-                return session;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error creating chat session: {ex.Message}");
-                return null;
-            }
+        /// <summary>
+        /// Encrypts a message using the specified key
+        /// </summary>
+        /// <param name="message">Message to encrypt</param>
+        /// <param name="key">Encryption key</param>
+        /// <returns>Encrypted message</returns>
+        public static EncryptedMessage EncryptMessage(string message, byte[] key)
+        {
+            return AES.Encrypt(message, key);
         }
 
         /// <summary>
-        /// Gets an existing chat session by ID.
+        /// Decrypts a message using the specified key
         /// </summary>
-        /// <param name="sessionId">The ID of the session.</param>
-        /// <returns>The chat session if found, null otherwise.</returns>
-        public async Task<IChatSession?> GetChatSessionAsync(string sessionId)
+        /// <param name="encryptedMessage">Encrypted message</param>
+        /// <param name="key">Decryption key</param>
+        /// <returns>Decrypted message</returns>
+        public static string DecryptMessage(EncryptedMessage encryptedMessage, byte[] key)
         {
-            EnsureInitialized();
+            return AES.Decrypt(encryptedMessage, key);
+        }
 
-            try
-            {
-                return await _sessionManager.GetSessionAsync(sessionId) as IChatSession;
-            }
-            catch (KeyNotFoundException)
-            {
-                LoggingManager.LogWarning(nameof(LibEmiddleClient), $"Chat session {sessionId} not found");
-                return null;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error getting chat session: {ex.Message}");
-                return null;
-            }
+        #endregion
+
+        #region Authentication
+
+        /// <summary>
+        /// Signs a message using the specified private key
+        /// </summary>
+        /// <param name="message">Message to sign</param>
+        /// <param name="privateKey">Private key for signing (64 bytes Ed25519)</param>
+        /// <returns>Signature as a byte array</returns>
+        public static byte[] SignMessage(byte[] message, byte[] privateKey)
+        {
+            return MessageSigning.SignMessage(message, privateKey);
         }
 
         /// <summary>
-        /// Creates a new group chat session.
+        /// Signs a text message using the specified private key
         /// </summary>
-        /// <param name="groupId">The ID of the group.</param>
-        /// <param name="initialMembers">The list of initial member IDs to add to the group.</param>
-        /// <returns>The group session if successful, null otherwise.</returns>
-        public async Task<IGroupSession?> CreateGroupSessionAsync(string groupId, IEnumerable<string>? initialMembers = null)
+        /// <param name="message">Text message to sign</param>
+        /// <param name="privateKey">Private key for signing</param>
+        /// <returns>Signature as a Base64 string</returns>
+        public static string SignTextMessage(string message, byte[] privateKey)
         {
-            EnsureInitialized();
-
-            try
-            {
-                // Create group options
-                var options = new GroupSessionOptions
-                {
-                    GroupId = groupId,
-                    RotationStrategy = KeyRotationStrategy.Standard
-                };
-
-                // Create the session
-                var session = await _sessionManager.CreateSessionAsync(Array.Empty<byte>(), options) as IGroupSession;
-                if (session == null)
-                {
-                    LoggingManager.LogError(nameof(LibEmiddleClient), "Failed to create group session");
-                    return null;
-                }
-
-                // Add initial members if provided
-                if (initialMembers != null)
-                {
-                    foreach (var memberId in initialMembers)
-                    {
-                        // Get member's public key
-                        var memberBundle = await GetRecipientBundleAsync(memberId);
-                        if (memberBundle == null)
-                        {
-                            LoggingManager.LogWarning(nameof(LibEmiddleClient), $"Failed to get key bundle for member {memberId}");
-                            continue;
-                        }
-
-                        // Add member to the group
-                        await session.AddMemberAsync(memberBundle.IdentityKey);
-                    }
-                }
-
-                return session;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error creating group session: {ex.Message}");
-                return null;
-            }
+            return MessageSigning.SignTextMessage(message, privateKey);
         }
 
         /// <summary>
-        /// Gets an existing group session by ID.
+        /// Verifies a signature for a message
         /// </summary>
-        /// <param name="sessionId">The ID of the session.</param>
-        /// <returns>The group session if found, null otherwise.</returns>
-        public async Task<IGroupSession?> GetGroupSessionAsync(string sessionId)
+        /// <param name="message">Original message</param>
+        /// <param name="signature">Signature to verify</param>
+        /// <param name="publicKey">Public key of the signer</param>
+        /// <returns>True if the signature is valid</returns>
+        public static bool VerifySignature(byte[] message, byte[] signature, byte[] publicKey)
         {
-            EnsureInitialized();
-
-            try
-            {
-                return await _sessionManager.GetSessionAsync(sessionId) as IGroupSession;
-            }
-            catch (KeyNotFoundException)
-            {
-                LoggingManager.LogWarning(nameof(LibEmiddleClient), $"Group session {sessionId} not found");
-                return null;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error getting group session: {ex.Message}");
-                return null;
-            }
+            return MessageSigning.VerifySignature(message, signature, publicKey);
         }
 
         /// <summary>
-        /// Sends an encrypted message to a recipient using an existing chat session.
+        /// Verifies a signature for a text message
         /// </summary>
-        /// <param name="sessionId">The ID of the chat session.</param>
-        /// <param name="message">The message to send.</param>
-        /// <returns>True if the message was sent successfully, false otherwise.</returns>
-        public async Task<bool> SendMessageAsync(string sessionId, string message)
+        /// <param name="message">Original message</param>
+        /// <param name="signatureBase64">Signature as a Base64 string</param>
+        /// <param name="publicKey">Public key of the signer</param>
+        /// <returns>True if the signature is valid</returns>
+        public static bool VerifyTextMessage(string message, string signatureBase64, byte[] publicKey)
         {
-            EnsureInitialized();
-            ArgumentException.ThrowIfNullOrEmpty(message, nameof(message));
-
-            try
-            {
-                // Get the session
-                var session = await _sessionManager.GetSessionAsync(sessionId);
-                if (session == null)
-                {
-                    throw new KeyNotFoundException($"Session {sessionId} not found");
-                }
-
-                // Encrypt the message based on session type
-                if (session is IChatSession chatSession)
-                {
-                    var encryptedMessage = await chatSession.EncryptAsync(message);
-                    if (encryptedMessage == null)
-                    {
-                        LoggingManager.LogError(nameof(LibEmiddleClient), "Failed to encrypt message");
-                        return false;
-                    }
-
-                    // Create mailbox message
-                    var mailboxMessage = new MailboxMessage
-                    {
-                        MessageId = encryptedMessage.MessageId,
-                        SenderId = ClientId,
-                        SenderDeviceId = DeviceId,
-                        RecipientId = ExtractRecipientId(sessionId),
-                        SessionId = sessionId,
-                        Type = MessageType.Individual,
-                        Content = JsonSerialization.Serialize(encryptedMessage),
-                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                    };
-
-                    // Send the message
-                    bool sent = await _mailboxTransport.SendMessageAsync(mailboxMessage);
-                    if (sent)
-                    {
-                        // Update the session
-                        await _sessionManager.SaveSessionAsync(chatSession);
-                    }
-
-                    return sent;
-                }
-                else if (session is IGroupSession groupSession)
-                {
-                    var encryptedMessage = await groupSession.EncryptMessageAsync(message);
-                    if (encryptedMessage == null)
-                    {
-                        LoggingManager.LogError(nameof(LibEmiddleClient), "Failed to encrypt group message");
-                        return false;
-                    }
-
-                    // Create mailbox message for group messaging
-                    var mailboxMessage = new MailboxMessage
-                    {
-                        MessageId = encryptedMessage.MessageId,
-                        SenderId = ClientId,
-                        SenderDeviceId = DeviceId,
-                        RecipientId = encryptedMessage.GroupId, // Group ID as recipient
-                        SessionId = sessionId,
-                        Type = MessageType.Group,
-                        Content = JsonSerialization.Serialize(encryptedMessage),
-                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                    };
-
-                    // Send the message to all group members
-                    bool sent = await _mailboxTransport.SendGroupMessageAsync(mailboxMessage);
-                    if (sent)
-                    {
-                        // Update the session
-                        await _sessionManager.SaveSessionAsync(groupSession);
-                    }
-
-                    return sent;
-                }
-                else
-                {
-                    throw new InvalidOperationException($"Unsupported session type for {sessionId}");
-                }
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error sending message: {ex.Message}");
-                return false;
-            }
+            return MessageSigning.VerifyTextMessage(message, signatureBase64, publicKey);
         }
 
         /// <summary>
-        /// Processes received encrypted messages and returns the decrypted content.
+        /// Signs a message using this client's identity key
         /// </summary>
-        /// <param name="mailboxMessage">The received mailbox message.</param>
-        /// <returns>The decrypted message content if successful, null otherwise.</returns>
-        public async Task<string?> ProcessReceivedMessageAsync(MailboxMessage mailboxMessage)
+        /// <param name="message">Message to sign</param>
+        /// <returns>Signature as a byte array</returns>
+        public byte[] SignWithIdentityKey(byte[] message)
         {
-            EnsureInitialized();
-            ArgumentNullException.ThrowIfNull(mailboxMessage, nameof(mailboxMessage));
-
-            try
-            {
-                // Handle based on message type
-                if (mailboxMessage.Type == MessageType.Individual)
-                {
-                    // Deserialize the encrypted message
-                    var encryptedMessage = JsonSerialization.Deserialize<EncryptedMessage>(mailboxMessage.Content);
-                    if (encryptedMessage == null)
-                    {
-                        LoggingManager.LogError(nameof(LibEmiddleClient), "Failed to deserialize encrypted message");
-                        return null;
-                    }
-
-                    // Get the session
-                    var session = await _sessionManager.GetSessionAsync(mailboxMessage.SessionId) as IChatSession;
-                    if (session == null)
-                    {
-                        // We might need to create a new session or handle an incoming initial message
-                        session = await HandleNewSessionMessageAsync(encryptedMessage, mailboxMessage);
-                        if (session == null)
-                        {
-                            LoggingManager.LogError(nameof(LibEmiddleClient),
-                                $"Failed to create session for incoming message {mailboxMessage.MessageId}");
-                            return null;
-                        }
-                    }
-
-                    // Decrypt the message
-                    string? decryptedMessage = await session.DecryptAsync(encryptedMessage);
-                    if (decryptedMessage == null)
-                    {
-                        LoggingManager.LogError(nameof(LibEmiddleClient), "Failed to decrypt message");
-                        return null;
-                    }
-
-                    // Update the session
-                    await _sessionManager.SaveSessionAsync(session);
-
-                    return decryptedMessage;
-                }
-                else if (mailboxMessage.Type == MessageType.Group)
-                {
-                    // Deserialize the encrypted group message
-                    var encryptedMessage = JsonSerialization.Deserialize<EncryptedGroupMessage>(mailboxMessage.Content);
-                    if (encryptedMessage == null)
-                    {
-                        LoggingManager.LogError(nameof(LibEmiddleClient), "Failed to deserialize encrypted group message");
-                        return null;
-                    }
-
-                    // Get the session
-                    var session = await _sessionManager.GetSessionAsync(mailboxMessage.SessionId) as IGroupSession;
-                    if (session == null)
-                    {
-                        LoggingManager.LogError(nameof(LibEmiddleClient), $"Group session {mailboxMessage.SessionId} not found");
-                        return null;
-                    }
-
-                    // Decrypt the message
-                    string? decryptedMessage = await session.DecryptMessageAsync(encryptedMessage);
-                    if (decryptedMessage == null)
-                    {
-                        LoggingManager.LogError(nameof(LibEmiddleClient), "Failed to decrypt group message");
-                        return null;
-                    }
-
-                    // Update the session
-                    await _sessionManager.SaveSessionAsync(session);
-
-                    return decryptedMessage;
-                }
-                else if (mailboxMessage.Type == MessageType.SenderKeyDistribution)
-                {
-                    return await HandleSenderKeyDistributionMessageAsync(mailboxMessage);
-                }
-                else if (mailboxMessage.Type == MessageType.DeviceSync)
-                {
-                    return await HandleDeviceSyncMessageAsync(mailboxMessage);
-                }
-                else
-                {
-                    LoggingManager.LogWarning(nameof(LibEmiddleClient), $"Unsupported message type: {mailboxMessage.Type}");
-                    return null;
-                }
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error processing received message: {ex.Message}");
-                return null;
-            }
+            ThrowIfDisposed();
+            return MessageSigning.SignMessage(message, _identityKeyPair.PrivateKey);
         }
 
         /// <summary>
-        /// Links a new device to this account.
+        /// Signs a text message using this client's identity key
         /// </summary>
-        /// <param name="deviceId">The ID of the new device.</param>
-        /// <param name="devicePublicKey">The public key of the new device.</param>
-        /// <returns>True if the device was linked successfully, false otherwise.</returns>
-        public async Task<bool> LinkDeviceAsync(string deviceId, byte[] devicePublicKey)
+        /// <param name="message">Text message to sign</param>
+        /// <returns>Signature as a Base64 string</returns>
+        public string SignTextWithIdentityKey(string message)
         {
-            EnsureInitialized();
-            ArgumentException.ThrowIfNullOrEmpty(deviceId, nameof(deviceId));
-            ArgumentNullException.ThrowIfNull(devicePublicKey, nameof(devicePublicKey));
+            ThrowIfDisposed();
+            return MessageSigning.SignTextMessage(message, _identityKeyPair.PrivateKey);
+        }
 
-            try
-            {
-                // Create device manager
-                var deviceManager = new DeviceManager(_cryptoProvider);
+        #endregion
 
-                // Create device sync message
-                var syncMessage = deviceManager.CreateDeviceSyncMessage(
-                    ClientId,
-                    deviceId,
-                    devicePublicKey,
-                    _identityKeyPair);
+        #region Chat Session Management
 
-                // Send the message
-                var mailboxMessage = new MailboxMessage
-                {
-                    MessageId = Guid.NewGuid().ToString("N"),
-                    SenderId = ClientId,
-                    SenderDeviceId = DeviceId,
-                    RecipientId = ClientId, // Send to self (other device)
-                    RecipientDeviceId = deviceId,
-                    Type = MessageType.DeviceSync,
-                    Content = JsonSerialization.Serialize(syncMessage),
-                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
+        /// <summary>
+        /// Gets or creates a chat session with a recipient
+        /// </summary>
+        /// <param name="recipientPublicKey">Recipient's public key</param>
+        /// <param name="recipientBundle">Optional recipient's key bundle, required for new sessions</param>
+        /// <returns>Chat session</returns>
+        /// <exception cref="ArgumentNullException">Thrown when recipientPublicKey is null</exception>
+        public (ChatSession session, InitialMessageData? initialMessageData) GetOrCreateChatSession(
+            byte[] recipientPublicKey,
+            X3DHPublicBundle? recipientBundle = null)
+        {
+            ThrowIfDisposed();
 
-                return await _mailboxTransport.SendMessageAsync(mailboxMessage);
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error linking device: {ex.Message}");
-                return false;
-            }
+            if (recipientPublicKey == null)
+                throw new ArgumentNullException(nameof(recipientPublicKey));
+
+            return _chatSessionManager.GetOrCreateSession(recipientPublicKey, recipientBundle);
         }
 
         /// <summary>
-        /// Revokes a linked device.
+        /// Closes a chat session with a recipient
         /// </summary>
-        /// <param name="deviceId">The ID of the device to revoke.</param>
-        /// <returns>True if the device was revoked successfully, false otherwise.</returns>
-        public async Task<bool> RevokeDeviceAsync(string deviceId)
+        /// <param name="recipientPublicKey">Recipient's public key</param>
+        /// <exception cref="ArgumentNullException">Thrown when recipientPublicKey is null</exception>
+        public void CloseChatSession(byte[] recipientPublicKey)
         {
-            EnsureInitialized();
-            ArgumentException.ThrowIfNullOrEmpty(deviceId, nameof(deviceId));
+            ThrowIfDisposed();
 
-            try
-            {
-                // Create device manager
-                var deviceManager = new DeviceManager(Sodium.GenerateEd25519KeyPair());
+            if (recipientPublicKey == null)
+                throw new ArgumentNullException(nameof(recipientPublicKey));
 
-                // Create device revocation message
-                var revocationMessage = deviceManager.CreateDeviceRevocationMessage(
-                    ClientId,
-                    deviceId,
-                    _identityKeyPair);
-
-                // Send the message
-                var mailboxMessage = new MailboxMessage
-                {
-                    MessageId = Guid.NewGuid().ToString("N"),
-                    SenderId = ClientId,
-                    SenderDeviceId = DeviceId,
-                    RecipientId = ClientId, // Send to self (other devices)
-                    Type = MessageType.DeviceRevocation,
-                    Content = JsonSerialization.Serialize(revocationMessage),
-                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-
-                return await _mailboxTransport.SendMessageAsync(mailboxMessage);
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error revoking device: {ex.Message}");
-                return false;
-            }
+            _chatSessionManager.CloseSession(recipientPublicKey);
         }
 
-        #region Helper Methods
-
-        private void EnsureInitialized()
+        /// <summary>
+        /// Gets all active chat sessions
+        /// </summary>
+        /// <returns>Collection of active session keys (Base64 encoded recipient public keys)</returns>
+        public IEnumerable<string> GetActiveChatSessions()
         {
-            if (!_isInitialized)
-                throw new InvalidOperationException("Client is not initialized. Call InitializeAsync first.");
+            ThrowIfDisposed();
+            return _chatSessionManager.GetActiveSessions();
         }
 
-        private async Task<KeyPair> LoadOrCreateIdentityKeyAsync(string? password = null)
+        /// <summary>
+        /// Configures the chat session manager to persist sessions to the specified path
+        /// </summary>
+        /// <param name="sessionStoragePath">Path to store session data</param>
+        /// <param name="sessionEncryptionKey">Optional key to encrypt session data</param>
+        /// <param name="enableLogging">Whether to enable detailed logging</param>
+        public void ConfigureChatSessionStorage(string sessionStoragePath, byte[]? sessionEncryptionKey = null, bool enableLogging = false)
         {
-            try
-            {
-                // Try to load existing identity key
-                byte[]? privateKey = await _cryptoProvider.RetrieveKeyAsync($"identity:{ClientId}", password);
-                if (privateKey != null)
-                {
-                    // Derive public key
-                    var publicKey = _cryptoProvider.DerivePublicKey(privateKey, KeyType.Ed25519).ToArray();
-                    return new KeyPair
-                    {
-                        PublicKey = publicKey,
-                        PrivateKey = privateKey
-                    };
-                }
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogWarning(nameof(LibEmiddleClient), $"Failed to load identity key: {ex.Message}");
-                // Fall through to create a new key
-            }
+            ThrowIfDisposed();
 
-            // Create a new identity key
-            var keyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-
-            // Store the new key
-            await _cryptoProvider.StoreKeyAsync($"identity:{ClientId}", keyPair.PrivateKey!, password);
-
-            return keyPair;
+            _chatSessionManager.ConfigureStorage(sessionStoragePath, sessionEncryptionKey, enableLogging);
         }
 
-        private async Task<X3DHKeyBundle> GenerateKeyBundleAsync(KeyPair identityKeyPair)
+        #endregion
+
+        #region Key Exchange & Secure Sessions
+
+        /// <summary>
+        /// Creates a key bundle for the X3DH key exchange protocol
+        /// </summary>
+        /// <returns>X3DH key bundle</returns>
+        public X3DHKeyBundle CreateKeyBundle()
         {
-            try
-            {
-                // Check if we have a stored bundle
-                string bundleKey = $"bundle:{ClientId}:{DeviceId}";
-                string? bundleJson = await _keyManager.RetrieveJsonAsync(bundleKey);
-
-                if (!string.IsNullOrEmpty(bundleJson))
-                {
-                    try
-                    {
-                        var storedBundle = JsonSerialization.Deserialize<X3DHKeyBundle>(bundleJson);
-                        if (storedBundle != null)
-                        {
-                            // Validate the bundle
-                            if (await LoadPrivateKeysForBundleAsync(storedBundle))
-                            {
-                                // Check if the bundle is still valid (not expired)
-                                long ageMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - storedBundle.CreationTimestamp;
-                                if (ageMs < Constants.SIGNED_PREKEY_ROTATION_MS)
-                                {
-                                    LoggingManager.LogDebug(nameof(LibEmiddleClient), "Using stored key bundle");
-                                    return storedBundle;
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        LoggingManager.LogWarning(nameof(LibEmiddleClient), $"Error loading stored bundle: {ex.Message}");
-                        // Fall through to create a new bundle
-                    }
-                }
-
-                // Create a new key bundle
-                var bundle = await _x3dhProtocol.CreateKeyBundleAsync(
-                    identityKeyPair,
-                    numOneTimeKeys: 20);
-
-                // Store the bundle
-                await StoreKeyBundleAsync(bundle);
-
-                return bundle;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error generating key bundle: {ex.Message}");
-                throw;
-            }
+            return _x3DHProtocol.CreateKeyBundleAsync().GetAwaiter().GetResult();
         }
 
-        private async Task<bool> LoadPrivateKeysForBundleAsync(X3DHKeyBundle bundle)
+        /// <summary>
+        /// Gets the identity key pair for this client
+        /// </summary>
+        /// <returns>Identity key pair (publicKey, privateKey)</returns>
+        public KeyPair GetIdentityKeyPair()
         {
-            // Load identity key private component
-            string idKeyPriv = $"bundle:{ClientId}:{DeviceId}:ik";
-            byte[]? identityPrivateKey = await _keyManager.RetrieveKeyAsync(idKeyPriv);
-            if (identityPrivateKey == null) return false;
-            bundle.SetIdentityKeyPrivate(identityPrivateKey);
-
-            // Load signed prekey private component
-            string spkPriv = $"bundle:{ClientId}:{DeviceId}:spk:{bundle.SignedPreKeyId}";
-            byte[]? signedPreKeyPrivate = await _keyManager.RetrieveKeyAsync(spkPriv);
-            if (signedPreKeyPrivate == null) return false;
-            bundle.SetSignedPreKeyPrivate(signedPreKeyPrivate);
-
-            // Load one-time prekeys private components
-            bool anyOPKLoaded = false;
-            for (int i = 0; i < bundle.OneTimePreKeyIds.Count; i++)
-            {
-                uint opkId = bundle.OneTimePreKeyIds[i];
-                string opkPriv = $"bundle:{ClientId}:{DeviceId}:opk:{opkId}";
-                byte[]? opkPrivateKey = await _keyManager.RetrieveKeyAsync(opkPriv);
-                if (opkPrivateKey != null)
-                {
-                    bundle.SetOneTimePreKeyPrivate(opkId, opkPrivateKey);
-                    anyOPKLoaded = true;
-                }
-            }
-
-            return anyOPKLoaded;
+            ThrowIfDisposed();
+            return new KeyPair(_identityKeyPair.PublicKey, _identityKeyPair.PrivateKey);
         }
 
-        private async Task<bool> StoreKeyBundleAsync(X3DHKeyBundle bundle)
+        /// <summary>
+        /// Initiates a secure session with a recipient
+        /// </summary>
+        /// <param name="recipientBundle">Recipient's key bundle</param>
+        /// <param name="senderIdentityKeyPair">Sender's identity key pair</param>
+        /// <returns>Initial session for secure communication</returns>
+        public SenderSessionResult InitiateSenderSession(X3DHPublicBundle recipientBundle, KeyPair senderIdentityKeyPair)
         {
-            // Store bundle metadata
-            string bundleKey = $"bundle:{ClientId}:{DeviceId}";
-            await _keyManager.StoreJsonAsync(bundleKey, JsonSerialization.Serialize(bundle));
-
-            // Store identity key private component
-            string idKeyPriv = $"bundle:{ClientId}:{DeviceId}:ik";
-            await _keyManager.StoreKeyAsync(idKeyPriv, bundle.GetIdentityKeyPrivate()!);
-
-            // Store signed prekey private component
-            string spkPriv = $"bundle:{ClientId}:{DeviceId}:spk:{bundle.SignedPreKeyId}";
-            await _keyManager.StoreKeyAsync(spkPriv, bundle.GetSignedPreKeyPrivate()!);
-
-            // Store one-time prekeys private components
-            for (int i = 0; i < bundle.OneTimePreKeyIds.Count; i++)
-            {
-                uint opkId = bundle.OneTimePreKeyIds[i];
-                byte[]? opkPrivateKey = bundle.GetOneTimePreKeyPrivate(opkId);
-                if (opkPrivateKey != null)
-                {
-                    string opkPriv = $"bundle:{ClientId}:{DeviceId}:opk:{opkId}";
-                    await _keyManager.StoreKeyAsync(opkPriv, opkPrivateKey);
-                }
-            }
-
-            return true;
+            return _x3DHProtocol.InitiateSessionAsSenderAsync(recipientBundle, senderIdentityKeyPair).GetAwaiter().GetResult();
         }
 
+        /// <summary>
+        /// Encrypts a message using the Double Ratchet algorithm
+        /// </summary>
+        /// <param name="session">Current Double Ratchet session</param>
+        /// <param name="message">Message to encrypt</param>
+        /// <returns>Updated session and encrypted message</returns>
+        public (DoubleRatchetSession? updatedSession, EncryptedMessage? encryptedMessage)
+            EncryptWithSession(DoubleRatchetSession session, string message)
+        {
+            return _doubleRatchetProtocol.EncryptAsync(session, message).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Decrypts a message using the Double Ratchet algorithm
+        /// </summary>
+        /// <param name="session">Current Double Ratchet session</param>
+        /// <param name="encryptedMessage">Encrypted message</param>
+        /// <returns>Updated session and decrypted message</returns>
+        public (DoubleRatchetSession? updatedSession, string? decryptedMessage)
+            DecryptWithSession(DoubleRatchetSession session, EncryptedMessage encryptedMessage)
+        {
+            return _doubleRatchetProtocol.DecryptAsync(session, encryptedMessage).GetAwaiter().GetResult();
+        }
+
+        #endregion
+
+        #region Group Messaging
+
+        /// <summary>
+        /// Creates a new group
+        /// </summary>
+        /// <param name="groupId"></param>
+        /// <param name="groupName"></param>
+        /// <param name="initialMembers"></param>
+        /// <returns>Sender key for this group</returns>
+        public GroupSession CreateGroup(string groupId, string groupName, IEnumerable<byte[]>? initialMembers = null)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.CreateGroupAsync(groupId, groupName, initialMembers).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Sends a group message
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <param name="message">The message to send</param>
+        /// <returns>Encrypted group message</returns>
+        public EncryptedGroupMessage? SendGroupMessage(string groupId, string message)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.SendMessageAsync(groupId, message).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Processes a received group message
+        /// </summary>
+        /// <param name="distribution">Distribution message</param>
+        /// <returns>True if the distribution was valid and processed</returns>
+        public string? ProcessGroupMessage(EncryptedGroupMessage distribution)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.ProcessMessageAsync(distribution).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Adds a member to a group
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <param name="memberPublicKey">Member's public key</param>
+        /// <returns>True if the member was added successfully</returns>
+        public bool AddGroupMember(string groupId, byte[] memberPublicKey)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.A(groupId, memberPublicKey);
+        }
+
+        /// <summary>
+        /// Removes a member from a group
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <param name="memberPublicKey">Member's public key</param>
+        /// <returns>True if the member was removed successfully</returns>
+        public bool RemoveGroupMember(string groupId, byte[] memberPublicKey)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.RemoveGroupMember(groupId, memberPublicKey);
+        }
+
+        /// <summary>
+        /// Rotates the group key for enhanced security
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <returns>New sender key</returns>
+        public byte[] RotateGroupKey(string groupId)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.RotateGroupKey(groupId);
+        }
+
+        /// <summary>
+        /// Checks if a group exists
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <returns>True if the group exists</returns>
+        public bool GroupExists(string groupId)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.GroupExists(groupId);
+        }
+
+        /// <summary>
+        /// Deletes a group
+        /// </summary>
+        /// <param name="groupId">Group identifier</param>
+        /// <returns>True if the group was deleted</returns>
+        public bool DeleteGroup(string groupId)
+        {
+            ThrowIfDisposed();
+            return _groupChatManager.DeleteGroup(groupId);
+        }
+
+        #endregion
+
+        #region Multi-Device Support
+
+        /// <summary>
+        /// Adds a linked device
+        /// </summary>
+        /// <param name="devicePublicKey">Public key of the device to link</param>
+        public void AddLinkedDevice(byte[] devicePublicKey)
+        {
+            ThrowIfDisposed();
+            _deviceManager.AddLinkedDevice(devicePublicKey);
+        }
+
+        /// <summary>
+        /// Removes a linked device
+        /// </summary>
+        /// <param name="devicePublicKey">Public key of the device to remove</param>
+        /// <returns>True if the device was found and removed</returns>
+        public bool RemoveLinkedDevice(byte[] devicePublicKey)
+        {
+            ThrowIfDisposed();
+            return _deviceManager.RemoveLinkedDevice(devicePublicKey);
+        }
+
+        /// <summary>
+        /// Creates sync messages for linked devices
+        /// </summary>
+        /// <param name="syncData">Data to sync</param>
+        /// <returns>Dictionary of encrypted messages for each device</returns>
+        public Dictionary<string, EncryptedMessage> CreateSyncMessages(byte[] syncData)
+        {
+            ThrowIfDisposed();
+            return _deviceManager.CreateSyncMessages(syncData);
+        }
+
+        /// <summary>
+        /// Creates a device link message
+        /// </summary>
+        /// <param name="mainDeviceKeyPair">Tuple of public and private keys</param>
+        /// <param name="newDevicePublicKey">New device's public key</param>
+        /// <returns>Encrypted link message</returns>
+        public static EncryptedMessage CreateDeviceLinkMessage(KeyPair mainDeviceKeyPair, byte[] newDevicePublicKey)
+        {
+            return DeviceLinking.CreateDeviceLinkMessage(mainDeviceKeyPair, newDevicePublicKey);
+        }
+
+        /// <summary>
+        /// Gets the number of linked devices
+        /// </summary>
+        /// <returns>Number of linked devices</returns>
+        public int GetLinkedDeviceCount()
+        {
+            ThrowIfDisposed();
+            return _deviceManager.GetLinkedDeviceCount();
+        }
+
+        /// <summary>
+        /// Checks if a device is already linked
+        /// </summary>
+        /// <param name="devicePublicKey">Device public key to check</param>
+        /// <returns>True if the device is linked</returns>
+        public bool IsDeviceLinked(byte[] devicePublicKey)
+        {
+            ThrowIfDisposed();
+            return _deviceManager.IsDeviceLinked(devicePublicKey);
+        }
+
+        /// <summary>
+        /// Processes a device revocation message
+        /// </summary>
+        /// <param name="revocationMessage">The revocation message</param>
+        /// <param name="trustedPublicKey">Trusted public key for verification</param>
+        /// <returns>True if the message was valid and processed</returns>
+        public bool ProcessDeviceRevocationMessage(DeviceRevocationMessage revocationMessage, byte[] trustedPublicKey)
+        {
+            ThrowIfDisposed();
+            return _deviceManager.ProcessRevocationMessage(revocationMessage, trustedPublicKey);
+        }
+
+        #endregion
+
+        #region Session Resumption
+
+        /// <summary>
+        /// Resumes a Double Ratchet session after an interruption or failure.
+        /// </summary>
+        /// <param name="session">The last known good session</param>
+        /// <param name="lastProcessedMessageId">The ID of the last successfully processed message, if any</param>
+        /// <returns>A session ready for continued communication, or null if resumption isn't possible</returns>
+        public static DoubleRatchetSession ResumeDoubleRatchetSession(DoubleRatchetSession session, Guid? lastProcessedMessageId = null)
+        {
+            return DoubleRatchet.ResumeSession(session, lastProcessedMessageId);
+        }
+
+        /// <summary>
+        /// Serializes a Double Ratchet session for storage.
+        /// </summary>
+        /// <param name="session">The session to serialize</param>
+        /// <param name="encryptionKey">Optional key to encrypt the serialized session</param>
+        /// <returns>Serialized (and optionally encrypted) session data</returns>
+        public static byte[] SerializeDoubleRatchetSession(DoubleRatchetSession session, byte[]? encryptionKey = null)
+        {
+            return SessionPersistence.SerializeSession(session, encryptionKey);
+        }
+
+        /// <summary>
+        /// Deserializes a Double Ratchet session from storage.
+        /// </summary>
+        /// <param name="serializedData">The serialized session data</param>
+        /// <param name="decryptionKey">Optional key to decrypt the serialized session</param>
+        /// <returns>Deserialized Double Ratchet session</returns>
+        public static DoubleRatchetSession DeserializeDoubleRatchetSession(byte[] serializedData, byte[]? decryptionKey = null)
+        {
+            return SessionPersistence.DeserializeSession(serializedData, decryptionKey);
+        }
+
+        #endregion
+
+        #region Device Revocation
+
+        /// <summary>
+        /// Creates a device revocation message for securely removing a device.
+        /// </summary>
+        /// <param name="revokedDeviceKey">Public key of the device to revoke</param>
+        /// <param name="authorityKeyPair">Key pair with authority to revoke devices</param>
+        /// <returns>A signed revocation message that can be distributed to other devices</returns>
+        public static DeviceRevocationMessage CreateDeviceRevocationMessage(byte[] revokedDeviceKey, KeyPair authorityKeyPair)
+        {
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // Combine device key and timestamp for signing
+            byte[] timestampBytes = BitConverter.GetBytes(timestamp);
+            byte[] dataToSign = SecureMemory.CreateSecureBuffer((uint)revokedDeviceKey.Length + (uint)timestampBytes.Length);
+
+            revokedDeviceKey.AsSpan().CopyTo(dataToSign.AsSpan(0, revokedDeviceKey.Length));
+            timestampBytes.AsSpan().CopyTo(dataToSign.AsSpan(revokedDeviceKey.Length));
+
+            // Sign the combined data
+            byte[] signature = MessageSigning.SignMessage(dataToSign, authorityKeyPair.PrivateKey);
+
+            // Create and return the revocation message
+            return new DeviceRevocationMessage
+            {
+                RevokedDeviceKey = revokedDeviceKey,
+                RevocationTimestamp = timestamp,
+                Signature = signature
+            };
+        }
+
+        /// <summary>
+        /// Validates a device revocation message.
+        /// </summary>
+        /// <param name="revocationMessage">The revocation message to validate</param>
+        /// <param name="trustedPublicKey">The trusted public key for verification</param>
+        /// <returns>True if the message is valid and properly signed</returns>
+        public static bool ValidateDeviceRevocationMessage(DeviceRevocationMessage revocationMessage, byte[] trustedPublicKey)
+        {
+            return revocationMessage.Validate(trustedPublicKey);
+        }
+
+        /// <summary>
+        /// Revokes a linked device and creates a revocation message
+        /// </summary>
+        /// <param name="devicePublicKey">Public key of the device to revoke</param>
+        /// <returns>A revocation message that should be distributed to other devices</returns>
+        public DeviceRevocationMessage RevokeLinkedDevice(byte[] devicePublicKey)
+        {
+            ThrowIfDisposed();
+            return _deviceManager.RevokeLinkedDevice(devicePublicKey);
+        }
+
+        #endregion
+
+        #region Mailbox Integration
+
+        /// <summary>
+        /// Creates a mailbox manager for handling asynchronous message delivery.
+        /// </summary>
+        /// <param name="identityKeyPair">The user's identity key pair</param>
+        /// <param name="transport">The transport implementation to use</param>
+        /// <returns>A configured mailbox manager</returns>
+        public static MailboxManager CreateMailboxManager(KeyPair identityKeyPair, IMailboxTransport transport)
+        {
+            return new MailboxManager(identityKeyPair, transport);
+        }
+
+        /// <summary>
+        /// Creates a mailbox manager using this client's identity key pair
+        /// </summary>
+        /// <param name="transport">The transport implementation to use</param>
+        /// <returns>A configured mailbox manager</returns>
+        public MailboxManager CreateMailboxManager(IMailboxTransport transport)
+        {
+            ThrowIfDisposed();
+            return new MailboxManager(_identityKeyPair, transport);
+        }
+
+        #endregion
+
+        #region Mailbox Transport Factories
+
+        /// <summary>
+        /// Creates an HTTP-based mailbox transport.
+        /// </summary>
+        /// <param name="serverUrl">The URL of the mailbox server</param>
+        /// <returns>An HTTP mailbox transport</returns>
+        public static IMailboxTransport CreateHttpMailboxTransport(string serverUrl)
+        {
+            return new HttpMailboxTransport(serverUrl);
+        }
+
+        /// <summary>
+        /// Creates an in-memory mailbox transport for testing or local-only scenarios.
+        /// </summary>
+        /// <returns>An in-memory mailbox transport</returns>
+        public static IMailboxTransport CreateInMemoryMailboxTransport()
+        {
+            return new InMemoryMailboxTransport();
+        }
 
         #endregion
 
         #region IDisposable Implementation
 
+        /// <summary>
+        /// Disposes resources used by this client
+        /// </summary>
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        /// <summary>
+        /// Disposes resources used by this client
+        /// </summary>
+        /// <param name="disposing">True if called from Dispose(), false if called from finalizer</param>
         protected virtual void Dispose(bool disposing)
         {
             if (_disposed)
@@ -707,20 +634,52 @@ namespace LibEmiddle.API
 
             if (disposing)
             {
-                // Clean up managed resources
-                (_mailboxTransport as IDisposable)?.Dispose();
-                (_sessionManager as IDisposable)?.Dispose();
+                // Dispose managed resources
+                (_groupChatManager as IDisposable)?.Dispose();
+                _deviceManager.Dispose();
+                (_chatSessionManager as IDisposable)?.Dispose();
             }
 
             _disposed = true;
         }
 
-        public void Dispose()
+        /// <summary>
+        /// Finalizer
+        /// </summary>
+        ~LibEmiddleClient()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
+            Dispose(false);
+        }
+
+        /// <summary>
+        /// Throws if this object has been disposed
+        /// </summary>
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(LibEmiddleClient));
         }
 
         #endregion
+    }
+
+    /// <summary>
+    /// Extension method to add the ConfigureStorage method to ChatSessionManager
+    /// </summary>
+    public static class ChatSessionManagerExtensions
+    {
+        /// <summary>
+        /// Configures the storage options for the chat session manager
+        /// </summary>
+        /// <param name="manager">Chat session manager to configure</param>
+        /// <param name="sessionStoragePath">Path to store session data</param>
+        /// <param name="sessionEncryptionKey">Optional key to encrypt session data</param>
+        /// <param name="enableLogging">Whether to enable detailed logging</param>
+        public static void ConfigureStorage(this ChatSessionManager manager, string sessionStoragePath, byte[]? sessionEncryptionKey = null, bool enableLogging = false)
+        {
+            // This extension method assumes these properties would be added to ChatSessionManager
+            // It serves as a placeholder until you can update the actual ChatSessionManager class
+            LoggingManager.LogInformation(nameof(ChatSessionManager), $"Configuring storage path: {sessionStoragePath}");
+        }
     }
 }

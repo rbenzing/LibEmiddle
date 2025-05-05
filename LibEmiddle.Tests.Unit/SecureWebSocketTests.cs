@@ -153,7 +153,7 @@ namespace LibEmiddle.Tests.Unit
             // Arrange:
             // This test expects that when invalid JSON is received, a FormatException is thrown.
             // To ensure this, update SecureWebSocketClient.ReceiveEncryptedMessageAsync to catch JsonException and rethrow it as FormatException.
-            byte[] invalidJsonBytes = Encoding.UTF8.GetBytes("Not a valid JSON");
+            byte[] invalidJsonBytes = Encoding.Default.GetBytes("Not a valid JSON");
             var receiveResult = new WebSocketReceiveResult(invalidJsonBytes.Length, WebSocketMessageType.Text, true);
             _mockWebSocket.Setup(ws => ws.State).Returns(WebSocketState.Open);
             _mockWebSocket.Setup(ws => ws.ReceiveAsync(It.IsAny<ArraySegment<byte>>(), It.IsAny<CancellationToken>()))
@@ -183,7 +183,7 @@ namespace LibEmiddle.Tests.Unit
                 { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }
             };
             string json = JsonSerializer.Serialize(messageData);
-            byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
+            byte[] jsonBytes = Encoding.Default.GetBytes(json);
             var receiveResult = new WebSocketReceiveResult(jsonBytes.Length, WebSocketMessageType.Text, true);
             _mockWebSocket.Setup(ws => ws.State).Returns(WebSocketState.Open);
             _mockWebSocket.Setup(ws => ws.ReceiveAsync(It.IsAny<ArraySegment<byte>>(), It.IsAny<CancellationToken>()))
@@ -213,7 +213,7 @@ namespace LibEmiddle.Tests.Unit
                 { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }
             };
             string json = JsonSerializer.Serialize(messageData);
-            byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
+            byte[] jsonBytes = Encoding.Default.GetBytes(json);
             var receiveResult = new WebSocketReceiveResult(jsonBytes.Length, WebSocketMessageType.Text, true);
             _mockWebSocket.Setup(ws => ws.State).Returns(WebSocketState.Open);
             _mockWebSocket.Setup(ws => ws.ReceiveAsync(It.IsAny<ArraySegment<byte>>(), It.IsAny<CancellationToken>()))
@@ -243,7 +243,7 @@ namespace LibEmiddle.Tests.Unit
                 { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 6 * 60 * 1000 }
             };
             string json = JsonSerializer.Serialize(messageData);
-            byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
+            byte[] jsonBytes = Encoding.Default.GetBytes(json);
             var receiveResult = new WebSocketReceiveResult(jsonBytes.Length, WebSocketMessageType.Text, true);
             _mockWebSocket.Setup(ws => ws.State).Returns(WebSocketState.Open);
             _mockWebSocket.Setup(ws => ws.ReceiveAsync(It.IsAny<ArraySegment<byte>>(), It.IsAny<CancellationToken>()))

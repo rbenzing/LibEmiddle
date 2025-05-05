@@ -172,7 +172,7 @@ namespace LibEmiddle.Tests.Unit
             manager.AddLinkedDevice(secondDeviceX25519Public);
 
             // Data to sync
-            byte[] syncData = Encoding.UTF8.GetBytes("This is sync data");
+            byte[] syncData = Encoding.Default.GetBytes("This is sync data");
 
             // Act
             var syncMessages = manager.CreateSyncMessages(syncData);
@@ -217,7 +217,7 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning($"Second device key (Base64) length: {secondDeviceKeyBase64.Length}");
 
             // 2. Create our test sync data
-            byte[] originalSyncData = Encoding.UTF8.GetBytes("Test sync data for multi-device processing");
+            byte[] originalSyncData = Encoding.Default.GetBytes("Test sync data for multi-device processing");
             Trace.TraceWarning($"Created test sync data, length: {originalSyncData.Length}");
 
             // 3. Manually create and process the sync message with signing
@@ -258,7 +258,7 @@ namespace LibEmiddle.Tests.Unit
 
                 // Encrypt the message with AES using the shared secret
                 byte[] nonce = _cryptoProvider.GenerateNonce();
-                byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
+                byte[] messageBytes = Encoding.Default.GetBytes(jsonMessage);
                 byte[] ciphertext = _cryptoProvider.Encrypt(messageBytes, sharedSecret, nonce);
                 Trace.TraceWarning($"Encrypted message, ciphertext length: {ciphertext.Length}");
 
@@ -351,7 +351,7 @@ namespace LibEmiddle.Tests.Unit
             secondDeviceManager.AddLinkedDevice(mainDeviceX25519Public);
 
             // Create sync data
-            byte[] syncData = Encoding.UTF8.GetBytes("Sync data that will be tampered with");
+            byte[] syncData = Encoding.Default.GetBytes("Sync data that will be tampered with");
 
             // Main device creates sync messages
             var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
@@ -407,7 +407,7 @@ namespace LibEmiddle.Tests.Unit
             mainDeviceManager.AddLinkedDevice(fourthDeviceX25519Public);
 
             // Create sync data
-            byte[] syncData = Encoding.UTF8.GetBytes("Test sync data for multiple devices");
+            byte[] syncData = Encoding.Default.GetBytes("Test sync data for multiple devices");
 
             // Act
             var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
@@ -462,7 +462,7 @@ namespace LibEmiddle.Tests.Unit
             mainDeviceManager.AddLinkedDevice(thirdDeviceX25519Public);
 
             // Create sync data
-            byte[] syncData = Encoding.UTF8.GetBytes("Test sync data");
+            byte[] syncData = Encoding.Default.GetBytes("Test sync data");
 
             // First verify both devices get messages
             var initialSyncMessages = mainDeviceManager.CreateSyncMessages(syncData);
@@ -511,7 +511,7 @@ namespace LibEmiddle.Tests.Unit
             secondDeviceManager.AddLinkedDevice(mainDeviceX25519Public);
 
             // Create a sync message with old timestamp
-            byte[] syncData = Encoding.UTF8.GetBytes("Test sync data with old timestamp");
+            byte[] syncData = Encoding.Default.GetBytes("Test sync data with old timestamp");
             var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
             var messageForSecondDevice = syncMessages[Convert.ToBase64String(secondDeviceX25519Public)];
 
@@ -538,7 +538,7 @@ namespace LibEmiddle.Tests.Unit
             });
 
             // Encrypt
-            byte[] plaintext = Encoding.UTF8.GetBytes(json);
+            byte[] plaintext = Encoding.Default.GetBytes(json);
             byte[] nonce = _cryptoProvider.GenerateNonce();
             byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, sharedSecret, nonce);
 
@@ -577,7 +577,7 @@ namespace LibEmiddle.Tests.Unit
             mainDeviceManager.AddLinkedDevice(secondDeviceX25519Public);
 
             // Create sync data
-            byte[] syncData = Encoding.UTF8.GetBytes("Test sync data for duplicate device");
+            byte[] syncData = Encoding.Default.GetBytes("Test sync data for duplicate device");
 
             // Act
             var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);

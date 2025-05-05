@@ -11,7 +11,7 @@ namespace LibEmiddle.Messaging.Chat
     /// Represents an end-to-end encrypted chat session with a remote party,
     /// managing Double Ratchet state, message history, and session lifecycle.
     /// </summary>
-    public class ChatSession : IChatSession, IDisposable
+    public class ChatSession : IChatSession, ISession, IDisposable
     {
         private readonly SemaphoreSlim _sessionLock = new(1, 1);
         private DoubleRatchetSession _cryptoSession;

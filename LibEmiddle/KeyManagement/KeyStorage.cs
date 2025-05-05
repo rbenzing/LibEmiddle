@@ -1,5 +1,4 @@
-﻿using System.Security.Cryptography;
-using System.Text;
+﻿using System.Text;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
@@ -68,12 +67,12 @@ namespace LibEmiddle.KeyExchange
                         Nonce = salt,
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow,
-                        Version = $"{ProtocolVersion.MAJOR_VERSION}.{ProtocolVersion.MINOR_VERSION}"
+                        Version = $"{ProtocolVersion.FULL_VERSION}"
                     };
 
                     // Serialize metadata
                     string metadataJson = System.Text.Json.JsonSerializer.Serialize(metadata);
-                    byte[] metadataBytes = Encoding.UTF8.GetBytes(metadataJson);
+                    byte[] metadataBytes = Encoding.Default.GetBytes(metadataJson);
 
                     // Generate a nonce for encryption
                     byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
@@ -91,8 +90,8 @@ namespace LibEmiddle.KeyExchange
 
                         // Write encrypted data with nonce
                         byte[] nonceAndCiphertext = new byte[nonce.Length + ciphertext.Length];
-                        Buffer.BlockCopy(nonce, 0, nonceAndCiphertext, 0, nonce.Length);
-                        Buffer.BlockCopy(ciphertext, 0, nonceAndCiphertext, nonce.Length, ciphertext.Length);
+                        nonce.AsSpan().CopyTo(nonceAndCiphertext.AsSpan(0, nonce.Length));
+                        ciphertext.AsSpan().CopyTo(nonceAndCiphertext.AsSpan(nonce.Length));
 
                         fs.Write(nonceAndCiphertext, 0, nonceAndCiphertext.Length);
                     }
@@ -167,11 +166,11 @@ namespace LibEmiddle.KeyExchange
 
                     // Extract nonce
                     byte[] nonce = new byte[Constants.NONCE_SIZE];
-                    Buffer.BlockCopy(nonceAndCiphertext, 0, nonce, 0, nonce.Length);
+                    nonceAndCiphertext.AsSpan(0, nonce.Length).CopyTo(nonce);
 
                     // Extract ciphertext
                     byte[] ciphertext = new byte[nonceAndCiphertext.Length - nonce.Length];
-                    Buffer.BlockCopy(nonceAndCiphertext, nonce.Length, ciphertext, 0, ciphertext.Length);
+                    nonceAndCiphertext.AsSpan(nonce.Length).CopyTo(ciphertext);
 
                     // Decrypt the key data
                     byte[] keyData = AES.AESDecrypt(ciphertext, encryptionKey, nonce, metadataBytes);
@@ -263,8 +262,8 @@ namespace LibEmiddle.KeyExchange
 
                     // Combine nonce and ciphertext
                     byte[] encryptedData = new byte[nonce.Length + ciphertext.Length];
-                    Buffer.BlockCopy(nonce, 0, encryptedData, 0, nonce.Length);
-                    Buffer.BlockCopy(ciphertext, 0, encryptedData, nonce.Length, ciphertext.Length);
+                    nonce.AsSpan().CopyTo(encryptedData.AsSpan(0, nonce.Length));
+                    ciphertext.AsSpan().CopyTo(encryptedData.AsSpan(nonce.Length));
 
                     // Write to file
                     File.WriteAllBytes(filePath, encryptedData);
@@ -315,11 +314,11 @@ namespace LibEmiddle.KeyExchange
 
                     // Extract nonce
                     byte[] nonce = new byte[Constants.NONCE_SIZE];
-                    Buffer.BlockCopy(encryptedData, 0, nonce, 0, nonce.Length);
+                    encryptedData.AsSpan(0, nonce.Length).CopyTo(nonce);
 
                     // Extract ciphertext
                     byte[] ciphertext = new byte[encryptedData.Length - nonce.Length];
-                    Buffer.BlockCopy(encryptedData, nonce.Length, ciphertext, 0, ciphertext.Length);
+                    encryptedData.AsSpan(nonce.Length).CopyTo(ciphertext);
 
                     // Decrypt data
                     return AES.AESDecrypt(ciphertext, encryptionKey, nonce, null);
@@ -409,11 +408,7 @@ namespace LibEmiddle.KeyExchange
                     }
 
                     // 2. Overwrite with random data
-                    byte[] random = new byte[4096];
-                    using (var rng = RandomNumberGenerator.Create())
-                    {
-                        rng.GetBytes(random);
-                    }
+                    byte[] random = Sodium.GenerateRandomBytes(4096);
 
                     fileStream.Position = 0;
                     remaining = fileSize;
@@ -488,7 +483,7 @@ namespace LibEmiddle.KeyExchange
         {
             // Make a copy of the key data for the cache
             byte[] keyCopy = new byte[keyData.Length];
-            Buffer.BlockCopy(keyData, 0, keyCopy, 0, keyData.Length);
+            keyData.AsSpan().CopyTo(keyCopy);
 
             // Add or update the cache
             _keyCache[keyId] = keyCopy;

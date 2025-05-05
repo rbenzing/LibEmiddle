@@ -437,7 +437,7 @@ namespace LibEmiddle.Messaging.Group
             return _cryptoProvider.DeriveKey(
                 chainKey,
                 null,
-                System.Text.Encoding.UTF8.GetBytes("GroupMessageKey"),
+                System.Text.Encoding.Default.GetBytes("GroupMessageKey"),
                 Constants.MESSAGE_KEY_SIZE);
         }
 
@@ -453,7 +453,7 @@ namespace LibEmiddle.Messaging.Group
             return _cryptoProvider.DeriveKey(
                 chainKey,
                 null,
-                System.Text.Encoding.UTF8.GetBytes("GroupChainKey"),
+                System.Text.Encoding.Default.GetBytes("GroupChainKey"),
                 Constants.CHAIN_KEY_SIZE);
         }
     }

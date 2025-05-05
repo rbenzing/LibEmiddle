@@ -14,11 +14,12 @@ namespace LibEmiddle.Sessions
     /// <summary>
     /// Provides centralized persistence for all types of cryptographic sessions.
     /// </summary>
-    public class SessionPersistenceManager
+    public class SessionPersistenceManager : IDisposable
     {
         private readonly ICryptoProvider _cryptoProvider;
         private readonly string _storagePath;
         private readonly SemaphoreSlim _ioLock = new(1, 1);
+        private bool _disposed;
 
         public SessionPersistenceManager(ICryptoProvider cryptoProvider, string? storagePath = null)
         {
@@ -61,7 +62,7 @@ namespace LibEmiddle.Sessions
             dto.Properties["LocalPublicKey"] = Convert.ToBase64String(chatSession.LocalPublicKey);
 
             // Get underlying cryptographic session state
-            var drSession = await chatSession.GetCryptoSessionAsync();
+            DoubleRatchetSession drSession = chatSession.GetCryptoSessionState();
             dto.CryptoState = SerializeDoubleRatchetSession(drSession);
 
             // Encrypt and save the session
@@ -105,7 +106,7 @@ namespace LibEmiddle.Sessions
         /// <summary>
         /// Loads a chat session from persistent storage.
         /// </summary>
-        public async Task<IChatSession?> LoadChatSessionAsync(
+        public async Task<ChatSession?> LoadChatSessionAsync(
             string sessionId,
             IDoubleRatchetProtocol doubleRatchetProtocol)
         {
@@ -132,17 +133,21 @@ namespace LibEmiddle.Sessions
                 // Deserialize crypto session
                 var drSession = DeserializeDoubleRatchetSession(dto.CryptoState);
 
-                // Create and return the chat session
-                return new ChatSession(
+                // Create session
+                var chatSession = new ChatSession(
                     drSession,
                     remotePublicKey,
                     localPublicKey,
-                    doubleRatchetProtocol)
+                    doubleRatchetProtocol);
+
+                // load the metadata
+                foreach (var item in dto.Metadata)
                 {
-                    // Restore session state
-                    State = dto.State,
-                    Metadata = new Dictionary<string, string>(dto.Metadata ?? new Dictionary<string, string>())
-                };
+                    chatSession.SetMetadata(item.Key, item.Value);
+                }
+
+                // return the chat session
+                return chatSession;
             }
             catch (Exception ex)
             {
@@ -163,12 +168,13 @@ namespace LibEmiddle.Sessions
             SenderKeyDistribution distributionManager)
         {
             ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
-            // Validate other required parameters
-
+            
             // Load and decrypt the session data
             var dto = await LoadAndDecryptSessionAsync(sessionId);
             if (dto == null || dto.SessionType != SessionType.Group)
                 return null;
+
+            ArgumentNullException.ThrowIfNull(dto.GroupState, nameof(dto.GroupState));
 
             try
             {
@@ -197,9 +203,6 @@ namespace LibEmiddle.Sessions
                     messageCrypto,
                     distributionManager,
                     rotationStrategy);
-
-                // Restore session state
-                groupSession.State = dto.State;
 
                 // Restore group state
                 await groupSession.RestoreSerializedStateAsync(dto.GroupState);
@@ -245,7 +248,7 @@ namespace LibEmiddle.Sessions
         /// <summary>
         /// Lists all available session IDs in storage.
         /// </summary>
-        public async Task<string[]> ListSessionsAsync()
+        public async Task<string?[]> ListSessionsAsync()
         {
             await _ioLock.WaitAsync();
             try
@@ -259,7 +262,7 @@ namespace LibEmiddle.Sessions
                     .Where(id => !string.IsNullOrEmpty(id))
                     .ToArray();
 
-                return sessionIds;
+                return sessionIds ?? Array.Empty<string>();
             }
             catch (Exception ex)
             {
@@ -278,7 +281,7 @@ namespace LibEmiddle.Sessions
         {
             // Serialize to JSON
             string json = JsonSerialization.Serialize(dto);
-            byte[] data = Encoding.UTF8.GetBytes(json);
+            byte[] data = Encoding.Default.GetBytes(json);
 
             // Generate a key for encryption
             byte[] key = _cryptoProvider.GenerateRandomBytes(32);
@@ -350,7 +353,7 @@ namespace LibEmiddle.Sessions
                     return null;
 
                 // Read the file
-                string metadataJson;
+                string? metadataJson;
                 byte[] encryptedData;
 
                 using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -499,5 +502,24 @@ namespace LibEmiddle.Sessions
         }
 
         #endregion
+
+        // IDisposable implementation
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed) return;
+
+            if (disposing)
+            {
+                
+            }
+
+            _disposed = true;
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
     }
 }

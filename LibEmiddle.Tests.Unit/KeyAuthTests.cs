@@ -88,7 +88,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var keyPair = Sodium.GenerateEd25519KeyPair();
-            var message = Encoding.UTF8.GetBytes("Test message");
+            var message = Encoding.Default.GetBytes("Test message");
             var signature = _cryptoProvider.Sign(message, keyPair.PrivateKey);
 
             // Tamper with signature

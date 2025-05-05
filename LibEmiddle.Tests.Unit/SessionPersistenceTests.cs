@@ -176,7 +176,7 @@ namespace LibEmiddle.Tests.Unit
             string corruptedJson = serializedJson.Substring(0, keyStart)
                                    + corruptedKeyValue
                                    + serializedJson.Substring(keyEnd);
-            byte[] corruptedBytes = System.Text.Encoding.UTF8.GetBytes(corruptedJson);
+            byte[] corruptedBytes = System.Text.Encoding.Default.GetBytes(corruptedJson);
 
             // Act & Assert - This should now throw an InvalidDataException.
             SessionPersistence.DeserializeSession(corruptedBytes);
@@ -309,7 +309,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             string json = JsonSerializer.Serialize(sessionData);
-            byte[] serializedData = Encoding.UTF8.GetBytes(json);
+            byte[] serializedData = Encoding.Default.GetBytes(json);
 
             // Act
             var deserializedSession = SessionPersistence.DeserializeSession(serializedData);

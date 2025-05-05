@@ -136,7 +136,7 @@ namespace LibEmiddle.MultiDevice
             // If using protocol v1.1+, also include the protocol version in the data to sign
             if (!string.Equals(Version, ProtocolVersion.LEGACY_VERSION, StringComparison.Ordinal))
             {
-                byte[] versionBytes = Encoding.UTF8.GetBytes(Version);
+                byte[] versionBytes = Encoding.Default.GetBytes(Version);
                 ms.Write(versionBytes, 0, versionBytes.Length);
             }
 

@@ -72,7 +72,7 @@ namespace LibEmiddle.MultiDevice
             return Sodium.HkdfDerive(
                 normalizedPublicKey,
                 existingSharedKey,
-                info: Encoding.UTF8.GetBytes($"DeviceLinkKeyDerivation-{keyFormat}")
+                info: Encoding.Default.GetBytes($"DeviceLinkKeyDerivation-{keyFormat}")
             );
         }
 
@@ -120,7 +120,7 @@ namespace LibEmiddle.MultiDevice
                 signature = Convert.ToBase64String(signature)
             };
             string json = System.Text.Json.JsonSerializer.Serialize(payload);
-            byte[] plaintext = Encoding.UTF8.GetBytes(json);
+            byte[] plaintext = Encoding.Default.GetBytes(json);
             byte[] nonce = Nonce.GenerateNonce();
             byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
 

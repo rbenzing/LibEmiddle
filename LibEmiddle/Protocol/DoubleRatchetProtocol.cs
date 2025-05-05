@@ -52,8 +52,8 @@ namespace LibEmiddle.Protocol
                 throw new CryptographicException("Failed to generate sender's initial ratchet key pair");
 
             // Create KDF info constants
-            byte[] rootKeyInfo = Encoding.UTF8.GetBytes("DoubleRatchetRoot");
-            byte[] chainKeyInfo = Encoding.UTF8.GetBytes("DoubleRatchetChain");
+            byte[] rootKeyInfo = Encoding.Default.GetBytes("DoubleRatchetRoot");
+            byte[] chainKeyInfo = Encoding.Default.GetBytes("DoubleRatchetChain");
 
             // Derive initial root key from the shared key
             byte[] rootKey = await _cryptoProvider.DeriveKeyAsync(
@@ -131,7 +131,7 @@ namespace LibEmiddle.Protocol
                 throw new ArgumentException("Sender's ephemeral public key has invalid size", nameof(senderEphemeralKeyPublic));
 
             // Create KDF info constants
-            byte[] rootKeyInfo = Encoding.UTF8.GetBytes("DoubleRatchetRoot");
+            byte[] rootKeyInfo = Encoding.Default.GetBytes("DoubleRatchetRoot");
 
             // Derive initial root key from the shared key
             byte[] rootKey = await _cryptoProvider.DeriveKeyAsync(
@@ -225,7 +225,7 @@ namespace LibEmiddle.Protocol
                 updatedSession.SenderChainKey = messageKeyAndNextChain.NextChainKey;
 
                 // Encrypt the message
-                byte[] plaintext = Encoding.UTF8.GetBytes(message);
+                byte[] plaintext = Encoding.Default.GetBytes(message);
                 byte[] nonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
                 byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, messageKey, nonce, null);
 
@@ -406,7 +406,7 @@ namespace LibEmiddle.Protocol
                 byte[] derived = await _cryptoProvider.DeriveKeyAsync(
                     combined,
                     salt: null,
-                    info: Encoding.UTF8.GetBytes("DoubleRatchetKDF"),
+                    info: Encoding.Default.GetBytes("DoubleRatchetKDF"),
                     length: 64);
 
                 byte[] newRootKey = new byte[32];
@@ -433,14 +433,14 @@ namespace LibEmiddle.Protocol
             byte[] nextChainKey = await _cryptoProvider.DeriveKeyAsync(
                 chainKey,
                 salt: null,
-                info: Encoding.UTF8.GetBytes("WhisperChain"),
+                info: Encoding.Default.GetBytes("WhisperChain"),
                 length: 32);
 
             // Use HKDF to derive the message key
             byte[] messageKey = await _cryptoProvider.DeriveKeyAsync(
                 chainKey,
                 salt: null,
-                info: Encoding.UTF8.GetBytes("WhisperMessage"),
+                info: Encoding.Default.GetBytes("WhisperMessage"),
                 length: 32);
 
             return (messageKey, nextChainKey);

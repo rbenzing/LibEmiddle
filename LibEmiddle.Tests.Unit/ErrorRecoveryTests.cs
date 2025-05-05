@@ -502,7 +502,7 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning("Linked both devices successfully");
 
             // Create sync data
-            byte[] syncData = Encoding.UTF8.GetBytes("Important sync data");
+            byte[] syncData = Encoding.Default.GetBytes("Important sync data");
             Trace.TraceWarning($"Created sync data of length {syncData.Length}");
 
             // Create sync messages

@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Collections.Concurrent;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Abstractions;
@@ -15,7 +10,7 @@ namespace LibEmiddle.Messaging.Group
     /// Manages group chat functionality, coordinating between key management, 
     /// messaging encryption, and member management in group contexts.
     /// </summary>
-    public class GroupChatManager
+    public class GroupChatManager : IDisposable
     {
         private readonly ICryptoProvider _cryptoProvider;
         private readonly GroupKeyManager _keyManager;
@@ -23,6 +18,7 @@ namespace LibEmiddle.Messaging.Group
         private readonly GroupMessageCrypto _messageCrypto;
         private readonly SenderKeyDistribution _distributionManager;
         private readonly KeyPair _identityKeyPair;
+        private bool _disposed;
 
         // Active sessions
         private readonly ConcurrentDictionary<string, GroupSession> _activeGroups = new ConcurrentDictionary<string, GroupSession>();
@@ -35,13 +31,13 @@ namespace LibEmiddle.Messaging.Group
         public GroupChatManager(ICryptoProvider cryptoProvider, KeyPair identityKeyPair)
         {
             _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-            _identityKeyPair = identityKeyPair ?? throw new ArgumentNullException(nameof(identityKeyPair));
+            _identityKeyPair = identityKeyPair;
 
             // Create dependent components
             _keyManager = new GroupKeyManager(cryptoProvider);
             _memberManager = new GroupMemberManager(cryptoProvider);
             _messageCrypto = new GroupMessageCrypto(cryptoProvider);
-            _distributionManager = new SenderKeyDistribution(cryptoProvider, _keyManager);
+            _distributionManager = new SenderKeyDistribution(cryptoProvider);
         }
 
         /// <summary>
@@ -52,7 +48,7 @@ namespace LibEmiddle.Messaging.Group
         /// <param name="initialMembers">Optional initial member identities to add to the group.</param>
         /// <param name="options">Optional configuration options for the group.</param>
         /// <returns>The created group session.</returns>
-        public async Task<IGroupSession> CreateGroupAsync(
+        public async Task<GroupSession> CreateGroupAsync(
             string groupId,
             string groupName,
             IEnumerable<byte[]>? initialMembers = null,
@@ -164,6 +160,9 @@ namespace LibEmiddle.Messaging.Group
         {
             if (distribution == null)
                 throw new ArgumentNullException(nameof(distribution));
+
+            if (distribution.GroupId == null)
+                throw new ArgumentNullException(nameof(distribution.GroupId));
 
             string groupId = distribution.GroupId;
 
@@ -337,6 +336,29 @@ namespace LibEmiddle.Messaging.Group
             }
 
             return loadedCount;
+        }
+
+        /// <summary>
+        /// Dispose
+        /// </summary>
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            foreach (var session in _activeGroups.Values)
+            {
+                try
+                {
+                    session.Dispose(); // or await session.TerminateAsync() in an async DisposeAsync if needed
+                }
+                catch (Exception ex)
+                {
+                    LoggingManager.LogError(nameof(GroupChatManager), $"Failed to dispose group session: {ex.Message}");
+                }
+            }
+
+            _disposed = true;
         }
     }
 }

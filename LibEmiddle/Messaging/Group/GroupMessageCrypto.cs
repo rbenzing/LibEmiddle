@@ -63,10 +63,10 @@ namespace LibEmiddle.Messaging.Group
                 byte[] nonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
 
                 // Encode the message
-                byte[] plaintext = Encoding.UTF8.GetBytes(message);
+                byte[] plaintext = Encoding.Default.GetBytes(message);
 
                 // Create associated data (group ID and timestamp)
-                byte[] associatedData = Encoding.UTF8.GetBytes($"{groupId}:{rotationTimestamp}");
+                byte[] associatedData = Encoding.Default.GetBytes($"{groupId}:{rotationTimestamp}");
 
                 // Encrypt the message
                 byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, messageKey, nonce, associatedData);
@@ -129,7 +129,7 @@ namespace LibEmiddle.Messaging.Group
                 }
 
                 // Create associated data (group ID and rotation epoch)
-                byte[] associatedData = Encoding.UTF8.GetBytes($"{groupId}:{encryptedMessage.RotationEpoch}");
+                byte[] associatedData = Encoding.Default.GetBytes($"{groupId}:{encryptedMessage.RotationEpoch}");
 
                 // Decrypt the message
                 byte[] decrypted = _cryptoProvider.Decrypt(
@@ -195,13 +195,13 @@ namespace LibEmiddle.Messaging.Group
             using var ms = new System.IO.MemoryStream();
             using var writer = new System.IO.BinaryWriter(ms);
 
-            writer.Write(Encoding.UTF8.GetBytes(message.GroupId));
+            writer.Write(Encoding.Default.GetBytes(message.GroupId));
             writer.Write(message.SenderIdentityKey);
             writer.Write(message.Ciphertext);
             writer.Write(message.Nonce);
             writer.Write(message.Timestamp);
             writer.Write(message.RotationEpoch);
-            writer.Write(Encoding.UTF8.GetBytes(message.MessageId));
+            writer.Write(Encoding.Default.GetBytes(message.MessageId));
 
             return ms.ToArray();
         }

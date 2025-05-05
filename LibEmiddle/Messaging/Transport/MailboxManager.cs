@@ -1,11 +1,10 @@
 ﻿using System.Collections.Concurrent;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
-using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
-using LibEmiddle.KeyExchange;
 using LibEmiddle.Protocol;
+using LibEmiddle.Sessions;
 
 namespace LibEmiddle.Messaging.Transport
 {
@@ -17,24 +16,26 @@ namespace LibEmiddle.Messaging.Transport
     /// Creates a new mailbox manager.
     /// </remarks>
     /// <param name="identityKeyPair">The user's identity key pair</param>
+    /// <param name="doubleRatchet">The double ratchet protocol implementation to use</param>
     /// <param name="transport">The transport implementation to use</param>
-    public class MailboxManager(KeyPair identityKeyPair, IMailboxTransport transport) : IDisposable
+    public class MailboxManager(KeyPair identityKeyPair, IMailboxTransport transport, IDoubleRatchetProtocol doubleRatchet) : IDisposable
     {
         private readonly KeyPair _identityKeyPair = identityKeyPair;
-        private readonly IMailboxTransport _transport = transport ?? throw new ArgumentNullException(nameof(transport));
-        private readonly CancellationTokenSource _cts = new CancellationTokenSource();
-        private readonly ConcurrentDictionary<string, DoubleRatchetSession> _sessions =
-            new ConcurrentDictionary<string, DoubleRatchetSession>();
-        private readonly ConcurrentQueue<MailboxMessage> _outgoingQueue = new ConcurrentQueue<MailboxMessage>();
-        private readonly ConcurrentDictionary<string, MailboxMessage> _incomingMessages =
-            new ConcurrentDictionary<string, MailboxMessage>();
+
+        private readonly IDoubleRatchetProtocol _doubleRatchetProtocol = doubleRatchet ?? throw new ArgumentNullException(nameof(doubleRatchet));
+        private readonly IMailboxTransport _mailboxTransport = transport ?? throw new ArgumentNullException(nameof(transport));
+
+        private readonly CancellationTokenSource _cts = new();
+        private readonly ConcurrentDictionary<string, DoubleRatchetSession> _sessions = new();
+        private readonly ConcurrentQueue<MailboxMessage> _outgoingQueue = new();
+        private readonly ConcurrentDictionary<string, MailboxMessage> _incomingMessages = new();
 
         private Task? _pollingTask;
         private Task? _sendingTask;
         private TimeSpan _pollingInterval = TimeSpan.FromSeconds(30);
         private bool _isRunning = false;
         private bool _autoSendReceipts = true;
-        private readonly SemaphoreSlim _syncLock = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim _syncLock = new(1, 1);
 
         /// <summary>
         /// Event raised when a new message is received.
@@ -138,10 +139,6 @@ namespace LibEmiddle.Messaging.Transport
             if (!SecureMemory.SecureCompare(message.RecipientKey, _identityKeyPair.PublicKey))
                 return false;
 
-            // Check the encrypted payload
-            if (!message.EncryptedPayload.Validate())
-                return false;
-
             // Check for expired messages
             if (message.IsExpired())
                 return false;
@@ -159,10 +156,11 @@ namespace LibEmiddle.Messaging.Transport
         /// </summary>
         /// <param name="recipientKey">The recipient's public key</param>
         /// <param name="message">The message to send</param>
+        /// <param name="session">The double ratchet session.</param>
         /// <param name="messageType">The type of message</param>
         /// <param name="timeToLive">How long the message should be valid (0 for no expiration)</param>
         /// <returns>The message ID</returns>
-        public string SendMessage(byte[] recipientKey, string message, MessageType messageType = MessageType.Chat, long timeToLive = 0)
+        public string SendMessage(byte[] recipientKey, string message, DoubleRatchetSession session, MessageType messageType = MessageType.Chat, long timeToLive = 0)
         {
             if (recipientKey == null || recipientKey.Length == 0)
                 throw new ArgumentException("Recipient key cannot be null or empty", nameof(recipientKey));
@@ -172,10 +170,9 @@ namespace LibEmiddle.Messaging.Transport
 
             // Get or create session for this recipient
             string recipientId = Convert.ToBase64String(recipientKey);
-            DoubleRatchetSession session = GetOrCreateSession(recipientId, recipientKey);
 
             // Encrypt the message
-            var (updatedSession, encryptedPayload) = DoubleRatchetProtocol.Encrypt(session, message);
+            var (updatedSession, encryptedPayload) = _doubleRatchetProtocol.EncryptAsync(session, message).GetAwaiter().GetResult();
 
             ArgumentNullException.ThrowIfNull(updatedSession, nameof(updatedSession));
             ArgumentNullException.ThrowIfNull(encryptedPayload, nameof(encryptedPayload));
@@ -232,8 +229,7 @@ namespace LibEmiddle.Messaging.Transport
                     string senderId = Convert.ToBase64String(message.SenderKey);
                     if (_sessions.TryGetValue(senderId, out var session))
                     {
-                        var (updatedSession, decryptedMessage) = DoubleRatchet.DoubleRatchetDecrypt(
-                            session, message.EncryptedPayload);
+                        var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(session, message.EncryptedPayload).GetAwaiter().GetResult();
 
                         if (updatedSession != null && decryptedMessage != null)
                         {
@@ -282,7 +278,7 @@ namespace LibEmiddle.Messaging.Transport
                 // Update on server
                 try
                 {
-                    await _transport.MarkMessageAsReadAsync(messageId);
+                    await _mailboxTransport.MarkMessageAsReadAsync(messageId);
                 }
                 catch (Exception ex)
                 {
@@ -311,7 +307,7 @@ namespace LibEmiddle.Messaging.Transport
             try
             {
                 // Attempt to delete from server first
-                bool serverRemoved = await _transport.DeleteMessageAsync(messageId);
+                bool serverRemoved = await _mailboxTransport.DeleteMessageAsync(messageId);
 
                 // Then remove from local collection if server deletion succeeded
                 if (serverRemoved)
@@ -338,44 +334,30 @@ namespace LibEmiddle.Messaging.Transport
                 return session;
             }
 
-            // Create a new session
-            // In a real system, you'd perform a proper key exchange first
-            // This is a simplified implementation for integration purposes
-
             // Convert to X25519 for key exchange if needed
             byte[] x25519PrivateKey = _identityKeyPair.PrivateKey.Length != Constants.X25519_KEY_SIZE ?
-                Sodium.ConvertEd25519PrivateKeyToX25519(_identityKeyPair.PrivateKey) :
+                Sodium.ConvertEd25519PrivateKeyToX25519(_identityKeyPair.PrivateKey).ToArray() :
                 _identityKeyPair.PrivateKey;
 
             // Ensure contact key is in X25519 format
             byte[] contactX25519Key = contactKey.Length != Constants.X25519_KEY_SIZE ?
-                Sodium.ConvertEd25519PublicKeyToX25519(contactKey) :
+                Sodium.ConvertEd25519PublicKeyToX25519(contactKey).ToArray() :
                 contactKey;
 
             // Perform key exchange  
-            byte[] sharedSecret = Sodium.ScalarMult(contactX25519Key, x25519PrivateKey);
-
-            // Initialize Double Ratchet
-            var (rootKey, chainKey) = DoubleRatchet.DeriveDoubleRatchet(sharedSecret);
+            byte[] sharedSecret = Sodium.HkdfDerive(contactX25519Key, x25519PrivateKey);
 
             // Create a session with a unique ID
             string sessionId = $"session-{contactId}-{Guid.NewGuid()}";
 
-            session = new DoubleRatchetSession(
-                dhRatchetKeyPair: new KeyPair(_identityKeyPair.PublicKey, x25519PrivateKey),
-                remoteDHRatchetKey: contactX25519Key,
-                rootKey: rootKey,
-                sendingChainKey: chainKey,
-                receivingChainKey: chainKey,
-                messageNumberSending: 0,
-                messageNumberReceiving: 0,
-                sessionId: sessionId
-            );
-
+            // Initialize Double Ratchet
+            DoubleRatchetSession drSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(sharedSecret, 
+                contactX25519Key, sessionId).GetAwaiter().GetResult();
+            
             // Store the session
-            _sessions[contactId] = session;
+            _sessions[contactId] = drSession;
 
-            return session;
+            return drSession;
         }
 
         /// <summary>
@@ -404,7 +386,7 @@ namespace LibEmiddle.Messaging.Transport
                 try
                 {
                     // Fetch new messages
-                    var messages = await _transport.FetchMessagesAsync(_identityKeyPair.PublicKey, cancellationToken);
+                    var messages = await _mailboxTransport.FetchMessagesAsync(_identityKeyPair.PublicKey, cancellationToken);
 
                     foreach (var message in messages)
                     {
@@ -485,7 +467,7 @@ namespace LibEmiddle.Messaging.Transport
                             continue;
 
                         // Send the message
-                        bool success = await _transport.SendMessageAsync(message);
+                        bool success = await _mailboxTransport.SendMessageAsync(message);
 
                         // If failed, re-queue (unless expired)
                         if (!success && !message.IsExpired())
@@ -521,7 +503,7 @@ namespace LibEmiddle.Messaging.Transport
         /// <summary>
         /// Sends a delivery or read receipt.
         /// </summary>
-        private void SendReceipt(MailboxMessage originalMessage, bool isDeliveryReceipt)
+        private static void SendReceipt(MailboxMessage originalMessage, bool isDeliveryReceipt)
         {
             // Create receipt data
             var receiptData = new
@@ -535,8 +517,7 @@ namespace LibEmiddle.Messaging.Transport
             string json = System.Text.Json.JsonSerializer.Serialize(receiptData);
 
             // Send as a normal message
-            MessageType receiptType = isDeliveryReceipt ? MessageType.DeliveryReceipt : MessageType.ReadReceipt;
-            SendMessage(originalMessage.SenderKey, json, receiptType);
+            SendMessage(originalMessage.SenderKey, json, isDeliveryReceipt ? MessageType.DeliveryReceipt : MessageType.ReadReceipt);
         }
 
         /// <summary>
@@ -545,16 +526,6 @@ namespace LibEmiddle.Messaging.Transport
         protected virtual void OnMessageReceived(MailboxMessage message)
         {
             MessageReceived?.Invoke(this, new MailboxMessageEventArgs(message));
-        }
-
-        /// <summary>
-        /// Disposes resources.
-        /// </summary>
-        public void Dispose()
-        {
-            Stop();
-            _cts.Dispose();
-            _syncLock.Dispose();
         }
 
         /// <summary>
@@ -575,14 +546,13 @@ namespace LibEmiddle.Messaging.Transport
         /// Exports a session for a recipient.
         /// </summary>
         /// <param name="recipientId">The recipient ID (Base64 of their public key)</param>
-        /// <param name="encryptionKey">Optional key to encrypt the session data</param>
         /// <returns>Serialized session data</returns>
-        public byte[] ExportSession(string recipientId, byte[]? encryptionKey = null)
+        public byte[] ExportSession(string recipientId)
         {
             if (!_sessions.TryGetValue(recipientId, out var session))
                 throw new KeyNotFoundException($"No session found for recipient {recipientId}");
 
-            return SessionPersistence.SerializeSession(session, encryptionKey);
+            return SessionManager.SaveSessionAsync(session);
         }
 
         /// <summary>
@@ -611,6 +581,18 @@ namespace LibEmiddle.Messaging.Transport
                 LoggingManager.LogError(nameof(MailboxManager), $"Error importing session: {ex.Message}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Disposes resources.
+        /// </summary>
+        public void Dispose()
+        {
+            Stop();
+            _doubleRatchetProtocol.Dispose();
+            _mailboxTransport.Dispose();
+            _cts.Dispose();
+            _syncLock.Dispose();
         }
     }
 

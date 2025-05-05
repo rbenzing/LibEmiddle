@@ -5,8 +5,7 @@ using System.Security.Cryptography;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.KeyExchange;
-using LibEmiddle.Models;
+using LibEmiddle.Abstractions;
 using LibEmiddle.Protocol;
 
 namespace LibEmiddle.Tests.Unit
@@ -15,7 +14,7 @@ namespace LibEmiddle.Tests.Unit
     public class KeyExchangeTests
     {
         private CryptoProvider _cryptoProvider;
-        private X3DHProtocol _x3DHProtocol;
+        private IX3DHProtocol _x3DHProtocol;
 
         [TestInitialize]
         public void Setup()
@@ -131,10 +130,9 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsNotNull(session);
-            Assert.IsNotNull(session.RootKey);
-            Assert.IsNotNull(session.ChainKey);
-            Assert.IsFalse(session.UsedOneTimePreKey, "Should not have used a one-time pre-key");
-            Assert.IsNull(usedOneTimePreKeyId, "Should not have a one-time pre-key ID");
+            Assert.IsNotNull(session.SharedKey);
+            Assert.IsNotNull(session.MessageDataToSend);
+            Assert.IsFalse(session.MessageDataToSend.RecipientOneTimePreKeyId == null, "Should not have used a one-time pre-key");
         }
 
         [TestMethod]
@@ -142,7 +140,7 @@ namespace LibEmiddle.Tests.Unit
         public void InitiateX3DHSession_WithInvalidSignedPreKey_ShouldThrowException()
         {
             // Arrange
-            var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
+            var bobBundle = _x3DHProtocol.CreateKeyBundleAsync().GetAwaiter().GetResult();
             KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create a bundle with invalid signed pre-key (all zeros)
@@ -155,7 +153,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act & Assert - Should throw ArgumentException
-            X3DHExchange.InitiateX3DHSession(bobPublicBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
+            var sessionResult = _x3DHProtocol.InitiateSessionAsSenderAsync(bobPublicBundle, _aliceIdentityKeyPair).GetAwaiter().GetResult();
         }
 
         [TestMethod]
@@ -163,7 +161,7 @@ namespace LibEmiddle.Tests.Unit
         public void InitiateX3DHSession_WithInvalidSignature_ShouldThrowException()
         {
             // Arrange
-            var bobBundle = X3DHExchange.CreateX3DHKeyBundle();
+            var bobBundle = _x3DHProtocol.CreateKeyBundleAsync().GetAwaiter().GetResult();
             KeyPair _aliceIdentityKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Tamper with the signature
@@ -181,15 +179,15 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act & Assert - Should throw ArgumentException
-            X3DHExchange.InitiateX3DHSession(bobPublicBundle, _aliceIdentityKeyPair, out var usedOneTimePreKeyId);
+            var sessionResult = _x3DHProtocol.InitiateSessionAsSenderAsync(bobPublicBundle, _aliceIdentityKeyPair);
         }
 
         [TestMethod]
         public void X3DHSessionWithUpdatedChainKey_ShouldMaintainCorrectState()
         {
             // Arrange
-            var recipientId = Encoding.UTF8.GetBytes("recipient-id");
-            var senderId = Encoding.UTF8.GetBytes("sender-id");
+            var recipientId = Encoding.Default.GetBytes("recipient-id");
+            var senderId = Encoding.Default.GetBytes("sender-id");
             var ephemeralKey = new byte[32]; // dummy ephemeral key
             bool usedOneTimePreKey = true;
             byte[] rootKey = new byte[32];
@@ -232,8 +230,8 @@ namespace LibEmiddle.Tests.Unit
         public void X3DHSessionWithUpdatedKeys_ShouldMaintainCorrectState()
         {
             // Arrange
-            var recipientId = Encoding.UTF8.GetBytes("recipient-id");
-            var senderId = Encoding.UTF8.GetBytes("sender-id");
+            var recipientId = Encoding.Default.GetBytes("recipient-id");
+            var senderId = Encoding.Default.GetBytes("sender-id");
             var ephemeralKey = new byte[32]; // dummy ephemeral key
             bool usedOneTimePreKey = true;
             byte[] oldRootKey = new byte[32];

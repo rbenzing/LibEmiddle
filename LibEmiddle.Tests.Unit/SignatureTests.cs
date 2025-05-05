@@ -24,7 +24,7 @@ namespace LibEmiddle.Tests.Unit
         public void SignAndVerifyMessage_ShouldVerifyCorrectly()
         {
             // Arrange
-            byte[] message = Encoding.UTF8.GetBytes("This is a message to be signed");
+            byte[] message = Encoding.Default.GetBytes("This is a message to be signed");
             KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
             var privateKey = _identityKeyPair.PrivateKey;
@@ -41,8 +41,8 @@ namespace LibEmiddle.Tests.Unit
         public void VerifySignature_WithTamperedMessage_ShouldReturnFalse()
         {
             // Arrange
-            byte[] originalMessage = Encoding.UTF8.GetBytes("This is a message to be signed");
-            byte[] tamperedMessage = Encoding.UTF8.GetBytes("This is a tampered message");
+            byte[] originalMessage = Encoding.Default.GetBytes("This is a message to be signed");
+            byte[] tamperedMessage = Encoding.Default.GetBytes("This is a tampered message");
             KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
             var privateKey = _identityKeyPair.PrivateKey;
@@ -77,7 +77,7 @@ namespace LibEmiddle.Tests.Unit
         public void SignMessage_WithNullPrivateKey_ShouldThrowException()
         {
             // Arrange
-            byte[] message = Encoding.UTF8.GetBytes("Test message");
+            byte[] message = Encoding.Default.GetBytes("Test message");
 
             // Act & Assert - Should throw NullReferenceException
             _cryptoProvider.Sign(message, null);
@@ -104,7 +104,7 @@ namespace LibEmiddle.Tests.Unit
         public void SignMessage_WithX25519PrivateKey_ShouldNotWork()
         {
             // Arrange
-            byte[] message = Encoding.UTF8.GetBytes("Message to sign with X25519 key");
+            byte[] message = Encoding.Default.GetBytes("Message to sign with X25519 key");
             KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var privateKey = _identityKeyPair.PrivateKey;
 
@@ -116,7 +116,7 @@ namespace LibEmiddle.Tests.Unit
         public void SigningPerformance_ShouldBeReasonable()
         {
             // Arrange
-            byte[] smallMessage = Encoding.UTF8.GetBytes("Small message");
+            byte[] smallMessage = Encoding.Default.GetBytes("Small message");
             byte[] mediumMessage = SecureMemory.CreateSecureBuffer(1024); // 1KB
             byte[] largeMessage = SecureMemory.CreateSecureBuffer(1024 * 10); // 10KB
 
@@ -187,7 +187,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Test signature functionality
             string message = "Cryptographic identity test message";
-            byte[] messageBytes = Encoding.UTF8.GetBytes(message);
+            byte[] messageBytes = Encoding.Default.GetBytes(message);
 
             byte[] signature1 = _cryptoProvider.Sign(messageBytes, _signIdentityKeyPair1.PrivateKey);
             byte[] signature2 = _cryptoProvider.Sign(messageBytes, _signIdentityKeyPair2.PrivateKey);

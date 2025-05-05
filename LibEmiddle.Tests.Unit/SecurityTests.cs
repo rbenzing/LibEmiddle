@@ -382,7 +382,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Test signature functionality
             string message = "Cryptographic identity test message";
-            byte[] messageBytes = Encoding.UTF8.GetBytes(message);
+            byte[] messageBytes = Encoding.Default.GetBytes(message);
 
             byte[] signature1 = _cryptoProvider.Sign(messageBytes, keyPair1.PrivateKey);
             byte[] signature2 = _cryptoProvider.Sign(messageBytes, keyPair2.PrivateKey);
@@ -469,7 +469,7 @@ namespace LibEmiddle.Tests.Unit
             // Test with key arrays of incorrect length
             byte[] shortKey = new byte[16]; // Too short
             byte[] longKey = new byte[64];  // Too long for AES but valid for Ed25519
-            byte[] messageBytes = Encoding.UTF8.GetBytes("Test message");
+            byte[] messageBytes = Encoding.Default.GetBytes("Test message");
             byte[] validNonce = _cryptoProvider.GenerateNonce();
             byte[] shortNonce = new byte[8]; // Too short
 
@@ -556,8 +556,8 @@ namespace LibEmiddle.Tests.Unit
             string message1 = "First message";
             string message2 = "Second message - should use different nonce";
 
-            byte[] plaintext1 = Encoding.UTF8.GetBytes(message1);
-            byte[] plaintext2 = Encoding.UTF8.GetBytes(message2);
+            byte[] plaintext1 = Encoding.Default.GetBytes(message1);
+            byte[] plaintext2 = Encoding.Default.GetBytes(message2);
 
             // Act
             byte[] ciphertext1 = _cryptoProvider.Encrypt(plaintext1, key, nonce);

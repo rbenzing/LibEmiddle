@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-using LibEmiddle.Core;
+﻿using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
 using LibEmiddle.Abstractions;
@@ -14,7 +10,7 @@ namespace LibEmiddle.Messaging.Group
     /// Implements the IGroupSession interface, providing the main entry point
     /// for group chat functionality with end-to-end encryption.
     /// </summary>
-    public class GroupSession : IGroupSession, IDisposable
+    public class GroupSession : IGroupSession, ISession, IDisposable
     {
         private readonly SemaphoreSlim _sessionLock = new SemaphoreSlim(1, 1);
         private readonly string _groupId;
@@ -31,11 +27,19 @@ namespace LibEmiddle.Messaging.Group
         public SessionType Type => SessionType.Group;
         public SessionState State { get; private set; }
         public string GroupId => _groupId;
+        public byte[] ChainKey => _keyManager.GetSenderState(_groupId)?.ChainKey ?? Array.Empty<byte>();
+        public uint Iteration => _keyManager.GetSenderState(_groupId)?.Iteration ?? 0;
+        public IReadOnlyDictionary<string, string> Metadata;
+
 
         // Additional properties
         public DateTime CreatedAt { get; }
+        public DateTime CreationTimestamp => CreatedAt;
+
         public KeyRotationStrategy RotationStrategy { get; set; }
         public byte[] CreatorPublicKey { get; }
+        public byte[] CreatorIdentityKey => CreatorPublicKey;
+        public DateTime KeyEstablishmentTimestamp => DateTimeOffset.FromUnixTimeSeconds(_keyManager.GetLastRotationTimestamp(_groupId)).UtcDateTime;
 
         // Events
         public event EventHandler<SessionStateChangedEventArgs>? StateChanged;

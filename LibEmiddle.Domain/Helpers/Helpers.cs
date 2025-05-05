@@ -22,7 +22,7 @@ namespace LibEmiddle.Domain
                 // Attempt to decode
                 string decoded = Encoding.UTF8.GetString(data);
                 // Re-encode and check if the bytes match
-                byte[] reEncoded = Encoding.UTF8.GetBytes(decoded);
+                byte[] reEncoded = Encoding.Default.GetBytes(decoded);
 
                 if (data.Length != reEncoded.Length)
                     return false;

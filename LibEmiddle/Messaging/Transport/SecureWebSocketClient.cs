@@ -7,7 +7,7 @@ using System.Text.Json;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.Models;
+using LibEmiddle.Protocol;
 
 namespace LibEmiddle.Messaging.Transport
 {
@@ -17,6 +17,9 @@ namespace LibEmiddle.Messaging.Transport
     public class SecureWebSocketClient : IDisposable
     {
         private readonly IWebSocketClient _webSocket;
+        private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
+        private readonly ICryptoProvider _cryptoProvider;
+
         private readonly Uri _serverUri;
         private DoubleRatchetSession? _session = null;
         private bool _disposed = false;
@@ -40,6 +43,9 @@ namespace LibEmiddle.Messaging.Transport
         {
             _serverUri = new Uri(serverUrl);
             _webSocket = webSocket ?? throw new ArgumentNullException(nameof(webSocket));
+
+            _cryptoProvider = new CryptoProvider();
+            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
         }
 
         /// <summary>
@@ -110,7 +116,7 @@ namespace LibEmiddle.Messaging.Transport
             try
             {
                 // Encrypt the message
-                var (updatedSession, encryptedMessage) = DoubleRatchet.DoubleRatchetEncrypt(_session, message);
+                var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(_session, message).GetAwaiter().GetResult();
 
                 // Validate the encryption result
                 if (updatedSession is null)
@@ -137,16 +143,16 @@ namespace LibEmiddle.Messaging.Transport
                 {
                     ciphertext = Convert.ToBase64String(encryptedMessage.Ciphertext),
                     nonce = Convert.ToBase64String(encryptedMessage.Nonce),
-                    messageNumber = encryptedMessage.MessageNumber,
+                    messageNumber = encryptedMessage.SenderMessageNumber,
                     senderDHKey = Convert.ToBase64String(encryptedMessage.SenderDHKey),
                     timestamp = encryptedMessage.Timestamp,
-                    messageId = encryptedMessage.MessageId.ToString(),
+                    messageId = encryptedMessage.MessageId,
                     sessionId = encryptedMessage.SessionId
                 };
 
                 // Use our standardized JSON serialization
                 string jsonMessage = JsonSerialization.Serialize(messageData);
-                byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
+                byte[] messageBytes = Encoding.Default.GetBytes(jsonMessage);
 
                 // Send the message with cancellation support
                 await _webSocket.SendAsync(
@@ -265,6 +271,11 @@ namespace LibEmiddle.Messaging.Transport
                     sessionId = sessionIdElement.GetString();
                 }
 
+                if (sessionId == null)
+                {
+                    throw new ArgumentNullException(nameof(sessionId));
+                }
+
                 // Try to get message ID if available
                 Guid messageId = Guid.NewGuid(); // Default to a new ID
                 if (messageData.TryGetValue("messageId", out JsonElement messageIdElement) &&
@@ -282,20 +293,20 @@ namespace LibEmiddle.Messaging.Transport
                 {
                     Ciphertext = ciphertext,
                     Nonce = nonce,
-                    MessageNumber = messageNumber,
+                    SenderMessageNumber = (uint)messageNumber,
                     SenderDHKey = senderDHKey,
                     Timestamp = timestamp,
-                    MessageId = messageId,
+                    MessageId = messageId.ToString(),
                     SessionId = sessionId
                 };
 
                 // Validate the message before attempting decryption
-                if (!encryptedMessage.Validate())
+                if (!encryptedMessage.IsValid())
                 {
                     throw new SecurityException("Message validation failed.");
                 }
 
-                var (updatedSession, decryptedMessage) = DoubleRatchet.DoubleRatchetDecrypt(_session, encryptedMessage);
+                var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(_session, encryptedMessage).GetAwaiter().GetResult();
 
                 // Only update the session if decryption was successful
                 if (updatedSession != null)

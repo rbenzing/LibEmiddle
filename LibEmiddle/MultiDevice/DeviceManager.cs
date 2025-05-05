@@ -1,6 +1,5 @@
 ﻿using System.Collections.Concurrent;
 using System.Security;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using LibEmiddle.Core;
@@ -258,7 +257,7 @@ namespace LibEmiddle.MultiDevice
                             });
 
                             // Encrypt
-                            byte[] plaintext = Encoding.UTF8.GetBytes(json);
+                            byte[] plaintext = Encoding.Default.GetBytes(json);
                             byte[] nonce = Nonce.GenerateNonce();
                             byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
 
@@ -735,17 +734,13 @@ namespace LibEmiddle.MultiDevice
                 protocolVersion = ProtocolVersion.FULL_VERSION
             });
 
-            byte[] data = Encoding.UTF8.GetBytes(json);
+            byte[] data = Encoding.Default.GetBytes(json);
 
             // Encrypt if password provided
             if (!string.IsNullOrEmpty(password))
             {
                 // Generate a salt
                 byte[] salt = SecureMemory.CreateSecureBuffer(Constants.DEFAULT_SALT_SIZE);
-                using (var rng = RandomNumberGenerator.Create())
-                {
-                    rng.GetBytes(salt);
-                }
 
                 // Derive key
                 byte[] key = DeriveKeyFromPassword(password, salt);
@@ -912,13 +907,7 @@ namespace LibEmiddle.MultiDevice
         /// </summary>
         private static byte[] DeriveKeyFromPassword(string password, byte[] salt)
         {
-            using var pbkdf2 = new Rfc2898DeriveBytes(
-                password,
-                salt,
-                Constants.PBKDF2_ITERATIONS,
-                HashAlgorithmName.SHA256);
-
-            return pbkdf2.GetBytes(Constants.AES_KEY_SIZE);
+            return Sodium.GenerateHmacSha256(Encoding.Default.GetBytes(password), salt);
         }
 
         /// <summary>

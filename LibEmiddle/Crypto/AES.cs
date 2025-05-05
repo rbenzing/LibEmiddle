@@ -234,7 +234,7 @@ namespace LibEmiddle.Crypto
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
 
-            byte[] plaintext = Encoding.UTF8.GetBytes(message);
+            byte[] plaintext = Encoding.Default.GetBytes(message);
             byte[] nonce = Nonce.GenerateNonce();
             byte[] ciphertext = AESEncrypt(plaintext, key.ToArray(), nonce);
 
@@ -243,7 +243,7 @@ namespace LibEmiddle.Crypto
                 Ciphertext = ciphertext,
                 Nonce = nonce,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                MessageId = Guid.NewGuid()
+                MessageId = Guid.NewGuid().ToString(),
             };
         }
 

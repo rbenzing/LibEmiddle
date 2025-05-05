@@ -5,19 +5,35 @@ using System.Collections.Immutable;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.Domain.DTO;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Domain.Enums;
+using LibEmiddle.KeyExchange;
 
 namespace LibEmiddle.Messaging.Group
 {
     /// <summary>
     /// Manages the persistence of group session information
     /// </summary>
-    public class GroupSessionPersistence
+    public class GroupSessionPersistence : IDisposable
     {
+        private readonly ICryptoProvider _cryptoProvider;
+
         // Dictionary to store group sessions
         private readonly Dictionary<string, GroupSession> _groupSessions = new();
 
         // Lock object for thread safety
         private readonly object _sessionsLock = new();
+
+        private bool _disposed = false;
+
+        /// <summary>
+        /// C'tor
+        /// </summary>
+        public GroupSessionPersistence()
+        {
+            _cryptoProvider = new CryptoProvider();
+        }
 
         /// <summary>
         /// Gets a group session by ID
@@ -122,7 +138,7 @@ namespace LibEmiddle.Messaging.Group
                 WriteIndented = true
             });
 
-            byte[] data = Encoding.UTF8.GetBytes(json);
+            byte[] data = Encoding.Default.GetBytes(json);
 
             // Encrypt if password is provided
             if (!string.IsNullOrEmpty(password))
@@ -334,7 +350,7 @@ namespace LibEmiddle.Messaging.Group
 
             // Serialize to JSON
             string json = JsonSerializer.Serialize(sessionDto);
-            byte[] data = Encoding.UTF8.GetBytes(json);
+            byte[] data = Encoding.Default.GetBytes(json);
 
             // Encrypt if a key is provided
             if (encryptionKey != null && encryptionKey.Length == Constants.AES_KEY_SIZE)
@@ -400,21 +416,48 @@ namespace LibEmiddle.Messaging.Group
                 }
             }
 
+            var _identityKeyPair = Sodium.GenerateEd25519KeyPair();
+
             // Create new session from the DTO
             var session = new GroupSession(
                 groupId: dto.GroupId,
-                chainKey: Convert.FromBase64String(dto.ChainKeyBase64),
-                iteration: dto.Iteration,
-                creatorIdentityKey: Convert.FromBase64String(dto.CreatorIdentityKeyBase64),
-                creationTimestamp: dto.CreationTimestamp,
-                keyEstablishmentTimestamp: dto.KeyEstablishmentTimestamp,
-                metadata: metadata ?? ImmutableDictionary<string, string>.Empty
+                identityKeyPair: _identityKeyPair,
+                keyManager: new GroupKeyManager(_cryptoProvider),
+                memberManager: new GroupMemberManager(_cryptoProvider),
+                messageCrypto: new GroupMessageCrypto(_cryptoProvider),
+                distributionManager: new SenderKeyDistribution(_cryptoProvider)
             );
 
             // Store the session
             StoreGroupSession(session);
 
             return session;
+        }
+
+        /// <summary>
+        /// Disposes of resources used by the CryptoProvider.
+        /// </summary>
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        /// <summary>
+        /// Disposes of resources used by the CryptoProvider.
+        /// </summary>
+        /// <param name="disposing">True if disposing, false if finalizing.</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+                return;
+
+            if (disposing)
+            {
+                _cryptoProvider.Dispose();
+            }
+
+            _disposed = true;
         }
     }
 }

@@ -191,7 +191,7 @@ namespace LibEmiddle.Messaging.Group
             using var ms = new System.IO.MemoryStream();
             using var writer = new System.IO.BinaryWriter(ms);
 
-            writer.Write(System.Text.Encoding.UTF8.GetBytes(distribution.GroupId));
+            writer.Write(System.Text.Encoding.Default.GetBytes(distribution.GroupId));
             writer.Write(distribution.ChainKey);
             writer.Write(distribution.Iteration);
             writer.Write(distribution.Timestamp);
@@ -223,13 +223,13 @@ namespace LibEmiddle.Messaging.Group
             using var ms = new System.IO.MemoryStream();
             using var writer = new System.IO.BinaryWriter(ms);
 
-            writer.Write(System.Text.Encoding.UTF8.GetBytes(message.GroupId));
+            writer.Write(System.Text.Encoding.Default.GetBytes(message.GroupId));
             writer.Write(message.SenderIdentityKey);
             writer.Write(message.Ciphertext);
             writer.Write(message.Nonce);
             writer.Write(message.Timestamp);
             writer.Write(message.RotationEpoch);
-            writer.Write(System.Text.Encoding.UTF8.GetBytes(message.MessageId ?? string.Empty));
+            writer.Write(System.Text.Encoding.Default.GetBytes(message.MessageId ?? string.Empty));
 
             return ms.ToArray();
         }

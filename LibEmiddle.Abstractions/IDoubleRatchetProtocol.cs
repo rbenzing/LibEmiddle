@@ -1,6 +1,5 @@
 ﻿using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
-using LibEmiddle.Models;
 
 namespace LibEmiddle.Abstractions
 {

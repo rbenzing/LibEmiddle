@@ -488,12 +488,12 @@ namespace LibEmiddle.Protocol
             }
 
             int offset = 32;
-            Buffer.BlockCopy(dh1, 0, ikm, offset, dh1.Length); offset += dh1.Length;
-            Buffer.BlockCopy(dh2, 0, ikm, offset, dh2.Length); offset += dh2.Length;
-            Buffer.BlockCopy(dh3, 0, ikm, offset, dh3.Length); offset += dh3.Length;
+            dh1.AsSpan().CopyTo(ikm.AsSpan(offset, dh1.Length)); offset += dh1.Length;
+            dh2.AsSpan().CopyTo(ikm.AsSpan(offset, dh2.Length)); offset += dh2.Length;
+            dh3.AsSpan().CopyTo(ikm.AsSpan(offset, dh3.Length)); offset += dh3.Length;
             if (dh4 != null)
             {
-                Buffer.BlockCopy(dh4, 0, ikm, offset, dh4.Length);
+                dh4.AsSpan().CopyTo(ikm.AsSpan(offset, dh4.Length));
             }
 
             try
@@ -503,7 +503,7 @@ namespace LibEmiddle.Protocol
                     return _cryptoProvider.DeriveKey(
                         ikm,
                         salt: new byte[32], // 32 zero bytes for salt
-                        info: Encoding.UTF8.GetBytes("WhisperText"),
+                        info: Encoding.Default.GetBytes("WhisperText"),
                         length: 32);
                 });
             }

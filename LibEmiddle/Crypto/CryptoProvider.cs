@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
@@ -101,14 +100,21 @@ namespace LibEmiddle.Crypto
             if (count <= 0)
                 throw new ArgumentOutOfRangeException(nameof(count), "Count must be greater than zero.");
 
+            byte[] randomBuffer = new byte[count];
+
             try
             {
-                return RandomNumberGenerator.GetBytes(count);
+                Sodium.RandomFill(randomBuffer);
+                return randomBuffer;
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError(nameof(CryptoProvider), $"Error generating random bytes: {ex.Message}");
+                LoggingManager.LogError(nameof(CryptoProvider), $"GenerateRandomBytes: Error generating random bytes: {ex.Message}");
                 throw;
+            }
+            finally
+            {
+                SecureMemory.SecureClear(randomBuffer);
             }
         }
 
@@ -182,10 +188,10 @@ namespace LibEmiddle.Crypto
         /// </summary>
         /// <param name="plaintext">The data to encrypt.</param>
         /// <param name="key">The encryption key.</param>
-        /// <param name="nonce">The nonce for encryption.</param>
+        /// <param name="nonce">Optional nonce for encryption.</param>
         /// <param name="associatedData">Optional associated data for AEAD encryption.</param>
         /// <returns>The encrypted data.</returns>
-        public byte[] Encrypt(byte[] plaintext, byte[] key, byte[] nonce, byte[]? associatedData)
+        public byte[] Encrypt(byte[] plaintext, byte[] key, byte[]? nonce, byte[]? associatedData)
         {
             if (plaintext == null)
                 throw new ArgumentNullException(nameof(plaintext));
@@ -213,10 +219,10 @@ namespace LibEmiddle.Crypto
         /// </summary>
         /// <param name="ciphertext">The data to decrypt.</param>
         /// <param name="key">The decryption key.</param>
-        /// <param name="nonce">The nonce for decryption.</param>
+        /// <param name="nonce">Optional nonce for decryption.</param>
         /// <param name="associatedData">Optional associated data for AEAD decryption.</param>
         /// <returns>The decrypted data.</returns>
-        public byte[] Decrypt(byte[] ciphertext, byte[] key, byte[] nonce, byte[]? associatedData)
+        public byte[] Decrypt(byte[] ciphertext, byte[] key, byte[]? nonce, byte[]? associatedData)
         {
             if (ciphertext == null)
                 throw new ArgumentNullException(nameof(ciphertext));
@@ -270,12 +276,14 @@ namespace LibEmiddle.Crypto
         /// <param name="inputKeyMaterial">The input key material.</param>
         /// <param name="salt">Optional salt.</param>
         /// <param name="info">Optional context info.</param>
-        /// <param name="length">The desired output length.</param>
+        /// <param name="length">Optional desired output length. (default: 32)</param>
         /// <returns>The derived key.</returns>
-        public byte[] DeriveKey(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length)
+        public byte[] DeriveKey(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length = 32)
         {
             if (inputKeyMaterial == null)
+            {
                 throw new ArgumentNullException(nameof(inputKeyMaterial));
+            }
 
             if (length <= 0)
                 throw new ArgumentOutOfRangeException(nameof(length), "Length must be greater than zero.");
@@ -298,9 +306,9 @@ namespace LibEmiddle.Crypto
         /// <param name="inputKeyMaterial">The input key material.</param>
         /// <param name="salt">Optional salt.</param>
         /// <param name="info">Optional context info.</param>
-        /// <param name="length">The desired output length.</param>
+        /// <param name="length">Optional desired output length. (default: 32)</param>
         /// <returns>The derived key.</returns>
-        public Task<byte[]> DeriveKeyAsync(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length)
+        public Task<byte[]> DeriveKeyAsync(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length = 32)
         {
             return Task.Run(() => DeriveKey(inputKeyMaterial, salt, info, length));
         }
@@ -318,7 +326,7 @@ namespace LibEmiddle.Crypto
             try
             {
                 // Use Argon2id for password-based hashing
-                 return Encoding.UTF8.GetBytes(Sodium.Argon2id(password));
+                 return Encoding.Default.GetBytes(Sodium.Argon2id(password));
             }
             catch (Exception ex)
             {
@@ -598,7 +606,7 @@ namespace LibEmiddle.Crypto
 
             try
             {
-                byte[] bytes = Encoding.UTF8.GetBytes(data);
+                byte[] bytes = Encoding.Default.GetBytes(data);
                 return Task.FromResult(_keyStorage.StoreData(keyId, bytes));
             }
             catch (Exception ex)

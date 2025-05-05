@@ -50,7 +50,7 @@ try
     mainDeviceManager.AddLinkedDevice(newDeviceKeyPair.publicKey);
 
     // Create sync messages for the new device
-    byte[] syncData = Encoding.UTF8.GetBytes("Secure device synchronization data");
+    byte[] syncData = Encoding.Default.GetBytes("Secure device synchronization data");
     var syncMessages = mainDeviceManager.CreateSyncMessages(syncData);
 
     // Process sync messages across devices

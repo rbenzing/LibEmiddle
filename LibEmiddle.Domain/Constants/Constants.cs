@@ -9,11 +9,6 @@ namespace LibEmiddle.Domain
     public static class Constants
     {
         /// <summary>
-        /// The eMiddle protocol version
-        /// </summary>
-        public const string PROTOCOL_VERSION = "1.0";
-
-        /// <summary>
         /// Size of nonce used in AES-GCM encryption (12 bytes)
         /// </summary>
         public const int NONCE_SIZE = 12;

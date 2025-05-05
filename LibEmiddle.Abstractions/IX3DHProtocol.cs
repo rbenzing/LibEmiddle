@@ -1,5 +1,4 @@
 ﻿using LibEmiddle.Domain;
-using LibEmiddle.Models;
 
 namespace LibEmiddle.Abstractions
 {

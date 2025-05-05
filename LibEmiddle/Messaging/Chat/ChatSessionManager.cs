@@ -5,6 +5,8 @@ using LibEmiddle.KeyExchange;
 using LibEmiddle.Sessions;
 using LibEmiddle.Domain;
 using Microsoft.Extensions.Logging;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Protocol;
 
 namespace LibEmiddle.Messaging.Chat
 {
@@ -27,6 +29,13 @@ namespace LibEmiddle.Messaging.Chat
         private readonly bool _enableLogging;
         private bool _disposed = false;
 
+        private readonly ICryptoProvider _cryptoProvider;
+        private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
+        private readonly IX3DHProtocol _x3DHProtocol;
+        private readonly IKeyManager _keyManager;
+        private readonly ISessionManager _sessionManager;
+        private readonly SessionPersistenceManager _sessionPersistenceManager;
+
         /// <summary>
         /// Creates a new ChatSessionManager.
         /// </summary>
@@ -41,6 +50,7 @@ namespace LibEmiddle.Messaging.Chat
             bool enableLogging = false)
         {
             _identityKeyPair = identityKeyPair;
+
             // Validate identity key pair format?
             if (_identityKeyPair.PublicKey == null || _identityKeyPair.PrivateKey == null /* || Add size checks */)
                 throw new ArgumentException("Provided identity key pair is invalid.", nameof(identityKeyPair));
@@ -49,10 +59,10 @@ namespace LibEmiddle.Messaging.Chat
                 throw new ArgumentException($"Session encryption key must be {Constants.AES_KEY_SIZE} bytes.", nameof(sessionEncryptionKey));
 
             _sessionStoragePath = sessionStoragePath ?? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "LibEmiddle", // Consider making configurable
-                    "Sessions"
-                );
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "LibEmiddle", // Consider making configurable
+                "Sessions"
+            );
 
             try
             {
@@ -66,6 +76,14 @@ namespace LibEmiddle.Messaging.Chat
                 _sessionStoragePath = ""; // Disable persistence if directory fails
             }
 
+            if (_cryptoProvider == null)
+                throw new ArgumentNullException(nameof(_cryptoProvider), "Crypto provider must not be null.");
+
+            _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+            _keyManager = new KeyManager(_cryptoProvider);
+            _sessionManager = new SessionManager(_cryptoProvider, _x3DHProtocol, _doubleRatchetProtocol, _keyManager, _identityKeyPair);
+            _sessionPersistenceManager = new SessionPersistenceManager(_cryptoProvider);
 
             _sessionEncryptionKey = sessionEncryptionKey;
             _enableLogging = enableLogging;
@@ -180,10 +198,10 @@ namespace LibEmiddle.Messaging.Chat
                 // 1. Perform X3DH Sender Initiation
                 // This returns the shared key (SK) and the data Bob needs (Alice's IK, EK, used IDs)
                 LogMessage($"Performing X3DH initiation with peer {Convert.ToBase64String(recipientIdentityPublicKey)}...", LogLevel.Debug);
-                SenderSessionResult x3dhResult = X3DHExchange.InitiateSessionAsSender(
+                SenderSessionResult x3dhResult = _x3DHProtocol.InitiateSessionAsSenderAsync(
                     recipientBundle,
                     _identityKeyPair // Our long-term identity key pair
-                );
+                ).GetAwaiter().GetResult();
 
                 // Assign shared key locally for clearing, ensure it's valid
                 sharedKey = x3dhResult?.SharedKey;
@@ -198,13 +216,13 @@ namespace LibEmiddle.Messaging.Chat
                 // Requires SK, our identity key pair (for DH calc?), and Bob's public key used for the first DR DH step (his SPK).
                 string sessionId = $"session-{Guid.NewGuid()}"; // Generate unique ID for this DR session instance
                 LogMessage($"Initializing Double Ratchet session {sessionId} as sender...", LogLevel.Debug);
-                DoubleRatchetSession initialDrSession = DoubleRatchet.InitializeSessionAsSender(
+                DoubleRatchetSession initialDrSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
                     sharedKeyFromX3DH: sharedKey,
                     // Pass our identity keypair - Check if DR init *needs* IK or just generates its own ratchet key pair.
                     // If it only generates internally, this argument might be removable from InitializeSessionAsSender signature.
                     recipientInitialPublicKey: recipientBundle.SignedPreKey ?? throw new InvalidOperationException("Recipient bundle missing SignedPreKey required for DR initialization."), // Bob's SPK is initial DHr
                     sessionId: sessionId
-                );
+                ).GetAwaiter().GetResult();
                 LogMessage($"Double Ratchet session {sessionId} initialized.", LogLevel.Debug);
 
 
@@ -215,7 +233,8 @@ namespace LibEmiddle.Messaging.Chat
                 var chatSession = new ChatSession(
                     initialDrSession,
                     recipientIdentityPublicKey, // Store Bob's IK (Remote Key)
-                    _identityKeyPair.PublicKey  // Store our own IK (Local Key)
+                    _identityKeyPair.PublicKey,  // Store our own IK (Local Key)
+                    _doubleRatchetProtocol
                 );
 
                 // 4. Return the ChatSession and the InitialMessageData to be sent
@@ -318,28 +337,29 @@ namespace LibEmiddle.Messaging.Chat
 
                 // 2. Perform X3DH Receiver Establishment to get the shared secret (SK)
                 // This function internally uses the private keys from localKeyBundle based on IDs in initialMessage
-                sharedKey = X3DHExchange.EstablishSessionAsReceiver(
+                sharedKey = _x3DHProtocol.EstablishSessionAsReceiverAsync(
                     initialMessage,
                     localKeyBundle // Pass our full bundle
-                );
+                ).GetAwaiter().GetResult();
 
                 if (sharedKey == null || sharedKey.Length != Constants.AES_KEY_SIZE) // Ensure valid key size
                     throw new CryptographicException("X3DH establishment failed to produce a valid shared key.");
 
                 // 3. Initialize Double Ratchet Receiver State
                 string sessionId = $"session-{Guid.NewGuid()}"; // Unique ID for this DR session instance
-                DoubleRatchetSession initialDrSession = DoubleRatchet.InitializeSessionAsReceiver(
+                DoubleRatchetSession initialDrSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
                     sharedKeyFromX3DH: sharedKey,
                     receiverInitialKeyPair: receiverSignedPreKeyPair, // Our SPK pair is our initial DHs
                     senderEphemeralKeyPublic: initialMessage.SenderEphemeralKeyPublic, // Alice's EK is her initial DHr
                     sessionId: sessionId
-                );
+                ).GetAwaiter().GetResult();
 
                 // 4. Create the ChatSession wrapper
                 var chatSession = new ChatSession(
                     initialDrSession,
                     senderIdentityPublicKey, // Store Alice's IK (Remote Key)
-                    localKeyBundle.IdentityKey ?? throw new InvalidOperationException("Local bundle missing identity key.") // Store our own IK
+                    localKeyBundle.IdentityKey ?? throw new InvalidOperationException("Local bundle missing identity key."), // Store our own IK
+                    _doubleRatchetProtocol
                 );
 
                 // 5. Add to active sessions and persist
@@ -387,33 +407,16 @@ namespace LibEmiddle.Messaging.Chat
         /// </summary>
         private ChatSession? TryLoadPersistedSession(string sessionKey, byte[] recipientIdentityPublicKey)
         {
-            if (string.IsNullOrEmpty(_sessionStoragePath)) return null; // Persistence disabled
+            var manager = new SessionPersistenceManager(_cryptoProvider);
 
-            string sessionFilePath = Path.Combine(_sessionStoragePath, $"{sessionKey}_session.bin");
-            if (!File.Exists(sessionFilePath)) return null;
-
-            byte[]? serializedSessionData = null;
             try
             {
-                serializedSessionData = File.ReadAllBytes(sessionFilePath);
-                var loadedDrSession = SessionPersistence.DeserializeSession(
-                    serializedSessionData,
-                    _sessionEncryptionKey
-                );
-
-                // Need local public key to create ChatSession - assume it's always _identityKeyPair.PublicKey
-                return new ChatSession(
-                    loadedDrSession,
-                    recipientIdentityPublicKey, // Key for this session
-                    _identityKeyPair.PublicKey   // Our key
-                );
+                return manager.LoadChatSessionAsync(sessionKey, _doubleRatchetProtocol).GetAwaiter().GetResult();
             }
             catch (FileNotFoundException) { return null; } // Expected if file disappears
             catch (Exception ex) when (ex is CryptographicException || ex is InvalidDataException)
             {
                 LogMessage($"Failed to load or decrypt persisted session for {sessionKey}: {ex.Message}. Deleting corrupt file.", LogLevel.Error);
-                // Delete corrupt session file to prevent repeated load failures
-                try { KeyStorage.SecureDeleteFile(sessionFilePath); } catch { /* Ignore delete error */ }
                 return null;
             }
             catch (Exception ex)
@@ -423,8 +426,8 @@ namespace LibEmiddle.Messaging.Chat
             }
             finally
             {
-                if (serializedSessionData != null)
-                    SecureMemory.SecureClear(serializedSessionData); // Clear data read from file
+                // cleanup
+                manager.Dispose();
             }
         }
 
@@ -446,10 +449,7 @@ namespace LibEmiddle.Messaging.Chat
                 // Get the underlying DoubleRatchetSession state
                 DoubleRatchetSession cryptoState = session.GetCryptoSessionState(); // Assumes method exists
 
-                serializedData = SessionPersistenceManager.SerializeSession(
-                    cryptoState,
-                    _sessionEncryptionKey
-                );
+                var didSerialize = SessionPersistenceManager.SaveChatSessionAsync(session).GetAwaiter().GetResult();
 
                 // Write atomically if possible (e.g., write to temp file, then rename)
                 string tempFilePath = sessionFilePath + ".tmp";

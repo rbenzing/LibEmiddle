@@ -408,7 +408,7 @@ namespace LibEmiddle.Core
         /// <param name="message">The message to authenticate.</param>
         /// <param name="key">The key to use (32 bytes recommended).</param>
         /// <returns>The 32-byte HMAC output.</returns>
-        public byte[] GenerateHmacSha256(ReadOnlySpan<byte> message, ReadOnlySpan<byte> key)
+        public static byte[] GenerateHmacSha256(ReadOnlySpan<byte> message, ReadOnlySpan<byte> key)
         {
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long.", nameof(key));
@@ -437,29 +437,40 @@ namespace LibEmiddle.Core
         /// </summary>
         [LibraryImport(LibraryName, EntryPoint = "crypto_kdf_hkdf_sha256_extract")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
-        internal static partial int crypto_kdf_hkdf_sha256_extract(
-            Span<byte> prk,
-            ReadOnlySpan<byte> salt, nuint saltLength,
-            ReadOnlySpan<byte> ikm, nuint ikmLength);
+        internal static partial int crypto_kdf_hkdf_sha256_extract(Span<byte> prk,
+            ReadOnlySpan<byte> salt, 
+            nuint saltLength,
+            ReadOnlySpan<byte> ikm, 
+            nuint ikmLength);
 
         /// <summary>
         /// Performs HKDF extraction to create a pseudorandom key.
         /// </summary>
         /// <param name="salt">Optional salt (can be null).</param>
         /// <param name="inputKeyMaterial">Input keying material.</param>
+        /// <param name="outputPrk">The derrived PRK.</param>
         /// <returns>32-byte PRK (pseudorandom key).</returns>
-        private static byte[] HkdfExtract(ReadOnlySpan<byte> salt, ReadOnlySpan<byte> inputKeyMaterial)
+        private static void HkdfExtract(ReadOnlySpan<byte> salt,
+            ReadOnlySpan<byte> inputKeyMaterial,
+            Span<byte> outputPrk)
         {
-            byte[] prk = new byte[32]; // SHA256 hash is 32 bytes
+            if (outputPrk.Length != 32)
+                throw new ArgumentException("Output buffer must be 32 bytes for SHA256 PRK.");
+
+            if (inputKeyMaterial == default)
+                inputKeyMaterial = Encoding.Default.GetBytes(ProtocolVersion.FULL_VERSION);
+
+            Initialize();
+
             int result = crypto_kdf_hkdf_sha256_extract(
-                prk,
-                salt, (uint)salt.Length,
-                inputKeyMaterial, (uint)inputKeyMaterial.Length);
+                outputPrk,
+                salt,
+                (uint)salt.Length,
+                inputKeyMaterial,
+                (uint)inputKeyMaterial.Length);
 
             if (result != 0)
                 throw new InvalidOperationException("HKDF extraction failed.");
-
-            return prk;
         }
 
         /// <summary>
@@ -474,8 +485,7 @@ namespace LibEmiddle.Core
         /// <returns></returns>
         [LibraryImport(LibraryName, EntryPoint = "crypto_kdf_hkdf_sha256_expand")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
-        internal static partial int crypto_kdf_hkdf_sha256_expand(
-            Span<byte> output,
+        internal static partial int crypto_kdf_hkdf_sha256_expand(Span<byte> output,
             nuint outputLength,
             ReadOnlySpan<byte> info,
             nuint infoLength,
@@ -486,26 +496,26 @@ namespace LibEmiddle.Core
         /// </summary>
         /// <param name="prk">The pseudorandom key from extraction step.</param>
         /// <param name="info">Optional context and application information.</param>
-        /// <param name="outputLength">Desired output length.</param>
+        /// <param name="output">Desired output.</param>
         /// <returns>Output key material of the specified length.</returns>
-        private static byte[] HkdfExpand(
-            ReadOnlySpan<byte> prk,
-            ReadOnlySpan<byte> info,
-            int outputLength)
+        private static void HkdfExpand(ReadOnlySpan<byte> prk, 
+            ReadOnlySpan<byte> info, 
+            Span<byte> output)
         {
-            if (outputLength <= 0)
-                throw new ArgumentException("Output length must be positive", nameof(outputLength));
+            if (output.Length <= 0)
+                throw new ArgumentException("Output buffer must not be empty.", nameof(output));
 
-            byte[] output = new byte[outputLength];
+            Initialize();
+
             int result = crypto_kdf_hkdf_sha256_expand(
-                output, (uint)outputLength,
-                info, (uint)info.Length,
+                output,
+                (uint)output.Length,
+                info,
+                (uint)info.Length,
                 prk);
 
             if (result != 0)
                 throw new InvalidOperationException("HKDF expand failed.");
-
-            return output;
         }
 
         /// <summary>
@@ -514,18 +524,31 @@ namespace LibEmiddle.Core
         /// <param name="inputKeyMaterial">Input keying material.</param>
         /// <param name="salt">Optional salt (can be null).</param>
         /// <param name="info">Optional context and application information.</param>
-        /// <param name="outputLength">Desired output length.</param>
+        /// <param name="outputLength">The length of the PRK.</param>
         /// <returns>Derived key of the specified length.</returns>
-        public static byte[] HkdfDerive(
-            ReadOnlySpan<byte> inputKeyMaterial,
+        public static byte[] HkdfDerive(ReadOnlySpan<byte> inputKeyMaterial,
             ReadOnlySpan<byte> salt = default,
             ReadOnlySpan<byte> info = default,
             int outputLength = 32)
         {
-            byte[] prk = HkdfExtract(salt, inputKeyMaterial);
+            if (outputLength <= 0)
+                throw new ArgumentOutOfRangeException(nameof(outputLength), "Output length must be positive.");
+
+            // Allocate heap buffer for PRK (SHA-256 output = 32 bytes)
+            byte[] prk = new byte[Constants.AES_KEY_SIZE];
+
             try
             {
-                return HkdfExpand(prk, info, outputLength);
+                // Fill PRK buffer securely
+                HkdfExtract(salt, inputKeyMaterial, prk);
+
+                // Allocate final output buffer
+                byte[] output = new byte[outputLength];
+
+                // Expand with PRK
+                HkdfExpand(prk, info, output);
+
+                return output;
             }
             finally
             {
@@ -772,7 +795,7 @@ namespace LibEmiddle.Core
                    StringMarshalling = StringMarshalling.Utf8)]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static partial int crypto_pwhash_str(
-            out Span<byte> outHashed,
+            Span<byte> outHashed,
             string password,             // marshalled as UTF-8
             nuint passwordLen,
             ulong opsLimit,
@@ -791,19 +814,19 @@ namespace LibEmiddle.Core
 
             try
             {
-                int rc = crypto_pwhash_str(
-                out buf,
-                password,
-                (nuint)Encoding.UTF8.GetByteCount(password),
-                4,  // opslimit 4-10 passes - TODO: turn this into a const
-                (nuint)(256 * 1024 * 1024)); // 256MB memory limit - TODO: turn this into a const
+                int rc = crypto_pwhash_str(buf,
+                    password,
+                    (nuint)Encoding.Default.GetByteCount(password),
+                    4,  // opslimit 4-10 passes - TODO: turn this into a const
+                    (nuint)(256 * 1024 * 1024)
+                ); // 256MB memory limit - TODO: turn this into a const
 
                 if (rc != 0)
                     throw new InvalidOperationException("crypto_pwhash_str failed.");
 
                 // strip final NUL
                 int len = buf.IndexOf((byte)0);
-                return Encoding.ASCII.GetString(buf[..(len < 0 ? 128 : len)]);
+                return Encoding.Default.GetString(buf[..(len < 0 ? 128 : len)]);
             }
             finally
             {
@@ -835,12 +858,12 @@ namespace LibEmiddle.Core
             int rc = 1; // 1 = false
 
             try { 
-                int written = Encoding.ASCII.GetBytes(hash, buf);
+                int written = Encoding.Default.GetBytes(hash, buf);
                 buf[written] = 0;                       // NUL-terminate
                 rc = crypto_pwhash_str_verify(
                     buf[..(written + 1)],               // include NUL
                     password,
-                    (nuint)Encoding.UTF8.GetByteCount(password));
+                    (nuint)Encoding.Default.GetByteCount(password));
                 } 
             finally
             {

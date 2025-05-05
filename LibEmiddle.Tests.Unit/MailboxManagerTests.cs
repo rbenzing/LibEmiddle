@@ -407,7 +407,7 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
             string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
-            byte[] invalidSessionData = Encoding.UTF8.GetBytes("This is not valid session data");
+            byte[] invalidSessionData = Encoding.Default.GetBytes("This is not valid session data");
 
             using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
             {

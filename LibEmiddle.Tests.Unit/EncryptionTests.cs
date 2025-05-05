@@ -40,7 +40,7 @@ namespace LibEmiddle.Tests.Unit
         public void AESEncryptDecrypt_ShouldReturnOriginalData()
         {
             // Arrange
-            byte[] plaintext = Encoding.UTF8.GetBytes("This is a test message for encryption and decryption");
+            byte[] plaintext = Encoding.Default.GetBytes("This is a test message for encryption and decryption");
             byte[] key = new byte[32]; // 256-bit key
             using (var rng = RandomNumberGenerator.Create())
             {
@@ -80,7 +80,7 @@ namespace LibEmiddle.Tests.Unit
         public void AESDecrypt_WithWrongKey_ShouldThrowException()
         {
             // Arrange
-            byte[] plaintext = Encoding.UTF8.GetBytes("This is a test message");
+            byte[] plaintext = Encoding.Default.GetBytes("This is a test message");
             byte[] correctKey = new byte[32]; // Using 32 bytes for AES-256
             byte[] wrongKey = new byte[32];
 
@@ -104,7 +104,7 @@ namespace LibEmiddle.Tests.Unit
         public void AESEncrypt_WithNullKey_ShouldThrowException()
         {
             // Arrange
-            byte[] plaintext = Encoding.UTF8.GetBytes("Test message");
+            byte[] plaintext = Encoding.Default.GetBytes("Test message");
             byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act & Assert - Should throw ArgumentNullException
@@ -226,7 +226,7 @@ namespace LibEmiddle.Tests.Unit
         public void AESEncryptDecrypt_WithAuthTag_ShouldHandleCorrectly()
         {
             // Arrange
-            byte[] plaintext = Encoding.UTF8.GetBytes("Test message with authentication tag");
+            byte[] plaintext = Encoding.Default.GetBytes("Test message with authentication tag");
             byte[] key = new byte[32]; // 256-bit key
             RandomNumberGenerator.Fill(key);
             byte[] nonce = _cryptoProvider.GenerateNonce();
@@ -246,7 +246,7 @@ namespace LibEmiddle.Tests.Unit
         public void AESDecrypt_TamperedTag_ShouldThrowException()
         {
             // Arrange
-            byte[] plaintext = Encoding.UTF8.GetBytes("Message with authentication tag");
+            byte[] plaintext = Encoding.Default.GetBytes("Message with authentication tag");
             byte[] key = new byte[32];
             RandomNumberGenerator.Fill(key);
             byte[] nonce = _cryptoProvider.GenerateNonce();

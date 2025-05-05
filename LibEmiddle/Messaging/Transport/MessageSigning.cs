@@ -65,7 +65,7 @@ namespace LibEmiddle.Messaging.Transport
 
             ArgumentNullException.ThrowIfNull(privateKey.ToArray(), nameof(privateKey));
 
-            ReadOnlySpan<byte> messageBytes = Encoding.UTF8.GetBytes(message);
+            ReadOnlySpan<byte> messageBytes = Encoding.Default.GetBytes(message);
             ReadOnlySpan<byte> signature = SignMessage(messageBytes, privateKey);
             return Convert.ToBase64String(signature);
         }
@@ -85,7 +85,7 @@ namespace LibEmiddle.Messaging.Transport
 
             try
             {
-                byte[] messageBytes = Encoding.UTF8.GetBytes(message);
+                byte[] messageBytes = Encoding.Default.GetBytes(message);
                 byte[] signature = Convert.FromBase64String(signatureBase64);
                 return VerifySignature(messageBytes, signature, publicKey);
             }
@@ -109,7 +109,7 @@ namespace LibEmiddle.Messaging.Transport
             string json = JsonSerialization.Serialize(data);
 
             // Sign the canonical representation
-            ReadOnlySpan<byte> messageBytes = Encoding.UTF8.GetBytes(json);
+            ReadOnlySpan<byte> messageBytes = Encoding.Default.GetBytes(json);
             return SignMessage(messageBytes, privateKey);
         }
 
@@ -127,7 +127,7 @@ namespace LibEmiddle.Messaging.Transport
             string json = JsonSerialization.Serialize(data);
 
             // Verify the signature against the canonical representation
-            byte[] messageBytes = Encoding.UTF8.GetBytes(json);
+            byte[] messageBytes = Encoding.Default.GetBytes(json);
             return VerifySignature(messageBytes, signature, publicKey);
         }
     }

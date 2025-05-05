@@ -3,6 +3,7 @@ using System.Text;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Abstractions;
+using LibEmiddle.KeyExchange;
 
 namespace LibEmiddle.Messaging.Group
 {
@@ -23,11 +24,10 @@ namespace LibEmiddle.Messaging.Group
         /// Initializes a new instance of the SenderKeyDistribution class.
         /// </summary>
         /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-        /// <param name="keyManager">The group key manager.</param>
-        public SenderKeyDistribution(ICryptoProvider cryptoProvider, GroupKeyManager keyManager)
+        public SenderKeyDistribution(ICryptoProvider cryptoProvider)
         {
             _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-            _keyManager = keyManager ?? throw new ArgumentNullException(nameof(keyManager));
+            _keyManager = new GroupKeyManager(_cryptoProvider);
         }
 
         /// <summary>
@@ -42,7 +42,7 @@ namespace LibEmiddle.Messaging.Group
             string groupId,
             byte[] chainKey,
             uint iteration,
-            KeyPair? senderKeyPair = null)
+            KeyPair senderKeyPair)
         {
             if (string.IsNullOrEmpty(groupId))
                 throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
@@ -60,7 +60,7 @@ namespace LibEmiddle.Messaging.Group
             };
 
             // Sign the message if a key pair is provided
-            if (senderKeyPair != null && senderKeyPair.PrivateKey != null && senderKeyPair.PublicKey != null)
+            if (senderKeyPair.PrivateKey != null && senderKeyPair.PublicKey != null)
             {
                 distribution.SenderIdentityKey = senderKeyPair.PublicKey.ToArray();
                 byte[] dataToSign = GetDataToSign(distribution);
@@ -84,6 +84,12 @@ namespace LibEmiddle.Messaging.Group
         {
             if (distribution == null)
                 throw new ArgumentNullException(nameof(distribution));
+
+            if (distribution.GroupId == null)
+                throw new ArgumentNullException(nameof(distribution.GroupId));
+
+            if (distribution.ChainKey == null)
+                throw new ArgumentNullException(nameof(distribution.ChainKey));
 
             // Validate the distribution message
             if (!_keyManager.ValidateDistributionMessage(distribution))
@@ -191,11 +197,16 @@ namespace LibEmiddle.Messaging.Group
         /// <returns>The data to sign.</returns>
         private byte[] GetDataToSign(SenderKeyDistributionMessage distribution)
         {
+            if (distribution.GroupId == null)
+                throw new ArgumentNullException(nameof(distribution.GroupId));
+            if (distribution.ChainKey == null)
+                throw new ArgumentNullException(nameof(distribution.ChainKey));
+
             // Combine all relevant fields for signing
             using var ms = new System.IO.MemoryStream();
             using var writer = new System.IO.BinaryWriter(ms);
 
-            writer.Write(Encoding.UTF8.GetBytes(distribution.GroupId));
+            writer.Write(Encoding.Default.GetBytes(distribution.GroupId));
             writer.Write(distribution.ChainKey);
             writer.Write(distribution.Iteration);
             writer.Write(distribution.Timestamp);

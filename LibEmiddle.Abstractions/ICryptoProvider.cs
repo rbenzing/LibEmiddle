@@ -14,20 +14,21 @@ namespace LibEmiddle.Abstractions
         public byte[] GenerateRandomBytes(int count);
         public byte[] Sign(byte[] data, byte[] privateKey);
         public bool VerifySignature(byte[] data, byte[] signature, byte[] publicKey);
-        public byte[] Encrypt(byte[] plaintext, byte[] key, byte[] nonce, byte[]? associatedData);
-        public byte[] Decrypt(byte[] ciphertext, byte[] key, byte[] nonce, byte[]? associatedData);
+        public byte[] Encrypt(byte[] plaintext, byte[] key, byte[]? nonce, byte[]? associatedData);
+        public byte[] Decrypt(byte[] ciphertext, byte[] key, byte[]? nonce, byte[]? associatedData);
         public byte[] ScalarMult(byte[] privateKey, byte[] publicKey);
-        public byte[] DeriveKey(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length);
+        public byte[] DeriveKey(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length = 32);
         public byte[] DeriveKeyFromPassword(string password);
         public byte[] ConvertEd25519PublicKeyToX25519(byte[] ed25519PublicKey);
         public byte[] ConvertEd25519PrivateKeyToX25519(byte[] ed25519PrivateKey);
         public bool ValidateEd25519PublicKey(byte[] publicKey);
         public bool ValidateX25519PublicKey(byte[] publicKey);
         public bool ConstantTimeEquals(byte[] a, byte[] b);
+        public void Dispose();
 
 
         // ASYNC
-        public Task<byte[]> DeriveKeyAsync(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length);
+        public Task<byte[]> DeriveKeyAsync(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length = 32);
         public Task<byte[]> DeriveKeyFromPasswordAsync(string password);
         public Task<bool> StoreKeyAsync(string keyId, byte[] key, string? password = null);
         public Task<byte[]?> RetrieveKeyAsync(string keyId, string? password = null);
