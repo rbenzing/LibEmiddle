@@ -689,7 +689,7 @@ namespace LibEmiddle.Core
             );
             if (result != 0)
             {
-                throw new InvalidOperationException("Failed to generate Ed25519 key pair.");
+                throw new CryptographicException("Failed to generate Ed25519 key pair.");
             }
 
             return new KeyPair(publicKey, privateKey);
@@ -760,7 +760,7 @@ namespace LibEmiddle.Core
         [LibraryImport(LibraryName, EntryPoint = "crypto_scalarmult_curve25519_base")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static partial int crypto_scalarmult_curve25519_base(
-            out Span<byte> q,
+            Span<byte> q,
             ReadOnlySpan<byte> n);
 
         /// <summary>
@@ -777,10 +777,10 @@ namespace LibEmiddle.Core
 
             Initialize();
 
-            Span<byte> publicKey = new byte[Constants.X25519_KEY_SIZE];
-            int result = crypto_scalarmult_curve25519_base(out publicKey, secretKey);
+            Span<byte> publicKey = null;
+            int result = crypto_scalarmult_curve25519_base(publicKey, secretKey);
 
-            if (result != 0)
+            if (result != 0 || publicKey == null)
                 // Use CryptographicException
                 throw new CryptographicException("Libsodium X25519 public key generation failed.");
 
@@ -878,7 +878,7 @@ namespace LibEmiddle.Core
         [LibraryImport(LibraryName, EntryPoint = "crypto_sign_ed25519_pk_to_curve25519")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static partial int crypto_sign_ed25519_pk_to_curve25519(
-            out Span<byte> x25519PublicKey,
+            Span<byte> x25519PublicKey,
             ReadOnlySpan<byte> ed25519PublicKey);
 
         /// <summary>
@@ -893,10 +893,11 @@ namespace LibEmiddle.Core
 
             Initialize();
 
-            int result = crypto_sign_ed25519_pk_to_curve25519(out Span<byte> x25519PublicKey, ed25519PublicKey);
+            Span<byte> x25519PublicKey = [];
+            int result = crypto_sign_ed25519_pk_to_curve25519(x25519PublicKey, ed25519PublicKey);
 
-            if (result != 0)
-                throw new InvalidOperationException("Failed to convert Ed25519 public key to X25519.");
+            if (result != 0 || x25519PublicKey.IsEmpty)
+                throw new CryptographicException("Failed to convert Ed25519 public key to X25519.");
 
             return x25519PublicKey;
         }
@@ -922,7 +923,7 @@ namespace LibEmiddle.Core
             int result = crypto_sign_ed25519_sk_to_pk(ed25519PublicKey, signedKey);
 
             if (result != 0)
-                throw new InvalidOperationException("Failed to convert Ed25519 private key to X25519.");
+                throw new CryptographicException("Failed to convert Ed25519 private key to X25519.");
 
             return ed25519PublicKey;
         }
@@ -952,7 +953,7 @@ namespace LibEmiddle.Core
             int result = crypto_sign_ed25519_sk_to_curve25519(x25519PrivateKey, ed25519PrivateKey);
 
             if (result != 0)
-                throw new InvalidOperationException("Failed to convert Ed25519 private key to X25519.");
+                throw new CryptographicException("Failed to convert Ed25519 private key to X25519.");
 
             return x25519PrivateKey;
         }
@@ -979,7 +980,7 @@ namespace LibEmiddle.Core
 
             int result = crypto_sign_ed25519_keypair(publicKey, privateKey);
             if (result != 0)
-                throw new InvalidOperationException("Ed25519 key pair generation failed.");
+                throw new CryptographicException("Ed25519 key pair generation failed.");
 
             return new KeyPair(publicKey, privateKey);
         }
@@ -1011,7 +1012,7 @@ namespace LibEmiddle.Core
 
             int result = crypto_sign_ed25519_seed_keypair(publicKey, privateKey, seed);
             if (result != 0)
-                throw new InvalidOperationException("Ed25519 key pair generation from seed failed.");
+                throw new CryptographicException("Ed25519 key pair generation from seed failed.");
 
             return new KeyPair(publicKey, privateKey);
         }
@@ -1038,7 +1039,7 @@ namespace LibEmiddle.Core
 
             int result = crypto_box_keypair(publicKey, privateKey);
             if (result != 0)
-                throw new InvalidOperationException("X25519 key pair generation failed.");
+                throw new CryptographicException("X25519 key pair generation failed.");
 
             return new KeyPair(publicKey, privateKey);
         }
@@ -1226,7 +1227,7 @@ namespace LibEmiddle.Core
 
             try
             {
-                int result = Sodium.crypto_scalarmult_curve25519_base(out output, privateKey);
+                int result = Sodium.crypto_scalarmult_curve25519_base(output, privateKey);
 
                 if (result != 0 || output == null)
                     // Using CryptographicException directly might be slightly better here

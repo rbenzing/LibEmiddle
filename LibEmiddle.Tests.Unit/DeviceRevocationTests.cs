@@ -5,9 +5,7 @@ using System.Security;
 using LibEmiddle.API;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
-using LibEmiddle.Models;
 using LibEmiddle.MultiDevice;
-using System.Security.Cryptography.X509Certificates;
 
 namespace LibEmiddle.Tests.Unit
 {

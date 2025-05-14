@@ -1,4 +1,6 @@
-﻿namespace LibEmiddle.Abstractions
+﻿using LibEmiddle.Domain;
+
+namespace LibEmiddle.Abstractions
 {
     public interface ISessionManager
     {

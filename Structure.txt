@@ -28,9 +28,9 @@ LibEmiddle/
 │   │   │   │   ├── GroupSecurityValidator.cs
 │   │   │   │   ├── GroupSession.cs
 │   │   │   │   ├── GroupSessionOptions.cs
-│   │   │   │   ├── GroupSessionPersistence.cs
 │   │   │   │   └── SenderKeyDistribution.cs
 │   │   │   └── Transport/
+│   │   │       ├── BaseMailboxTransport.cs
 │   │   │       ├── HttpMailboxTransport.cs
 │   │   │       ├── InMemoryMailboxTransport.cs
 │   │   │       ├── MailboxManager.cs
@@ -38,12 +38,12 @@ LibEmiddle/
 │   │   │       ├── SecureWebSocketClient.cs
 │   │   │       └── StandardWebSocketClient.cs
 │   │   ├── MultiDevice/
-│   │   │   ├── DeviceLinking.cs
+│   │   │   ├── DeviceLinkingService.cs
 │   │   │   ├── DeviceManager.cs
-│   │   │   ├── DeviceRevocationMessage.cs
-│   │   │   └── DeviceSyncMessage.cs
+│   │   │   └── SyncMessageValidator.cs
 │   │   ├── Protocol/
 │   │   │   ├── DoubleRatchetProtocol.cs
+│   │   │   ├── ProtocolAdapter.cs
 │   │   │   └── X3DHProtocol.cs
 │   │   ├── Sessions/
 │   │   │   ├── SessionManager.cs
@@ -52,6 +52,8 @@ LibEmiddle/
 │   ├── LibEmiddle.Abstractions/
 │   │   ├── IChatSession.cs
 │   │   ├── ICryptoProvider.cs
+│   │   ├── IDeviceLinkingService.cs
+│   │   ├── IDeviceManager.cs
 │   │   ├── IDoubleRatchetProtocol.cs
 │   │   ├── IGroupSession.cs
 │   │   ├── IKeyManager.cs
@@ -59,6 +61,7 @@ LibEmiddle/
 │   │   ├── ISesion.cs
 │   │   ├── ISessionManager.cs
 │   │   ├── IStorageProvider.cs
+│   │   ├── ISyncMessageValidator.cs
 │   │   ├── IWebSocketClient.cs
 │   │   ├── IX3DHProtocol.cs
 │   │   └── LibEmiddle.Abstractions.csproj
@@ -84,7 +87,9 @@ LibEmiddle/
 │   │   │   └── SessionType.cs 
 │   │   ├── Helpers/
 │   │   │   ├── Helpers.cs
-│   │   │   └── JsonSerialization.cs 
+│   │   │   └── JsonSerialization.cs
+│   │   ├── DeviceRevocationMessage.cs
+│   │   ├── DeviceSyncMessage.cs
 │   │   ├── DoubleRatchetSession.cs
 │   │   ├── EncyptedGroupMessage.cs
 │   │   ├── EncryptedMessage.cs

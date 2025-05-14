@@ -4,9 +4,8 @@ using System.Text;
 using System.Security.Cryptography;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
-using LibEmiddle.Domain;
-using LibEmiddle.Abstractions;
 using LibEmiddle.Protocol;
+using LibEmiddle.Domain;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -14,7 +13,7 @@ namespace LibEmiddle.Tests.Unit
     public class KeyExchangeTests
     {
         private CryptoProvider _cryptoProvider;
-        private IX3DHProtocol _x3DHProtocol;
+        private X3DHProtocol _x3DHProtocol;
 
         [TestInitialize]
         public void Setup()

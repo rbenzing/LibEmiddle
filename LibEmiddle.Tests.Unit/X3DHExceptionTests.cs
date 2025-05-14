@@ -1,11 +1,8 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
-using LibEmiddle.Models;
-using LibEmiddle.KeyExchange;
 using LibEmiddle.Core;
 using LibEmiddle.API;
-using LibEmiddle.Abstractions;
 using LibEmiddle.Domain;
 using LibEmiddle.Crypto;
 

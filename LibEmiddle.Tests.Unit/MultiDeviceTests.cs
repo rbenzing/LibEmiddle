@@ -4,13 +4,10 @@ using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using LibEmiddle.MultiDevice;
 using LibEmiddle.Core;
-using LibEmiddle.KeyExchange;
-using LibEmiddle.Models;
 using System.Linq;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Diagnostics;
-using LibEmiddle.Abstractions;
 using LibEmiddle.Messaging.Transport;
 using LibEmiddle.Domain;
 using LibEmiddle.Crypto;
@@ -43,10 +40,10 @@ namespace LibEmiddle.Tests.Unit
             var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
-            byte[] derivedKey1 = DeviceLinking.DeriveSharedKeyForNewDevice(
+            byte[] derivedKey1 = DeviceLinkingService.DeriveSharedKeyForNewDevice(
                 existingSharedKey, newDeviceKeyPair.PublicKey);
 
-            byte[] derivedKey2 = DeviceLinking.DeriveSharedKeyForNewDevice(
+            byte[] derivedKey2 = DeviceLinkingService.DeriveSharedKeyForNewDevice(
                 existingSharedKey, newDeviceKeyPair.PublicKey);
 
             // Assert
@@ -61,7 +58,7 @@ namespace LibEmiddle.Tests.Unit
             var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
-            var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
+            var encryptedMessage = DeviceLinkingService.CreateDeviceLinkMessage(
                 mainDeviceKeyPair, newDeviceKeyPair.PublicKey);
 
             // Assert
@@ -79,12 +76,12 @@ namespace LibEmiddle.Tests.Unit
             var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create a device link message from the main device to the new device
-            var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
+            var encryptedMessage = DeviceLinkingService.CreateDeviceLinkMessage(
                 mainDeviceKeyPair,
                 newDeviceKeyPair.PublicKey);
 
             // Act
-            byte[] result = DeviceLinking.ProcessDeviceLinkMessage(
+            byte[] result = DeviceLinkingService.ProcessDeviceLinkMessage(
                 encryptedMessage,
                 newDeviceKeyPair,
                 mainDeviceKeyPair.PublicKey);
@@ -105,7 +102,7 @@ namespace LibEmiddle.Tests.Unit
             var unrelatedKeyPair = Sodium.GenerateEd25519KeyPair(); // For tampering
 
             // Create a device link message from the main device to the new device
-            var encryptedMessage = DeviceLinking.CreateDeviceLinkMessage(
+            var encryptedMessage = DeviceLinkingService.CreateDeviceLinkMessage(
                 mainDeviceKeyPair,
                 newDeviceKeyPair.PublicKey);
 
@@ -123,7 +120,7 @@ namespace LibEmiddle.Tests.Unit
             tamperedMessage.Ciphertext[tamperedMessage.Ciphertext.Length / 2] ^= 0xFF;
 
             // Act - Pass the wrong public key (unrelatedKeyPair) to simulate wrong main device
-            byte[] result = DeviceLinking.ProcessDeviceLinkMessage(
+            byte[] result = DeviceLinkingService.ProcessDeviceLinkMessage(
                 tamperedMessage,  // Use the tampered message
                 newDeviceKeyPair,
                 unrelatedKeyPair.PublicKey);  // Use unrelated key to simulate wrong device
@@ -141,7 +138,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Act & Assert - Should throw ArgumentNullException
             Assert.ThrowsException<ArgumentNullException>(() => {
-                DeviceLinking.ProcessDeviceLinkMessage(null, newDeviceKeyPair, mainDeviceKeyPair.PublicKey);
+                DeviceLinkingService.ProcessDeviceLinkMessage(null, newDeviceKeyPair, mainDeviceKeyPair.PublicKey);
             });
         }
 

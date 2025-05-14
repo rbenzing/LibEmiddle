@@ -27,10 +27,9 @@ namespace LibEmiddle.Messaging.Group
         public SessionType Type => SessionType.Group;
         public SessionState State { get; private set; }
         public string GroupId => _groupId;
-        public byte[] ChainKey => _keyManager.GetSenderState(_groupId)?.ChainKey ?? Array.Empty<byte>();
+        public byte[] ChainKey => _keyManager.GetSenderState(_groupId)?.ChainKey ?? [];
         public uint Iteration => _keyManager.GetSenderState(_groupId)?.Iteration ?? 0;
-        public IReadOnlyDictionary<string, string> Metadata;
-
+        public IReadOnlyDictionary<string, string>? Metadata;
 
         // Additional properties
         public DateTime CreatedAt { get; }
@@ -84,7 +83,7 @@ namespace LibEmiddle.Messaging.Group
             CreatorPublicKey = groupInfo?.CreatorPublicKey ?? identityKeyPair.PublicKey;
 
             // Record group join time
-            _messageCrypto.RecordGroupJoin(groupId);
+            _messageCrypto.RecordGroupJoin(groupId, identityKeyPair);
         }
 
         /// <summary>
@@ -467,7 +466,7 @@ namespace LibEmiddle.Messaging.Group
                 return false;
 
             // Record group join time if not already recorded
-            _messageCrypto.RecordGroupJoin(_groupId);
+            _messageCrypto.RecordGroupJoin(_groupId, _identityKeyPair);
 
             // Process the distribution message
             return _distributionManager.ProcessDistributionMessage(distribution);

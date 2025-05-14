@@ -2,7 +2,6 @@
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.KeyExchange;
 using LibEmiddle.Messaging.Chat;
 using LibEmiddle.Messaging.Group;
 using LibEmiddle.Messaging.Transport;
@@ -18,11 +17,14 @@ namespace LibEmiddle.API
     public class LibEmiddleClient : IDisposable
     {
         private readonly GroupChatManager _groupChatManager;
+        private readonly GroupMemberManager _groupMemberManager;
         private readonly DeviceManager _deviceManager;
         private readonly ChatSessionManager _chatSessionManager;
+        private readonly MailboxManager _mailboxManager;
+        private readonly IMailboxTransport _mailboxTransport;
         private readonly ICryptoProvider _cryptoProvider;
-        private readonly IX3DHProtocol _x3DHProtocol;
-        private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
+        private readonly X3DHProtocol _x3DHProtocol;
+        private readonly DoubleRatchetProtocol _doubleRatchetProtocol;
 
         private readonly KeyPair _identityKeyPair;
         private bool _disposed;
@@ -35,15 +37,17 @@ namespace LibEmiddle.API
         {
             // Generate an X25519 identity key pair for this client
             _cryptoProvider = new CryptoProvider();
-            _groupChatManager = new GroupChatManager(_cryptoProvider, _identityKeyPair);
             _deviceManager = new DeviceManager(_identityKeyPair);
             _chatSessionManager = new ChatSessionManager(_identityKeyPair);
             _identityKeyPair = identityKeyPair.ToString() == null ? Sodium.GenerateX25519KeyPair() : identityKeyPair;
             _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
             _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
             _groupChatManager = new GroupChatManager(_cryptoProvider, _identityKeyPair);
+            _groupMemberManager = new GroupMemberManager(_cryptoProvider);
             _deviceManager = new DeviceManager(_identityKeyPair);
             _chatSessionManager = new ChatSessionManager(_identityKeyPair);
+            _mailboxTransport = new InMemoryMailboxTransport(_cryptoProvider);
+            _mailboxManager = new MailboxManager(_identityKeyPair, _mailboxTransport, _doubleRatchetProtocol);
         }
 
         #region Key Management
@@ -341,7 +345,7 @@ namespace LibEmiddle.API
         public bool AddGroupMember(string groupId, byte[] memberPublicKey)
         {
             ThrowIfDisposed();
-            return _groupChatManager.A(groupId, memberPublicKey);
+            return _groupMemberManager.AddMember(groupId, memberPublicKey);
         }
 
         /// <summary>
@@ -353,18 +357,7 @@ namespace LibEmiddle.API
         public bool RemoveGroupMember(string groupId, byte[] memberPublicKey)
         {
             ThrowIfDisposed();
-            return _groupChatManager.RemoveGroupMember(groupId, memberPublicKey);
-        }
-
-        /// <summary>
-        /// Rotates the group key for enhanced security
-        /// </summary>
-        /// <param name="groupId">Group identifier</param>
-        /// <returns>New sender key</returns>
-        public byte[] RotateGroupKey(string groupId)
-        {
-            ThrowIfDisposed();
-            return _groupChatManager.RotateGroupKey(groupId);
+            return _groupMemberManager.RemoveMember(groupId, memberPublicKey);
         }
 
         /// <summary>
@@ -372,10 +365,10 @@ namespace LibEmiddle.API
         /// </summary>
         /// <param name="groupId">Group identifier</param>
         /// <returns>True if the group exists</returns>
-        public bool GroupExists(string groupId)
+        public async Task<bool> GroupExists(string groupId)
         {
             ThrowIfDisposed();
-            return _groupChatManager.GroupExists(groupId);
+            return (await _groupChatManager.GetGroupAsync(groupId)).SessionId != null;
         }
 
         /// <summary>
@@ -383,10 +376,10 @@ namespace LibEmiddle.API
         /// </summary>
         /// <param name="groupId">Group identifier</param>
         /// <returns>True if the group was deleted</returns>
-        public bool DeleteGroup(string groupId)
+        public async Task<bool> DeleteGroup(string groupId)
         {
             ThrowIfDisposed();
-            return _groupChatManager.DeleteGroup(groupId);
+            return await _groupChatManager.LeaveGroupAsync(groupId);
         }
 
         #endregion
@@ -433,7 +426,7 @@ namespace LibEmiddle.API
         /// <returns>Encrypted link message</returns>
         public static EncryptedMessage CreateDeviceLinkMessage(KeyPair mainDeviceKeyPair, byte[] newDevicePublicKey)
         {
-            return DeviceLinking.CreateDeviceLinkMessage(mainDeviceKeyPair, newDevicePublicKey);
+            return DeviceLinkingService.CreateDeviceLinkMessage(mainDeviceKeyPair, newDevicePublicKey);
         }
 
         /// <summary>
@@ -473,38 +466,7 @@ namespace LibEmiddle.API
 
         #region Session Resumption
 
-        /// <summary>
-        /// Resumes a Double Ratchet session after an interruption or failure.
-        /// </summary>
-        /// <param name="session">The last known good session</param>
-        /// <param name="lastProcessedMessageId">The ID of the last successfully processed message, if any</param>
-        /// <returns>A session ready for continued communication, or null if resumption isn't possible</returns>
-        public static DoubleRatchetSession ResumeDoubleRatchetSession(DoubleRatchetSession session, Guid? lastProcessedMessageId = null)
-        {
-            return DoubleRatchet.ResumeSession(session, lastProcessedMessageId);
-        }
-
-        /// <summary>
-        /// Serializes a Double Ratchet session for storage.
-        /// </summary>
-        /// <param name="session">The session to serialize</param>
-        /// <param name="encryptionKey">Optional key to encrypt the serialized session</param>
-        /// <returns>Serialized (and optionally encrypted) session data</returns>
-        public static byte[] SerializeDoubleRatchetSession(DoubleRatchetSession session, byte[]? encryptionKey = null)
-        {
-            return SessionPersistence.SerializeSession(session, encryptionKey);
-        }
-
-        /// <summary>
-        /// Deserializes a Double Ratchet session from storage.
-        /// </summary>
-        /// <param name="serializedData">The serialized session data</param>
-        /// <param name="decryptionKey">Optional key to decrypt the serialized session</param>
-        /// <returns>Deserialized Double Ratchet session</returns>
-        public static DoubleRatchetSession DeserializeDoubleRatchetSession(byte[] serializedData, byte[]? decryptionKey = null)
-        {
-            return SessionPersistence.DeserializeSession(serializedData, decryptionKey);
-        }
+        // TODO: add session persistence and initialization
 
         #endregion
 
@@ -566,17 +528,6 @@ namespace LibEmiddle.API
         #region Mailbox Integration
 
         /// <summary>
-        /// Creates a mailbox manager for handling asynchronous message delivery.
-        /// </summary>
-        /// <param name="identityKeyPair">The user's identity key pair</param>
-        /// <param name="transport">The transport implementation to use</param>
-        /// <returns>A configured mailbox manager</returns>
-        public static MailboxManager CreateMailboxManager(KeyPair identityKeyPair, IMailboxTransport transport)
-        {
-            return new MailboxManager(identityKeyPair, transport);
-        }
-
-        /// <summary>
         /// Creates a mailbox manager using this client's identity key pair
         /// </summary>
         /// <param name="transport">The transport implementation to use</param>
@@ -584,7 +535,7 @@ namespace LibEmiddle.API
         public MailboxManager CreateMailboxManager(IMailboxTransport transport)
         {
             ThrowIfDisposed();
-            return new MailboxManager(_identityKeyPair, transport);
+            return new MailboxManager(_identityKeyPair, transport, _doubleRatchetProtocol);
         }
 
         #endregion
@@ -596,18 +547,19 @@ namespace LibEmiddle.API
         /// </summary>
         /// <param name="serverUrl">The URL of the mailbox server</param>
         /// <returns>An HTTP mailbox transport</returns>
-        public static IMailboxTransport CreateHttpMailboxTransport(string serverUrl)
+        public IMailboxTransport CreateHttpMailboxTransport(string serverUrl)
         {
-            return new HttpMailboxTransport(serverUrl);
+            var httpClient = new HttpClient();
+            return new HttpMailboxTransport(_cryptoProvider, httpClient, serverUrl);
         }
 
         /// <summary>
         /// Creates an in-memory mailbox transport for testing or local-only scenarios.
         /// </summary>
         /// <returns>An in-memory mailbox transport</returns>
-        public static IMailboxTransport CreateInMemoryMailboxTransport()
+        public IMailboxTransport CreateInMemoryMailboxTransport()
         {
-            return new InMemoryMailboxTransport();
+            return new InMemoryMailboxTransport(_cryptoProvider);
         }
 
         #endregion

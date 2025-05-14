@@ -298,6 +298,10 @@ namespace LibEmiddle.Crypto
                 LoggingManager.LogError(nameof(CryptoProvider), $"Error deriving key: {ex.Message}");
                 throw;
             }
+            finally
+            {
+                SecureMemory.SecureClear(inputKeyMaterial);
+            }
         }
 
         /// <summary>

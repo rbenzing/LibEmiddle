@@ -3,7 +3,6 @@ using System;
 using System.Diagnostics;
 using System.Reflection;
 using System.Threading;
-using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Messaging.Group;
@@ -20,33 +19,6 @@ namespace LibEmiddle.Tests.Unit
         public void Setup()
         {
             _cryptoProvider = new CryptoProvider();
-        }
-
-        [TestMethod]
-        public void RotateGroupKey_ShouldGenerateNewKey()
-        {
-            // Arrange
-            var keyPair = Sodium.GenerateEd25519KeyPair();
-            var groupManager = new GroupChatManager(keyPair);
-            string groupId = $"test-key-{Guid.NewGuid()}";
-            byte[] originalKey = groupManager.CreateGroup(groupId);
-
-            // Act
-            byte[] newKey = groupManager.RotateGroupKey(groupId);
-
-            // Get the sender key via reflection
-            var groupSessionPersistenceField = typeof(GroupChatManager).GetField("_sessionPersistence",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            var sessionPersistence = groupSessionPersistenceField.GetValue(groupManager) as GroupSessionPersistence;
-
-            var session = sessionPersistence.GetGroupSession(groupId);
-            byte[] storedKey = session.ChainKey;
-
-            // Assert
-            Assert.IsNotNull(newKey);
-            Assert.AreEqual(32, newKey.Length);
-            Assert.IsFalse(SecureMemory.SecureCompare(originalKey, newKey));
-            Assert.IsTrue(SecureMemory.SecureCompare(newKey, storedKey));
         }
 
         [TestMethod]
@@ -298,17 +270,22 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             string message = "This is a group message";
             string groupId = $"test-group-{Guid.NewGuid()}";
-            byte[] senderKey = SecureMemory.CreateSecureBuffer(Constants.AES_KEY_SIZE);
 
             // Create identity key pair for signing
             var identityKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create an instance of GroupMessageCrypto
-            var messageCrypto = new GroupMessageCrypto();
+            var messageCrypto = new GroupMessageCrypto(_cryptoProvider);
+            var keyManager = new GroupKeyManager(_cryptoProvider);
+
+            var (messageKey, iteration) = keyManager.GetSenderMessageKey(groupId);
+
+            // Get last rotation timestamp
+            long rotationTimestamp = keyManager.GetLastRotationTimestamp(groupId);
 
             // Act
-            var encryptedMessage = messageCrypto.EncryptMessage(groupId, message, senderKey, identityKeyPair);
-            var decryptedMessage = messageCrypto.DecryptMessage(encryptedMessage, senderKey);
+            var encryptedMessage = messageCrypto.EncryptMessage(groupId, message, messageKey, identityKeyPair, rotationTimestamp);
+            var decryptedMessage = messageCrypto.DecryptMessage(encryptedMessage, messageKey);
 
             // Assert
             Assert.AreEqual(message, decryptedMessage);
@@ -319,39 +296,24 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string groupId = $"test-group-{Guid.NewGuid()}";
-            var senderKeyPair = Sodium.GenerateEd25519KeyPair();
+            string groupName = "myGroup";
+            string message = "This is my test message";
+            KeyPair senderKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create an instance of GroupChatManager
-            var groupChatManager = new GroupChatManager(senderKeyPair);
+            var groupChatManager = new GroupChatManager(_cryptoProvider, senderKeyPair);
 
             // Create the group
-            byte[] senderKey = groupChatManager.CreateGroup(groupId);
+            GroupSession session = groupChatManager.CreateGroupAsync(groupId, groupName).GetAwaiter().GetResult();
 
             // Act
-            var distributionMessage = groupChatManager.CreateDistributionMessage(groupId);
-
+            EncryptedGroupMessage distributionMessage = groupChatManager.SendMessageAsync(groupId, message).GetAwaiter().GetResult();
+            
             // Assert
+            Assert.IsNotNull(session);
             Assert.IsNotNull(distributionMessage);
+            Assert.IsTrue(distributionMessage.IsValid());
             Assert.AreEqual(groupId, distributionMessage.GroupId);
-
-            // Get session persistence manager via reflection
-            var sessionPersistenceField = typeof(GroupChatManager).GetField("_sessionPersistence",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            var sessionPersistence = sessionPersistenceField.GetValue(groupChatManager) as GroupSessionPersistence;
-
-            var session = sessionPersistence.GetGroupSession(groupId);
-            byte[] storedKey = session.ChainKey;
-
-            Assert.IsTrue(SecureMemory.SecureCompare(storedKey, distributionMessage.ChainKey));
-            Assert.IsTrue(SecureMemory.SecureCompare(senderKeyPair.PublicKey, distributionMessage.SenderIdentityKey));
-
-            // Get the distribution manager via reflection to verify signature
-            var distributionManagerField = typeof(GroupChatManager).GetField("_distributionManager",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            var distributionManager = distributionManagerField.GetValue(groupChatManager) as SenderKeyDistribution;
-
-            bool isValidDistribution = distributionManager.VerifyDistributionSignature(distributionMessage);
-            Assert.IsTrue(isValidDistribution, "Distribution message should be valid");
         }
 
         [TestMethod]

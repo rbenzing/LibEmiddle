@@ -43,6 +43,26 @@
         /// <summary>
         /// A read receipt
         /// </summary>
-        ReadReceipt = 8
+        ReadReceipt = 8,
+
+        /// <summary>
+        /// Control message for session management.
+        /// </summary>
+        Control = 9,
+
+        /// <summary>
+        /// Sender key distribution for group messaging.
+        /// </summary>
+        SenderKeyDistribution = 10,
+
+        /// <summary>
+        /// Message for requesting sender key distribution.
+        /// </summary>
+        SenderKeyRequest = 11,
+
+        /// <summary>
+        /// Message containing pre-key bundles.
+        /// </summary>
+        PreKeyBundle = 12,
     }
 }

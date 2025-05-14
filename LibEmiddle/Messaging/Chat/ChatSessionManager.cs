@@ -1,12 +1,12 @@
 ﻿using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
 using LibEmiddle.Core;
 using LibEmiddle.KeyExchange;
 using LibEmiddle.Sessions;
 using LibEmiddle.Domain;
-using Microsoft.Extensions.Logging;
-using LibEmiddle.Abstractions;
 using LibEmiddle.Protocol;
+using LibEmiddle.Crypto;
 
 namespace LibEmiddle.Messaging.Chat
 {
@@ -29,11 +29,9 @@ namespace LibEmiddle.Messaging.Chat
         private readonly bool _enableLogging;
         private bool _disposed = false;
 
-        private readonly ICryptoProvider _cryptoProvider;
-        private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
-        private readonly IX3DHProtocol _x3DHProtocol;
-        private readonly IKeyManager _keyManager;
-        private readonly ISessionManager _sessionManager;
+        private readonly CryptoProvider _cryptoProvider;
+        private readonly DoubleRatchetProtocol _doubleRatchetProtocol;
+        private readonly X3DHProtocol _x3DHProtocol;
         private readonly SessionPersistenceManager _sessionPersistenceManager;
 
         /// <summary>
@@ -76,13 +74,9 @@ namespace LibEmiddle.Messaging.Chat
                 _sessionStoragePath = ""; // Disable persistence if directory fails
             }
 
-            if (_cryptoProvider == null)
-                throw new ArgumentNullException(nameof(_cryptoProvider), "Crypto provider must not be null.");
-
+            _cryptoProvider = new CryptoProvider();
             _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
             _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
-            _keyManager = new KeyManager(_cryptoProvider);
-            _sessionManager = new SessionManager(_cryptoProvider, _x3DHProtocol, _doubleRatchetProtocol, _keyManager, _identityKeyPair);
             _sessionPersistenceManager = new SessionPersistenceManager(_cryptoProvider);
 
             _sessionEncryptionKey = sessionEncryptionKey;
@@ -132,7 +126,7 @@ namespace LibEmiddle.Messaging.Chat
             // 2. Try persisted sessions (only if path is valid)
             if (!string.IsNullOrEmpty(_sessionStoragePath))
             {
-                ChatSession? persistedSession = TryLoadPersistedSession(sessionKey, recipientIdentityPublicKey);
+                ChatSession? persistedSession = TryLoadPersistedSession(sessionKey);
                 if (persistedSession != null && persistedSession.IsValid())
                 {
                     LogMessage($"Loaded persisted session for {sessionKey}", LogLevel.Information);
@@ -295,7 +289,7 @@ namespace LibEmiddle.Messaging.Chat
             }
             if (!string.IsNullOrEmpty(_sessionStoragePath))
             {
-                var loadedPersistedSession = TryLoadPersistedSession(sessionKey, senderIdentityPublicKey);
+                var loadedPersistedSession = TryLoadPersistedSession(sessionKey);
                 if (loadedPersistedSession != null)
                 {
                     LogMessage($"Session already persisted for {sessionKey}. Loading instead of establishing new.", LogLevel.Warning);
@@ -405,13 +399,11 @@ namespace LibEmiddle.Messaging.Chat
         /// <summary>
         /// Attempts to load a persisted Double Ratchet session state and wrap it in a ChatSession.
         /// </summary>
-        private ChatSession? TryLoadPersistedSession(string sessionKey, byte[] recipientIdentityPublicKey)
+        private ChatSession? TryLoadPersistedSession(string sessionKey)
         {
-            var manager = new SessionPersistenceManager(_cryptoProvider);
-
             try
             {
-                return manager.LoadChatSessionAsync(sessionKey, _doubleRatchetProtocol).GetAwaiter().GetResult();
+                return _sessionPersistenceManager.LoadChatSessionAsync(sessionKey, _doubleRatchetProtocol).GetAwaiter().GetResult();
             }
             catch (FileNotFoundException) { return null; } // Expected if file disappears
             catch (Exception ex) when (ex is CryptographicException || ex is InvalidDataException)
@@ -423,11 +415,6 @@ namespace LibEmiddle.Messaging.Chat
             {
                 LogMessage($"Unexpected error loading persisted session for {sessionKey}: {ex.Message}", LogLevel.Error);
                 return null; // Don't crash, just fail to load
-            }
-            finally
-            {
-                // cleanup
-                manager.Dispose();
             }
         }
 
@@ -449,7 +436,10 @@ namespace LibEmiddle.Messaging.Chat
                 // Get the underlying DoubleRatchetSession state
                 DoubleRatchetSession cryptoState = session.GetCryptoSessionState(); // Assumes method exists
 
-                var didSerialize = SessionPersistenceManager.SaveChatSessionAsync(session).GetAwaiter().GetResult();
+                var didSerialize = _sessionPersistenceManager.SaveChatSessionAsync(session).GetAwaiter().GetResult();
+
+                if (serializedData == null)
+                    throw new ArgumentNullException(nameof(serializedData));
 
                 // Write atomically if possible (e.g., write to temp file, then rename)
                 string tempFilePath = sessionFilePath + ".tmp";
@@ -552,8 +542,9 @@ namespace LibEmiddle.Messaging.Chat
                         kvp.Value.Dispose();
                     }
                     _activeSessions.Clear();
-                    // Clear session encryption key if held directly? (depends on lifecycle)
-                    // SecureMemory.SecureClear(_sessionEncryptionKey); // Be careful if key is shared/managed elsewhere
+                    
+                    _cryptoProvider.Dispose();
+                    _sessionPersistenceManager.Dispose();
                 }
 
                 // Free unmanaged resources (unmanaged objects) and override finalizer

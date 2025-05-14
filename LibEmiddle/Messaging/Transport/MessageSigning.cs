@@ -1,6 +1,5 @@
 ﻿using System.Text;
 using LibEmiddle.Core;
-using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 
 namespace LibEmiddle.Messaging.Transport
@@ -27,7 +26,7 @@ namespace LibEmiddle.Messaging.Transport
                 throw new ArgumentException("Invalid private key.", nameof(privateKey));
             }
 
-            return KeyAuth.SignDetached(message, privateKey);
+            return Sodium.SignDetached(message, privateKey);
         }
 
         /// <summary>
@@ -49,7 +48,7 @@ namespace LibEmiddle.Messaging.Transport
                 throw new ArgumentException("Invalid public key.", nameof(publicKey));
             }
 
-            return KeyAuth.VerifyDetached(signature, message, publicKey);
+            return Sodium.SignVerifyDetached(signature, message, publicKey);
         }
 
         /// <summary>

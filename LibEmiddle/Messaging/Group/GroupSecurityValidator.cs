@@ -14,7 +14,7 @@ namespace LibEmiddle.Messaging.Group
         private readonly GroupMemberManager _memberManager;
 
         // Cache of known public keys for validation
-        private readonly Dictionary<string, byte[]> _knownPublicKeys = new Dictionary<string, byte[]>();
+        private readonly Dictionary<string, byte[]> _knownPublicKeys = [];
 
         /// <summary>
         /// Initializes a new instance of the GroupSecurityValidator class.
@@ -116,7 +116,7 @@ namespace LibEmiddle.Messaging.Group
             if (distribution.Signature != null)
             {
                 byte[] dataToSign = GetDataToSign(distribution);
-                if (!_cryptoProvider.Verify(dataToSign, distribution.Signature, senderIdentityKey))
+                if (!_cryptoProvider.VerifySignature(dataToSign, distribution.Signature, senderIdentityKey))
                 {
                     LoggingManager.LogWarning(nameof(GroupSecurityValidator),
                         $"Invalid signature on distribution message for group {groupId}");
@@ -158,7 +158,7 @@ namespace LibEmiddle.Messaging.Group
             if (message.Signature != null)
             {
                 byte[] dataToSign = GetDataToSign(message);
-                if (!_cryptoProvider.Verify(dataToSign, message.Signature, senderIdentityKey))
+                if (!_cryptoProvider.VerifySignature(dataToSign, message.Signature, senderIdentityKey))
                 {
                     LoggingManager.LogWarning(nameof(GroupSecurityValidator),
                         $"Invalid signature on message for group {groupId}");

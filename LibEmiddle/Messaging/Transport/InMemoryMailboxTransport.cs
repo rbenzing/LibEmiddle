@@ -1,122 +1,359 @@
-﻿using System.Collections.Concurrent;
-using LibEmiddle.Abstractions;
+﻿using LibEmiddle.Abstractions;
 using LibEmiddle.Domain;
+using LibEmiddle.Core;
 
 namespace LibEmiddle.Messaging.Transport
 {
     /// <summary>
-    /// Implements an in-memory version of the mailbox transport for testing or local-only scenarios.
+    /// In-memory implementation of the mailbox transport for testing and local development.
     /// </summary>
-    public class InMemoryMailboxTransport : IMailboxTransport
+    /// <param name="cryptoProvider">Crypto provider for encryption operations.</param>
+    /// <exception cref="ArgumentNullException">Thrown if any required parameters are null.</exception>
+    public class InMemoryMailboxTransport(ICryptoProvider cryptoProvider) : BaseMailboxTransport(cryptoProvider)
     {
-        private readonly ConcurrentDictionary<string, ConcurrentBag<MailboxMessage>> _mailboxes;
-        private readonly ConcurrentDictionary<string, MailboxMessage> _messagesById;
+        private readonly Dictionary<string, List<MailboxMessage>> _mailboxes = [];
+        private readonly SemaphoreSlim _lock = new(1, 1);
+        private CancellationTokenSource? _pollingCts;
 
-        /// <summary>
-        /// Creates a new in-memory mailbox transport.
-        /// </summary>
-        public InMemoryMailboxTransport()
+        /// <inheritdoc/>
+        protected override async Task<bool> SendMessageInternalAsync(MailboxMessage message)
         {
-            _mailboxes = new ConcurrentDictionary<string, ConcurrentBag<MailboxMessage>>();
-            _messagesById = new ConcurrentDictionary<string, MailboxMessage>();
-        }
-
-        /// <summary>
-        /// Sends a message to the in-memory mailbox.
-        /// </summary>
-        /// <param name="message">The message to send</param>
-        /// <returns>True if the send operation was successful</returns>
-        public Task<bool> SendMessageAsync(MailboxMessage message)
-        {
-            ArgumentNullException.ThrowIfNull(message, nameof(message));
-            ArgumentNullException.ThrowIfNull(message.RecipientKey, nameof(message.RecipientKey));
-
-            // Generate recipient ID from their public key
-            string recipientId = Convert.ToBase64String(message.RecipientKey);
-
-            // Ensure mailbox exists
-            var mailbox = _mailboxes.GetOrAdd(recipientId, _ => new ConcurrentBag<MailboxMessage>());
-
-            // Add message to mailbox
-            mailbox.Add(message);
-            _messagesById[message.MessageId] = message;
-
-            return Task.FromResult(true);
-        }
-
-        /// <summary>
-        /// Fetches messages from the in-memory mailbox.
-        /// </summary>
-        /// <param name="recipientKey">The recipient's public key</param>
-        /// <param name="cancellationToken">Cancellation token</param>
-        /// <returns>List of mailbox messages for the recipient</returns>
-        public Task<List<MailboxMessage>> FetchMessagesAsync(byte[] recipientKey, CancellationToken cancellationToken)
-        {
-            ArgumentNullException.ThrowIfNull(recipientKey, nameof(recipientKey));
-
-            // Check for cancellation
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // Get recipient's mailbox
-            string recipientId = Convert.ToBase64String(recipientKey);
-            if (!_mailboxes.TryGetValue(recipientId, out var mailbox))
+            await _lock.WaitAsync();
+            try
             {
-                return Task.FromResult(new List<MailboxMessage>());
+                var recipientKeyString = Convert.ToBase64String(message.RecipientKey);
+
+                if (!_mailboxes.TryGetValue(recipientKeyString, out var mailbox))
+                {
+                    mailbox = [];
+                    _mailboxes[recipientKeyString] = mailbox;
+                }
+
+                mailbox.Add(message);
+
+                LoggingManager.LogInformation("InMemoryMailboxTransport", $"Added message {message.Id} to mailbox {recipientKeyString}");
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError("InMemoryMailboxTransport", $"Error while adding message {message.Id} to mailbox", ex);
+                return false;
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        /// <inheritdoc/>
+        protected override async Task<List<MailboxMessage>> FetchMessagesInternalAsync(byte[] recipientKey, CancellationToken cancellationToken)
+        {
+            await _lock.WaitAsync(cancellationToken);
+            try
+            {
+                var recipientKeyString = Convert.ToBase64String(recipientKey);
+
+                if (_mailboxes.TryGetValue(recipientKeyString, out var mailbox))
+                {
+                    // Get unread messages for this recipient
+                    var unreadMessages = mailbox
+                        .Where(m => !m.IsRead && !m.IsExpired())
+                        .ToList();
+
+                    LoggingManager.LogInformation("InMemoryMailboxTransport", 
+                        $"Fetched {unreadMessages.Count} unread messages for mailbox {recipientKeyString}");
+
+                    return unreadMessages;
+                }
+
+                return new List<MailboxMessage>();
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError("InMemoryMailboxTransport", "Error while fetching messages from mailbox", ex);
+                return new List<MailboxMessage>();
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        /// <inheritdoc/>
+        protected override async Task<bool> DeleteMessageInternalAsync(string messageId)
+        {
+            await _lock.WaitAsync();
+            try
+            {
+                bool messageFound = false;
+
+                foreach (var mailbox in _mailboxes.Values)
+                {
+                    var message = mailbox.FirstOrDefault(m => m.Id == messageId);
+                    if (message != null)
+                    {
+                        mailbox.Remove(message);
+                        messageFound = true;
+
+                        LoggingManager.LogInformation("InMemoryMailboxTransport", $"Deleted message {messageId} from mailbox");
+                        break;
+                    }
+                }
+
+                return messageFound;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError("InMemoryMailboxTransport", "Error while deleting message {messageId}", ex);
+                return false;
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        /// <inheritdoc/>
+        protected override async Task<bool> MarkMessageAsReadInternalAsync(string messageId)
+        {
+            await _lock.WaitAsync();
+            try
+            {
+                bool messageFound = false;
+
+                foreach (var mailbox in _mailboxes.Values)
+                {
+                    var message = mailbox.FirstOrDefault(m => m.Id == messageId);
+                    if (message != null)
+                    {
+                        message.IsRead = true;
+                        message.ReadAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        messageFound = true;
+
+                        LoggingManager.LogInformation("InMemoryMailboxTransport", $"Marked message {messageId} as read");
+                        break;
+                    }
+                }
+
+                return messageFound;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError("InMemoryMailboxTransport", $"Error while marking message {messageId} as read", ex);
+                return false;
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        /// <inheritdoc/>
+        protected override async Task StartListeningInternalAsync(byte[] localIdentityKey, int pollingInterval, CancellationToken cancellationToken)
+        {
+            await StopListeningInternalAsync();
+
+            _pollingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var linkedToken = _pollingCts.Token;
+
+            // Start polling task
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!linkedToken.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            var messages = await FetchMessagesAsync(localIdentityKey, linkedToken);
+
+                            foreach (var message in messages)
+                            {
+                                // Notify listeners about new message
+                                OnMessageReceived(message);
+
+                                // Mark message as read to prevent refetching
+                                await MarkMessageAsReadAsync(message.Id);
+                            }
+
+                            // Wait for the specified polling interval
+                            await Task.Delay(pollingInterval, linkedToken);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // Normal cancellation, break the loop
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            LoggingManager.LogError("InMemoryMailboxTransport", "Error during message polling", ex);
+
+                            // Continue polling even after errors
+                            try
+                            {
+                                await Task.Delay(pollingInterval, linkedToken);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                // Normal cancellation, break the loop
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LoggingManager.LogError("InMemoryMailboxTransport", "Fatal error in polling loop", ex);
+                }
+
+                LoggingManager.LogInformation("InMemoryMailboxTransport", "Message polling stopped");
+            }, linkedToken);
+
+            LoggingManager.LogInformation("InMemoryMailboxTransport", "Started in-memory mailbox polling");
+        }
+
+        /// <inheritdoc/>
+        protected override Task StopListeningInternalAsync()
+        {
+            if (_pollingCts != null)
+            {
+                if (!_pollingCts.IsCancellationRequested)
+                {
+                    _pollingCts.Cancel();
+                }
+
+                _pollingCts.Dispose();
+                _pollingCts = null;
+
+                LoggingManager.LogInformation("InMemoryMailboxTransport", "Stopped in-memory mailbox polling");
             }
 
-            // Convert to list and filter out expired messages
-            var messages = mailbox.Where(m => !m.IsExpired()).ToList();
-            return Task.FromResult(messages);
+            return Task.CompletedTask;
+        }
+
+        /// <inheritdoc/>
+        protected override async Task<bool> UpdateDeliveryStatusInternalAsync(string messageId, bool isDelivered)
+        {
+            await _lock.WaitAsync();
+            try
+            {
+                bool messageFound = false;
+
+                foreach (var mailbox in _mailboxes.Values)
+                {
+                    var message = mailbox.FirstOrDefault(m => m.Id == messageId);
+                    if (message != null)
+                    {
+                        message.IsDelivered = isDelivered;
+
+                        if (isDelivered)
+                        {
+                            message.DeliveredAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        }
+
+                        messageFound = true;
+
+                        LoggingManager.LogInformation("InMemoryMailboxTransport", 
+                            $"Updated delivery status for message {messageId} to {isDelivered}");
+                        break;
+                    }
+                }
+
+                return messageFound;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError("InMemoryMailboxTransport", $"Error while updating delivery status for message {messageId}", ex);
+                return false;
+            }
+            finally
+            {
+                _lock.Release();
+            }
         }
 
         /// <summary>
-        /// Deletes a message from the in-memory storage.
+        /// Clears all messages from all mailboxes.
         /// </summary>
-        /// <param name="messageId">The message ID to delete</param>
-        /// <returns>True if the deletion was successful</returns>
-        public Task<bool> DeleteMessageAsync(string messageId)
+        /// <remarks>
+        /// This method is primarily used for testing purposes.
+        /// </remarks>
+        public async Task ClearAllMailboxesAsync()
         {
-            // Remove from messages by ID dictionary
-            if (!_messagesById.TryRemove(messageId, out var message))
+            await _lock.WaitAsync();
+            try
             {
-                return Task.FromResult(false);
+                _mailboxes.Clear();
+                LoggingManager.LogInformation("InMemoryMailboxTransport", "Cleared all mailboxes");
             }
-
-            // We can't easily remove from the ConcurrentBag, but that's okay for tests
-            // In a real implementation, we would have a better data structure
-            // Mark it as expired instead, so it won't be returned in future fetches
-            if (message != null)
+            finally
             {
-                message.ExpiresAt = 1; // Set to a past time
+                _lock.Release();
             }
-
-            return Task.FromResult(true);
         }
 
         /// <summary>
-        /// Marks a message as read in the in-memory storage.
+        /// Gets the number of messages in all mailboxes.
         /// </summary>
-        /// <param name="messageId">The message ID to mark as read</param>
-        /// <returns>True if the operation was successful</returns>
-        public Task<bool> MarkMessageAsReadAsync(string messageId)
+        /// <returns>The total number of messages.</returns>
+        /// <remarks>
+        /// This method is primarily used for testing purposes.
+        /// </remarks>
+        public async Task<int> GetTotalMessageCountAsync()
         {
-            if (_messagesById.TryGetValue(messageId, out var message))
+            await _lock.WaitAsync();
+            try
             {
-                message.IsRead = true;
-                message.ReadAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                return Task.FromResult(true);
+                return _mailboxes.Values.Sum(m => m.Count);
             }
-
-            return Task.FromResult(false);
+            finally
+            {
+                _lock.Release();
+            }
         }
 
         /// <summary>
-        /// Clears all mailboxes (for testing purposes only).
+        /// Gets all messages in a specific mailbox.
         /// </summary>
-        public void Clear()
+        /// <param name="recipientKey">The recipient's public key.</param>
+        /// <returns>All messages in the mailbox.</returns>
+        /// <remarks>
+        /// This method is primarily used for testing purposes.
+        /// </remarks>
+        public async Task<List<MailboxMessage>> GetAllMessagesAsync(byte[] recipientKey)
         {
-            _mailboxes.Clear();
-            _messagesById.Clear();
+            if (recipientKey == null)
+            {
+                throw new ArgumentNullException(nameof(recipientKey));
+            }
+
+            await _lock.WaitAsync();
+            try
+            {
+                var recipientKeyString = Convert.ToBase64String(recipientKey);
+
+                if (_mailboxes.TryGetValue(recipientKeyString, out var mailbox))
+                {
+                    return mailbox.ToList();
+                }
+
+                return new List<MailboxMessage>();
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Disposes resources used by the transport.
+        /// </summary>
+        public void Dispose()
+        {
+            StopListeningAsync().GetAwaiter().GetResult();
+            _pollingCts?.Dispose();
+            _lock.Dispose();
         }
     }
 }

@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Security.Cryptography;
+﻿using System.Collections.Concurrent;
 using System.Text;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
@@ -152,17 +150,20 @@ namespace LibEmiddle.Messaging.Group
         /// Records when the user joined a group for message validation.
         /// </summary>
         /// <param name="groupId">The identifier of the group.</param>
+        /// <param name="identityKeyPair">The identifier of the user.</param>
         /// <returns>The join timestamp.</returns>
-        public long RecordGroupJoin(string groupId)
+        public long RecordGroupJoin(string groupId, KeyPair identityKeyPair)
         {
             if (string.IsNullOrEmpty(groupId))
                 throw new ArgumentException("Group ID cannot be null or empty.", nameof(groupId));
 
             var joinTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
+            var userId = identityKeyPair.PublicKey.ToString() ?? throw new ArgumentNullException(nameof(identityKeyPair.PublicKey), "User PK cannot be null.");
+
             // Record the join timestamp
             var groupTimestamps = _groupJoinTimestamps.GetOrAdd(groupId, _ => new ConcurrentDictionary<string, long>());
-            groupTimestamps[Constants.SELF_USER_ID] = joinTimestamp;
+            groupTimestamps[userId] = joinTimestamp;
 
             return joinTimestamp;
         }
@@ -191,9 +192,15 @@ namespace LibEmiddle.Messaging.Group
         /// <returns>The data to sign.</returns>
         private byte[] GetDataToSign(EncryptedGroupMessage message)
         {
+
+            ArgumentNullException.ThrowIfNull(nameof(message));
+
+            if (message.MessageId == null)
+                throw new ArgumentNullException(nameof(message.MessageId));
+
             // Combine all relevant fields for signing
-            using var ms = new System.IO.MemoryStream();
-            using var writer = new System.IO.BinaryWriter(ms);
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms);
 
             writer.Write(Encoding.Default.GetBytes(message.GroupId));
             writer.Write(message.SenderIdentityKey);
@@ -214,10 +221,12 @@ namespace LibEmiddle.Messaging.Group
         /// <param name="messageTimestamp">The message timestamp to validate.</param>
         /// <returns>True if the timestamp is valid.</returns>
         private bool ValidateMessageTimestamp(string groupId, byte[] senderPublicKey, long messageTimestamp)
-        {
+        {             
+            var userId = senderPublicKey.ToString() ?? throw new ArgumentNullException(nameof(senderPublicKey), "Sender PK cannot be null.");
+
             // Get our join timestamp for this group
             if (_groupJoinTimestamps.TryGetValue(groupId, out var groupTimestamps) &&
-                groupTimestamps.TryGetValue(Constants.SELF_USER_ID, out var joinTimestamp))
+                groupTimestamps.TryGetValue(userId, out var joinTimestamp))
             {
                 // Allow a small tolerance for clock skew
                 const long CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000; // 5 minutes

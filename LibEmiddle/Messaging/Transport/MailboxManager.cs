@@ -3,8 +3,6 @@ using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
-using LibEmiddle.Protocol;
-using LibEmiddle.Sessions;
 
 namespace LibEmiddle.Messaging.Transport
 {
@@ -181,11 +179,8 @@ namespace LibEmiddle.Messaging.Transport
             _sessions[recipientId] = updatedSession;
 
             // Create the mailbox message
-            var mailboxMessage = new MailboxMessage
+            var mailboxMessage = new MailboxMessage(recipientKey, _identityKeyPair.PublicKey, encryptedPayload)
             {
-                RecipientKey = recipientKey,
-                SenderKey = _identityKeyPair.PublicKey,
-                EncryptedPayload = encryptedPayload,
                 Type = messageType,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             };
@@ -199,7 +194,7 @@ namespace LibEmiddle.Messaging.Transport
             // Add to outgoing queue
             _outgoingQueue.Enqueue(mailboxMessage);
 
-            return mailboxMessage.MessageId;
+            return mailboxMessage.Id;
         }
 
         /// <summary>
@@ -241,7 +236,7 @@ namespace LibEmiddle.Messaging.Transport
                 }
                 catch (Exception ex)
                 {
-                    LoggingManager.LogError(nameof(MailboxManager), $"Error decrypting message {message.MessageId}: {ex.Message}");
+                    LoggingManager.LogError(nameof(MailboxManager), $"Error decrypting message {message.Id}: {ex.Message}");
                 }
 
                 results.Add((message, content));
@@ -395,7 +390,7 @@ namespace LibEmiddle.Messaging.Transport
                             continue;
 
                         // Add to our local store if it's new
-                        if (_incomingMessages.TryAdd(message.MessageId, message))
+                        if (_incomingMessages.TryAdd(message.Id, message))
                         {
                             // Mark as delivered
                             message.IsDelivered = true;
@@ -503,12 +498,12 @@ namespace LibEmiddle.Messaging.Transport
         /// <summary>
         /// Sends a delivery or read receipt.
         /// </summary>
-        private static void SendReceipt(MailboxMessage originalMessage, bool isDeliveryReceipt)
+        private void SendReceipt(MailboxMessage originalMessage, bool isDeliveryReceipt)
         {
             // Create receipt data
             var receiptData = new
             {
-                messageId = originalMessage.MessageId,
+                messageId = originalMessage.Id,
                 timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 type = isDeliveryReceipt ? "delivery" : "read"
             };
@@ -516,8 +511,12 @@ namespace LibEmiddle.Messaging.Transport
             // Serialize to JSON
             string json = System.Text.Json.JsonSerializer.Serialize(receiptData);
 
+            var messageType = isDeliveryReceipt ? MessageType.DeliveryReceipt : MessageType.ReadReceipt;
+            string senderId = Convert.ToBase64String(originalMessage.SenderKey);
+            DoubleRatchetSession session = GetOrCreateSession(senderId, originalMessage.SenderKey);
+
             // Send as a normal message
-            SendMessage(originalMessage.SenderKey, json, isDeliveryReceipt ? MessageType.DeliveryReceipt : MessageType.ReadReceipt);
+            SendMessage(originalMessage.SenderKey, json, session, messageType);
         }
 
         /// <summary>
@@ -543,54 +542,11 @@ namespace LibEmiddle.Messaging.Transport
         }
 
         /// <summary>
-        /// Exports a session for a recipient.
-        /// </summary>
-        /// <param name="recipientId">The recipient ID (Base64 of their public key)</param>
-        /// <returns>Serialized session data</returns>
-        public byte[] ExportSession(string recipientId)
-        {
-            if (!_sessions.TryGetValue(recipientId, out var session))
-                throw new KeyNotFoundException($"No session found for recipient {recipientId}");
-
-            return SessionManager.SaveSessionAsync(session);
-        }
-
-        /// <summary>
-        /// Imports a session for a recipient.
-        /// </summary>
-        /// <param name="recipientId">The recipient ID (Base64 of their public key)</param>
-        /// <param name="sessionData">The serialized session data</param>
-        /// <param name="decryptionKey">Optional key to decrypt the session data</param>
-        /// <returns>True if the session was imported successfully</returns>
-        public bool ImportSession(string recipientId, byte[] sessionData, byte[]? decryptionKey = null)
-        {
-            try
-            {
-                var session = SessionPersistence.DeserializeSession(sessionData, decryptionKey);
-
-                if (session != null && DoubleRatchet.ValidateSession(session))
-                {
-                    _sessions[recipientId] = session;
-                    return true;
-                }
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(MailboxManager), $"Error importing session: {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
         /// Disposes resources.
         /// </summary>
         public void Dispose()
         {
             Stop();
-            _doubleRatchetProtocol.Dispose();
-            _mailboxTransport.Dispose();
             _cts.Dispose();
             _syncLock.Dispose();
         }

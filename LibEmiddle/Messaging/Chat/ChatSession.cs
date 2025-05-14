@@ -16,6 +16,7 @@ namespace LibEmiddle.Messaging.Chat
         private readonly SemaphoreSlim _sessionLock = new(1, 1);
         private DoubleRatchetSession _cryptoSession;
         private bool _disposed;
+        private InitialMessageData? _initialMessageData;
 
         // Required properties from interface
         public string SessionId { get; }
@@ -35,6 +36,7 @@ namespace LibEmiddle.Messaging.Chat
 
         // Events
         public event EventHandler<SessionStateChangedEventArgs>? StateChanged;
+        public event EventHandler<MessageReceivedEventArgs>? MessageReceived;
 
         // Collections
         private readonly ConcurrentQueue<MessageRecord> _messageHistory = new();
@@ -42,6 +44,11 @@ namespace LibEmiddle.Messaging.Chat
 
         // Services
         private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
+
+        /// <summary>
+        /// Gets the initial message data for X3DH key exchange (sender-only).
+        /// </summary>
+        public InitialMessageData? InitialMessageData => _initialMessageData;
 
         // Constructor with dependency injection
         public ChatSession(
@@ -58,6 +65,16 @@ namespace LibEmiddle.Messaging.Chat
             SessionId = initialCryptoSession.SessionId;
             CreatedAt = DateTime.UtcNow;
             State = SessionState.Initialized;
+        }
+
+        /// <summary>
+        /// Sets the initial X3DH message data for this session.
+        /// Used when creating a session as the sender.
+        /// </summary>
+        /// <param name="initialMessageData">The X3DH initial message data.</param>
+        public void SetInitialMessageData(InitialMessageData initialMessageData)
+        {
+            _initialMessageData = initialMessageData ?? throw new ArgumentNullException(nameof(initialMessageData));
         }
 
         /// <summary>
@@ -163,6 +180,52 @@ namespace LibEmiddle.Messaging.Chat
             {
                 _sessionLock.Release();
             }
+        }
+
+        /// <summary>
+        /// Encrypts and sends a message using the current Double Ratchet state.
+        /// Handles state updates and emits events.
+        /// </summary>
+        /// <param name="message">Plaintext message to send.</param>
+        /// <returns>True if the message was sent successfully, false otherwise.</returns>
+        /// <exception cref="ArgumentException">If message is null or empty.</exception>
+        /// <exception cref="InvalidOperationException">If session is Terminated or Suspended.</exception>
+        /// <exception cref="ObjectDisposedException"></exception>
+        public async Task<bool> SendMessageAsync(string message)
+        {
+            ThrowIfDisposed();
+            ArgumentException.ThrowIfNullOrEmpty(message, nameof(message));
+
+            EncryptedMessage? encryptedMessage = await EncryptAsync(message);
+            if (encryptedMessage == null)
+            {
+                return false;
+            }
+
+            // In a real implementation, this would send the message via transport
+            // For now, we'll just return success
+            return true;
+        }
+
+        /// <summary>
+        /// Processes an incoming encrypted message.
+        /// </summary>
+        /// <param name="encryptedMessage">The encrypted message to process.</param>
+        /// <returns>The decrypted message, or null if decryption failed.</returns>
+        public async Task<string?> ProcessIncomingMessageAsync(EncryptedMessage encryptedMessage)
+        {
+            var decryptedMessage = await DecryptAsync(encryptedMessage);
+            
+            if (decryptedMessage != null)
+            {
+                // Notify listeners about the new message
+                OnMessageReceived(new MessageReceivedEventArgs(
+                    RemotePublicKey,
+                    decryptedMessage,
+                    encryptedMessage.Timestamp));
+            }
+            
+            return decryptedMessage;
         }
 
         /// <summary>
@@ -379,6 +442,12 @@ namespace LibEmiddle.Messaging.Chat
             // StateChanged?.Invoke(this, new SessionStateChangedEventArgs(previousState, newState));
         }
 
+        /// <summary> Raises the MessageReceived event. </summary>
+        protected virtual void OnMessageReceived(MessageReceivedEventArgs e)
+        {
+            Task.Run(() => MessageReceived?.Invoke(this, e));
+        }
+
         /// <summary> Checks if disposed and throws. </summary>
         private void ThrowIfDisposed()
         {
@@ -426,4 +495,4 @@ namespace LibEmiddle.Messaging.Chat
             _disposed = true;
         }
     }
-} // End namespace
+}

@@ -37,7 +37,7 @@ namespace LibEmiddle.Messaging.Group
             _keyManager = new GroupKeyManager(cryptoProvider);
             _memberManager = new GroupMemberManager(cryptoProvider);
             _messageCrypto = new GroupMessageCrypto(cryptoProvider);
-            _distributionManager = new SenderKeyDistribution(cryptoProvider);
+            _distributionManager = new SenderKeyDistribution(cryptoProvider, _keyManager);
         }
 
         /// <summary>

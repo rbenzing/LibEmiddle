@@ -3,7 +3,6 @@ using System.Text;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Abstractions;
-using LibEmiddle.KeyExchange;
 
 namespace LibEmiddle.Messaging.Group
 {
@@ -11,24 +10,17 @@ namespace LibEmiddle.Messaging.Group
     /// Manages the distribution of sender keys for group messaging,
     /// handling the secure sharing of encryption keys between group members.
     /// </summary>
-    public class SenderKeyDistribution
+    /// <remarks>
+    /// Initializes a new instance of the SenderKeyDistribution class.
+    /// </remarks>
+    public class SenderKeyDistribution(ICryptoProvider cryptoProvider, GroupKeyManager groupKeyManager)
     {
-        private readonly ICryptoProvider _cryptoProvider;
-        private readonly GroupKeyManager _keyManager;
+        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
+        private readonly GroupKeyManager _keyManager = groupKeyManager ?? throw new ArgumentNullException(nameof(groupKeyManager));
 
         // Cache of distribution messages by group ID
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, SenderKeyDistributionMessage>> _distributionMessages =
             new ConcurrentDictionary<string, ConcurrentDictionary<string, SenderKeyDistributionMessage>>();
-
-        /// <summary>
-        /// Initializes a new instance of the SenderKeyDistribution class.
-        /// </summary>
-        /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-        public SenderKeyDistribution(ICryptoProvider cryptoProvider)
-        {
-            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-            _keyManager = new GroupKeyManager(_cryptoProvider);
-        }
 
         /// <summary>
         /// Creates a new sender key distribution message for a group.

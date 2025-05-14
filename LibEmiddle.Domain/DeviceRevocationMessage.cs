@@ -1,9 +1,4 @@
-﻿using System.Text;
-using LibEmiddle.Core;
-using LibEmiddle.Domain;
-using LibEmiddle.Messaging.Transport;
-
-namespace LibEmiddle.MultiDevice
+﻿namespace LibEmiddle.Domain
 {
     /// <summary>
     /// Message indicating a device has been revoked.
@@ -55,95 +50,6 @@ namespace LibEmiddle.MultiDevice
         }
 
         /// <summary>
-        /// Validates this revocation message against a trusted public key.
-        /// </summary>
-        /// <param name="trustedPublicKey">The trusted public key for verification</param>
-        /// <returns>True if the message is valid and properly signed</returns>
-        public bool Validate(byte[] trustedPublicKey)
-        {
-            if (RevokedDeviceKey == null || RevokedDeviceKey.Length == 0)
-                return false;
-
-            if (Signature == null || Signature.Length == 0)
-                return false;
-
-            if (RevocationTimestamp <= 0)
-                return false;
-
-            // Check for expired revocation (> 30 days old)
-            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            if (currentTime - RevocationTimestamp > 30 * 24 * 60 * 60 * 1000L) // 30 days in milliseconds
-                return false;
-
-            // Check protocol version compatibility if set
-            if (!string.IsNullOrEmpty(Version))
-            {
-                if (!IsValidProtocolVersion(Version))
-                    return false;
-            }
-
-            // Combine device key and timestamp for verification
-            byte[] timestampBytes = BitConverter.GetBytes(RevocationTimestamp);
-            byte[] dataToVerify = SecureMemory.CreateSecureBuffer((uint)RevokedDeviceKey.Length + (uint)timestampBytes.Length);
-
-            RevokedDeviceKey.AsSpan().CopyTo(dataToVerify.AsSpan(0, RevokedDeviceKey.Length));
-            timestampBytes.AsSpan().CopyTo(dataToVerify.AsSpan(RevokedDeviceKey.Length, timestampBytes.Length));
-
-            // Verify the signature
-            return MessageSigning.VerifySignature(dataToVerify, Signature, trustedPublicKey);
-        }
-
-        /// <summary>
-        /// Validates the protocol version format and compatibility
-        /// </summary>
-        /// <param name="version">Protocol version string to check</param>
-        /// <returns>True if the version is compatible</returns>
-        private bool IsValidProtocolVersion(string version)
-        {
-            // Check format (e.g., "LibEmiddle/v1.0")
-            string[] parts = version.Split('/');
-            if (parts.Length != 2 || !parts[1].StartsWith("v"))
-                return false;
-
-            // Parse version number
-            string versionNumber = parts[1].Substring(1);
-            string[] versionParts = versionNumber.Split('.');
-            if (versionParts.Length != 2)
-                return false;
-
-            if (!int.TryParse(versionParts[0], out int majorVersion) ||
-                !int.TryParse(versionParts[1], out int minorVersion))
-                return false;
-
-            // Check compatibility
-            return ProtocolVersion.IsCompatible(majorVersion, minorVersion);
-        }
-
-        /// <summary>
-        /// Combines device key, timestamp, and optional version for signature verification.
-        /// </summary>
-        private byte[] CombineForVerification()
-        {
-            using var ms = new MemoryStream();
-
-            // Add the revoked device key
-            ms.Write(RevokedDeviceKey, 0, RevokedDeviceKey.Length);
-
-            // Add the timestamp
-            byte[] timestampBytes = BitConverter.GetBytes(RevocationTimestamp);
-            ms.Write(timestampBytes, 0, timestampBytes.Length);
-
-            // If using protocol v1.1+, also include the protocol version in the data to sign
-            if (!string.Equals(Version, ProtocolVersion.LEGACY_VERSION, StringComparison.Ordinal))
-            {
-                byte[] versionBytes = Encoding.Default.GetBytes(Version);
-                ms.Write(versionBytes, 0, versionBytes.Length);
-            }
-
-            return ms.ToArray();
-        }
-
-        /// <summary>
         /// Serializes this message to a dictionary for transport
         /// </summary>
         public Dictionary<string, string> ToDictionary()
@@ -191,7 +97,7 @@ namespace LibEmiddle.MultiDevice
         /// </summary>
         public string ToJson()
         {
-            return JsonSerialization.Serialize(ToDictionary());
+            return System.Text.Json.JsonSerializer.Serialize(ToDictionary());
         }
 
         /// <summary>
@@ -199,10 +105,19 @@ namespace LibEmiddle.MultiDevice
         /// </summary>
         public static DeviceRevocationMessage FromJson(string json)
         {
-            var dict = JsonSerialization.Deserialize<Dictionary<string, string>>(json)
+            var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json)
                 ?? throw new ArgumentException("Failed to deserialize JSON", nameof(json));
 
             return FromDictionary(dict);
         }
+    }
+
+    // Add a cryptographic validation interface to Domain project
+    public interface ICryptographicValidator
+    {
+        /// <summary>
+        /// Validates a revocation message against a trusted public key.
+        /// </summary>
+        bool ValidateRevocationMessage(DeviceRevocationMessage message, byte[] trustedPublicKey);
     }
 }

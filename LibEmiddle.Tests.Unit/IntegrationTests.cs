@@ -1,19 +1,11 @@
 ﻿using System;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using LibEmiddle.KeyExchange;
-using LibEmiddle.Models;
 using LibEmiddle.API;
-using LibEmiddle.Abstractions;
 using LibEmiddle.Messaging.Group;
 using LibEmiddle.Domain;
 using LibEmiddle.Crypto;
 using LibEmiddle.Core;
-using System.Collections.Generic;
-using System.Reflection.Metadata;
 using System.Collections.Immutable;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace LibEmiddle.Tests.Unit
 {

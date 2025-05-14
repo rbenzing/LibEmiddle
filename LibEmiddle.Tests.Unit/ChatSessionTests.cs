@@ -5,9 +5,10 @@ using System.Threading.Tasks;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.KeyExchange;
 using LibEmiddle.Messaging.Chat;
 using LibEmiddle.Domain.Enums;
+using LibEmiddle.Protocol;
+using LibEmiddle.Abstractions;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -20,50 +21,32 @@ namespace LibEmiddle.Tests.Unit
         private DoubleRatchetSession _bobRatchetSession;
         private ChatSession _aliceChatSession;
         private CryptoProvider _cryptoProvider;
+        private DoubleRatchetProtocol _doubleRatchetProtocol;
+        private X3DHProtocol _x3DHProtocol;
 
         [TestInitialize]
         public void Setup()
         {
-
             _cryptoProvider = new CryptoProvider();
+            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+            _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
 
             // Generate proper key pairs for Alice and Bob
             _aliceKeyPair = Sodium.GenerateEd25519KeyPair();
             _bobKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            byte[] _alicePrivateKey = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(_aliceKeyPair.PrivateKey);
-
-            // Create a shared secret (simulating X3DH)
-            byte[] sharedSecret = Sodium.ScalarMult(_alicePrivateKey, _bobKeyPair.PublicKey);
-
-            // Initialize Double Ratchet
-            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
+            byte[] _alicePrivateKey = _cryptoProvider.ConvertEd25519PrivateKeyToX25519(_aliceKeyPair.PrivateKey);
 
             string sessionId = Guid.NewGuid().ToString();
 
+            // Init Session
+            X3DHKeyBundle aliceX3DHBundle =  _x3DHProtocol.CreateKeyBundleAsync(_aliceKeyPair).GetAwaiter().GetResult();
+
             // Create Alice's sending session
-            _aliceRatchetSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: _aliceKeyPair,
-                remoteDHRatchetKey: _bobKeyPair.PublicKey,
-                rootKey: rootKey,
-                sendingChainKey: chainKey,
-                receivingChainKey: chainKey,
-                messageNumberSending: 0,
-                messageNumberReceiving: 0,
-                sessionId: sessionId
-            );
+            _aliceRatchetSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync().GetAwaiter().GetResult();
 
             // Create Bob's receiving session
-            _bobRatchetSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: _bobKeyPair,
-                remoteDHRatchetKey: _aliceKeyPair.PublicKey,
-                rootKey: rootKey,
-                sendingChainKey: chainKey,
-                receivingChainKey: chainKey,
-                messageNumberSending: 0,
-                messageNumberReceiving: 0,
-                sessionId: sessionId
-            );
+            _bobRatchetSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync();
 
             // Create Alice's chat session
             _aliceChatSession = new ChatSession(

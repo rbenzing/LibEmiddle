@@ -11,14 +11,9 @@ namespace LibEmiddle.Protocol
     /// Provides an implementation of the Signal X3DH (Extended Triple Diffie-Hellman) protocol
     /// to establish secure session keys between parties.
     /// </summary>
-    public class X3DHProtocol : IX3DHProtocol
+    public class X3DHProtocol(ICryptoProvider cryptoProvider) : IX3DHProtocol
     {
-        private readonly ICryptoProvider _cryptoProvider;
-
-        public X3DHProtocol(ICryptoProvider cryptoProvider)
-        {
-            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-        }
+        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
 
         /// <summary>
         /// Creates a new X3DH key bundle, generating necessary public and private keys,

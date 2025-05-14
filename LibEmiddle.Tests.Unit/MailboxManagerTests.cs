@@ -7,7 +7,6 @@ using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using LibEmiddle.Core;
-using LibEmiddle.Models;
 using System.Linq;
 using System.Diagnostics;
 using LibEmiddle.Abstractions;

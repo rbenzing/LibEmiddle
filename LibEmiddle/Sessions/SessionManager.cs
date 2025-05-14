@@ -1,11 +1,11 @@
 ﻿using System.Collections.Concurrent;
-using System.Security.Cryptography;
 using LibEmiddle.Abstractions;
-using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
 using LibEmiddle.Messaging.Chat;
 using LibEmiddle.Messaging.Group;
+using LibEmiddle.Protocol;
+using LibEmiddle.Core;
 
 namespace LibEmiddle.Sessions
 {
@@ -13,43 +13,35 @@ namespace LibEmiddle.Sessions
     /// Implements the ISessionManager interface, providing centralized management
     /// for both individual and group chat sessions.
     /// </summary>
-    public class SessionManager : ISessionManager, IDisposable
+    /// <remarks>
+    /// Initializes a new instance of the SessionManager class.
+    /// </remarks>
+    /// <param name="cryptoProvider">The cryptographic provider.</param>
+    /// <param name="x3dhProtocol">The X3DH protocol implementation.</param>
+    /// <param name="doubleRatchetProtocol">The Double Ratchet protocol implementation.</param>
+    /// <param name="identityKeyPair">The identity key pair for this device.</param>
+    /// <param name="sessionStoragePath">Optional path for storing session data.</param>
+    public class SessionManager(
+        ICryptoProvider cryptoProvider,
+        IX3DHProtocol x3dhProtocol,
+        IDoubleRatchetProtocol doubleRatchetProtocol,
+        KeyPair identityKeyPair,
+        string? sessionStoragePath = null) : ISessionManager, IDisposable
     {
-        private readonly ICryptoProvider _cryptoProvider;
-        private readonly IX3DHProtocol _x3dhProtocol;
-        private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
-        private readonly KeyPair _identityKeyPair;
-        private readonly SessionPersistenceManager _persistenceManager;
+        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
+        private readonly IX3DHProtocol _x3dhProtocol = x3dhProtocol ?? throw new ArgumentNullException(nameof(x3dhProtocol));
+        private readonly IDoubleRatchetProtocol _doubleRatchetProtocol = doubleRatchetProtocol ?? throw new ArgumentNullException(nameof(doubleRatchetProtocol));
+        private readonly KeyPair _identityKeyPair = identityKeyPair;
 
-        private readonly ConcurrentDictionary<string, ISession> _activeSessions = new ConcurrentDictionary<string, ISession>();
-        private readonly SemaphoreSlim _operationLock = new SemaphoreSlim(1, 1);
+        private readonly SessionPersistenceManager _persistenceManager = new(cryptoProvider, sessionStoragePath);
+        private readonly ProtocolAdapter _protocolAdapter = new(
+                x3dhProtocol,
+                doubleRatchetProtocol,
+                cryptoProvider);
+
+        private readonly ConcurrentDictionary<string, ISession> _activeSessions = new();
+        private readonly SemaphoreSlim _operationLock = new(1, 1);
         private bool _disposed;
-
-        /// <summary>
-        /// Initializes a new instance of the SessionManager class.
-        /// </summary>
-        /// <param name="cryptoProvider">The cryptographic provider.</param>
-        /// <param name="x3dhProtocol">The X3DH protocol implementation.</param>
-        /// <param name="doubleRatchetProtocol">The Double Ratchet protocol implementation.</param>
-        /// <param name="keyManager">The key manager.</param>
-        /// <param name="identityKeyPair">The identity key pair for this device.</param>
-        /// <param name="sessionStoragePath">Optional path for storing session data.</param>
-        public SessionManager(
-            ICryptoProvider cryptoProvider,
-            IX3DHProtocol x3dhProtocol,
-            IDoubleRatchetProtocol doubleRatchetProtocol,
-            IKeyManager keyManager,
-            KeyPair identityKeyPair,
-            string? sessionStoragePath = null)
-        {
-            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-            _x3dhProtocol = x3dhProtocol ?? throw new ArgumentNullException(nameof(x3dhProtocol));
-            _doubleRatchetProtocol = doubleRatchetProtocol ?? throw new ArgumentNullException(nameof(doubleRatchetProtocol));
-            _identityKeyPair = identityKeyPair.ToString() != null ? identityKeyPair : throw new ArgumentNullException(nameof(identityKeyPair));
-
-            // Initialize persistence manager
-            _persistenceManager = new SessionPersistenceManager(cryptoProvider, sessionStoragePath);
-        }
 
         /// <summary>
         /// Creates a new session for secure messaging.
@@ -182,12 +174,38 @@ namespace LibEmiddle.Sessions
         /// Lists all available session IDs.
         /// </summary>
         /// <returns>An array of session IDs.</returns>
-        public async Task<string[]> ListSessionsAsync()
+        public async Task<string?[]> ListSessionsAsync()
         {
             ThrowIfDisposed();
 
             // Get from disk
             return await _persistenceManager.ListSessionsAsync();
+        }
+
+        /// <summary>
+        /// Creates a new direct messaging session with another user.
+        /// </summary>
+        /// <param name="recipientIdentityKey">The recipient's identity key.</param>
+        /// <param name="recipientUserId">Optional user ID for the recipient.</param>
+        /// <returns>A fully initialized chat session.</returns>
+        public async Task<IChatSession> CreateDirectMessageSessionAsync(
+            byte[] recipientIdentityKey,
+            string recipientUserId)
+        {
+            ThrowIfDisposed();
+
+            if (recipientUserId == null)
+                throw new ArgumentNullException(nameof(recipientUserId));
+            if (recipientIdentityKey == null)
+                throw new ArgumentNullException(nameof(recipientIdentityKey));
+
+            var options = new ChatSessionOptions
+            {
+                RemoteUserId = recipientUserId,
+                AutoActivate = true
+            };
+
+            return (IChatSession)await CreateSessionAsync(recipientIdentityKey, options);
         }
 
         /// <summary>
@@ -209,6 +227,8 @@ namespace LibEmiddle.Sessions
 
             try
             {
+                LoggingManager.LogInformation("SessionManager", $"Creating new chat session with recipient key {Convert.ToBase64String(recipientKey).Substring(0, 8)}");
+
                 // Get or generate recipient's key bundle
                 X3DHPublicBundle recipientBundle;
 
@@ -231,27 +251,116 @@ namespace LibEmiddle.Sessions
                     throw new ArgumentException("Invalid recipient key bundle", nameof(recipientKey));
                 }
 
-                // Initialize X3DH key exchange
-                var sessionResult = await _x3dhProtocol.InitiateSessionAsSenderAsync(
-                    recipientBundle,
-                    _identityKeyPair);
-
-                if (sessionResult == null || sessionResult.SharedKey == null)
-                {
-                    throw new CryptographicException("Failed to initialize X3DH session");
-                }
-
-                // Initialize Double Ratchet session
+                // Generate a unique session ID
                 string sessionId = $"chat-{Convert.ToBase64String(recipientKey).Substring(0, 8)}-{Guid.NewGuid():N}";
-                var drSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
-                    sessionResult.SharedKey,
-                    recipientBundle.SignedPreKey!,
+
+                // Use the protocol adapter to prepare a session with both X3DH and Double Ratchet
+                var (drSession, initialMessageData) = await _protocolAdapter.PrepareSenderSessionAsync(
+                    recipientBundle,
+                    _identityKeyPair,
                     sessionId);
 
                 // Create the chat session
                 var chatSession = new ChatSession(
                     drSession,
                     recipientBundle.IdentityKey!,
+                    _identityKeyPair.PublicKey!,
+                    _doubleRatchetProtocol)
+                {
+                    RotationStrategy = options.RotationStrategy
+                };
+
+                // Set the initial message data for handshake
+                chatSession.SetInitialMessageData(initialMessageData);
+
+                // Add metadata if provided
+                if (options.Metadata != null)
+                {
+                    foreach (var kvp in options.Metadata)
+                    {
+                        chatSession.Metadata[kvp.Key] = kvp.Value;
+                    }
+                }
+
+                // Add remote user ID if provided
+                if (!string.IsNullOrEmpty(options.RemoteUserId))
+                {
+                    chatSession.Metadata["RemoteUserId"] = options.RemoteUserId;
+                }
+
+                // Auto-activate if requested
+                if (options.AutoActivate)
+                {
+                    await chatSession.ActivateAsync();
+                }
+
+                // Cache the session
+                _activeSessions[chatSession.SessionId] = chatSession;
+
+                // Persist the session
+                await _persistenceManager.SaveChatSessionAsync(chatSession);
+
+                LoggingManager.LogInformation("SessionManager", $"Successfully created chat session {sessionId}");
+
+                return chatSession;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError("SessionManager", "Failed to create chat session", ex);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Processes an incoming X3DH key exchange message and creates a new chat session.
+        /// </summary>
+        /// <param name="mailboxMessage">The mailbox message containing X3DH data.</param>
+        /// <param name="recipientBundle">The local recipient's key bundle.</param>
+        /// <param name="options">Optional chat session options.</param>
+        /// <returns>The created chat session.</returns>
+        public async Task<IChatSession?> ProcessKeyExchangeMessageAsync(
+            MailboxMessage mailboxMessage,
+            X3DHKeyBundle recipientBundle,
+            ChatSessionOptions? options = null)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(mailboxMessage, nameof(mailboxMessage));
+            ArgumentNullException.ThrowIfNull(recipientBundle, nameof(recipientBundle));
+
+            // Use default options if none provided
+            options ??= new ChatSessionOptions
+            {
+                RotationStrategy = KeyRotationStrategy.Standard,
+                TrackMessageHistory = true,
+                MaxTrackedMessages = 100,
+                AutoActivate = true
+            };
+
+            try
+            {
+                LoggingManager.LogInformation("SessionManager", $"Processing key exchange message from {Convert.ToBase64String(mailboxMessage.SenderKey).Substring(0, 8)}");
+
+                // Extract the X3DH initial message data
+                InitialMessageData? initialMessageData = _protocolAdapter.ExtractInitialMessageData(mailboxMessage);
+                if (initialMessageData == null)
+                {
+                    LoggingManager.LogWarning("SessionManager", "Failed to extract X3DH initial message data");
+                    return null;
+                }
+
+                // Generate a unique session ID
+                string sessionId = $"chat-{Convert.ToBase64String(mailboxMessage.SenderKey).Substring(0, 8)}-{Guid.NewGuid():N}";
+
+                // Use the protocol adapter to prepare a receiver session
+                var drSession = await _protocolAdapter.PrepareReceiverSessionAsync(
+                    initialMessageData,
+                    recipientBundle,
+                    sessionId);
+
+                // Create the chat session
+                var chatSession = new ChatSession(
+                    drSession,
+                    mailboxMessage.SenderKey,
                     _identityKeyPair.PublicKey!,
                     _doubleRatchetProtocol)
                 {
@@ -285,12 +394,14 @@ namespace LibEmiddle.Sessions
                 // Persist the session
                 await _persistenceManager.SaveChatSessionAsync(chatSession);
 
+                LoggingManager.LogInformation("SessionManager", $"Successfully created chat session {sessionId} from key exchange");
+
                 return chatSession;
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError(nameof(SessionManager), $"Failed to create chat session: {ex.Message}");
-                throw;
+                LoggingManager.LogError("SessionManager", "Failed to process key exchange message", ex);
+                return null;
             }
         }
 
@@ -352,7 +463,7 @@ namespace LibEmiddle.Sessions
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError(nameof(SessionManager), $"Failed to create group session: {ex.Message}");
+                LoggingManager.LogError("SessionManager", "Failed to create group session", ex);
                 throw;
             }
         }
@@ -370,7 +481,7 @@ namespace LibEmiddle.Sessions
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError(nameof(SessionManager), $"Failed to load chat session {sessionId}: {ex.Message}");
+                LoggingManager.LogError("SessionManager", $"Failed to load chat session {sessionId}", ex);
                 return null;
             }
         }
@@ -403,8 +514,29 @@ namespace LibEmiddle.Sessions
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError(nameof(SessionManager), $"Failed to load group session {sessionId}: {ex.Message}");
+                LoggingManager.LogError("SessionManager", $"Failed to load group session {sessionId}", ex);
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// Creates and validates a local X3DH key bundle for receiving messages.
+        /// </summary>
+        /// <param name="numOneTimeKeys">Number of one-time prekeys to generate.</param>
+        /// <returns>A complete X3DH key bundle.</returns>
+        public async Task<X3DHKeyBundle> CreateLocalKeyBundleAsync(int numOneTimeKeys = 10)
+        {
+            ThrowIfDisposed();
+
+            try
+            {
+                LoggingManager.LogInformation("SessionManager", $"Creating local X3DH key bundle with {numOneTimeKeys} one-time keys");
+                return await _x3dhProtocol.CreateKeyBundleAsync(_identityKeyPair, numOneTimeKeys);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError("SessionManager", "Failed to create local key bundle", ex);
+                throw;
             }
         }
 
