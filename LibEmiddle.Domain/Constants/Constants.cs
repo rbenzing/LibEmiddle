@@ -79,6 +79,11 @@ namespace LibEmiddle.Domain
         public const int MAX_SKIPPED_MESSAGES = 2000;
 
         /// <summary>
+        /// Maximum age of a revocation message in milliseconds (30 days in milliseconds)
+        /// </summary>
+        public const long MAX_REVOCATION_AGE_MS = 2592000000;
+
+        /// <summary>
         /// Default number of one-time prekeys to generate for key bundles
         /// </summary>
         public const int DEFAULT_ONE_TIME_PREKEY_COUNT = 5;

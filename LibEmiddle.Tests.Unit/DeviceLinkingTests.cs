@@ -6,7 +6,6 @@ using System.Security.Cryptography;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.MultiDevice;
-using LibEmiddle.Abstractions;
 using LibEmiddle.Crypto;
 using System.Diagnostics;
 
@@ -16,11 +15,13 @@ namespace LibEmiddle.Tests.Unit
     public class DeviceLinkingTests
     {
         private CryptoProvider _cryptoProvider;
+        private DeviceLinkingService _deviceLinkingSvc;
 
         [TestInitialize]
         public void Setup()
         {
             _cryptoProvider = new CryptoProvider();
+            _deviceLinkingSvc = new DeviceLinkingService(_cryptoProvider);
         }
 
         [TestMethod]
@@ -40,7 +41,7 @@ namespace LibEmiddle.Tests.Unit
         // Scenario 3: Ed25519 public key with X25519 private key (should fail)
         ( () => {
             var ed25519Pair = Sodium.GenerateEd25519KeyPair();
-            var x25519Private = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(ed25519Pair.PrivateKey);
+            var x25519Private = _cryptoProvider.ConvertEd25519PrivateKeyToX25519(ed25519Pair.PrivateKey);
             return new KeyPair(ed25519Pair.PublicKey, x25519Private);
         }, false, "Ed25519 to X25519 Hybrid Key Pair" )
             };
@@ -51,7 +52,7 @@ namespace LibEmiddle.Tests.Unit
                 if (shouldSucceed)
                 {
                     // Expect successful creation.
-                    var encryptedMessage = DeviceLinkingService.CreateDeviceLinkMessage(
+                    var encryptedMessage = _deviceLinkingSvc.CreateDeviceLinkMessage(
                         mainDeviceKeyPair,
                         newDeviceKeyPair.PublicKey
                     );
@@ -65,7 +66,7 @@ namespace LibEmiddle.Tests.Unit
                     Exception caughtException = null;
                     try
                     {
-                        DeviceLinkingService.CreateDeviceLinkMessage(mainDeviceKeyPair, newDeviceKeyPair.PublicKey);
+                        _deviceLinkingSvc.CreateDeviceLinkMessage(mainDeviceKeyPair, newDeviceKeyPair.PublicKey);
                     }
                     catch (Exception ex)
                     {
@@ -103,7 +104,7 @@ namespace LibEmiddle.Tests.Unit
                 Trace.TraceInformation($"Converted public to X25519 - {Convert.ToBase64String(x25519NewDeviceKey)}");
 
                 // Derive the shared key using the Ed25519 public key.
-                byte[] keyFromEd25519 = DeviceLinkingService.DeriveSharedKeyForNewDevice(existingSharedKey, newDeviceKeyPair.PublicKey);
+                byte[] keyFromEd25519 = _deviceLinkingSvc.DeriveSharedKeyForNewDevice(existingSharedKey, newDeviceKeyPair.PublicKey);
                 Trace.TraceInformation($"Derived Ed25519 public shared key - {Convert.ToBase64String(keyFromEd25519)}");
 
                 // Verify the derived key has the expected length
@@ -113,7 +114,7 @@ namespace LibEmiddle.Tests.Unit
                 // Since the method should internally convert Ed25519 to X25519, passing an already
                 // converted key should produce a different result. We're not testing equivalence here,
                 // but rather that the keys are properly derived in both cases.
-                byte[] keyFromX25519 = DeviceLinkingService.DeriveSharedKeyForNewDevice(existingSharedKey, x25519NewDeviceKey);
+                byte[] keyFromX25519 = _deviceLinkingSvc.DeriveSharedKeyForNewDevice(existingSharedKey, x25519NewDeviceKey.ToArray());
                 Trace.TraceInformation($"Derived X25519 public shared key - {Convert.ToBase64String(keyFromX25519)}");
 
                 // Both derived keys should have the correct length
@@ -150,7 +151,7 @@ namespace LibEmiddle.Tests.Unit
             var x25519Private = Sodium.ConvertEd25519PrivateKeyToX25519(ed25519Pair.PrivateKey);
             var x25519Public = SecureMemory.CreateSecureBuffer(Constants.X25519_KEY_SIZE);
             Sodium.ComputePublicKey(x25519Public, x25519Private);
-            return new KeyPair(x25519Public, x25519Private);
+            return new KeyPair(x25519Public.ToArray(), x25519Private.ToArray());
         }, "Ed25519 to X25519 Conversion"),
 
         // Scenario 3: Minimal Entropy Keys – valid key pair derived from an all-zero seed.
@@ -184,7 +185,7 @@ namespace LibEmiddle.Tests.Unit
                     // For these scenarios, we expect an exception when creating the device link message.
                     Assert.ThrowsException<ArgumentException>(() =>
                     {
-                        DeviceLinkingService.CreateDeviceLinkMessage(mainDeviceKeyPair, newDeviceKeyPair.PublicKey);
+                        _deviceLinkingSvc.CreateDeviceLinkMessage(mainDeviceKeyPair, newDeviceKeyPair.PublicKey);
                     }, $"Scenario {scenarioDescription} should throw an exception due to invalid main device key pair format.");
                 }
                 else
@@ -193,7 +194,7 @@ namespace LibEmiddle.Tests.Unit
                     try
                     {
                         // Create device link message.
-                        var encryptedMessage = DeviceLinkingService.CreateDeviceLinkMessage(
+                        var encryptedMessage = _deviceLinkingSvc.CreateDeviceLinkMessage(
                             mainDeviceKeyPair,
                             newDeviceKeyPair.PublicKey
                         );
@@ -201,10 +202,10 @@ namespace LibEmiddle.Tests.Unit
                         // Make sure to convert Ed25519 public key to X25519 for SenderDHKey before processing
                         // This simulates what would happen in the real system where SenderDHKey comes from a network message
                         var mainDeviceX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(mainDeviceKeyPair.PublicKey);
-                        encryptedMessage.SenderDHKey = mainDeviceX25519Public;
+                        encryptedMessage.SenderDHKey = mainDeviceX25519Public.ToArray();
 
                         // Process the message.
-                        var result = DeviceLinkingService.ProcessDeviceLinkMessage(
+                        var result = _deviceLinkingSvc.ProcessDeviceLinkMessage(
                             encryptedMessage,
                             newDeviceKeyPair,
                             mainDeviceKeyPair.PublicKey
@@ -237,7 +238,7 @@ namespace LibEmiddle.Tests.Unit
             var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create a valid device link message
-            var originalMessage = DeviceLinkingService.CreateDeviceLinkMessage(
+            var originalMessage = _deviceLinkingSvc.CreateDeviceLinkMessage(
                 mainDeviceKeyPair,
                 newDeviceKeyPair.PublicKey
             );
@@ -280,7 +281,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 var maliciousMessage = maliciousMessageFunc();
 
-                var result = DeviceLinkingService.ProcessDeviceLinkMessage(
+                var result = _deviceLinkingSvc.ProcessDeviceLinkMessage(
                     maliciousMessage,
                     newDeviceKeyPair,
                     mainDeviceKeyPair.PublicKey
@@ -329,7 +330,7 @@ namespace LibEmiddle.Tests.Unit
                 byte[] sharedKey = keyFunc();
                 var newDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
-                var derivedKey = DeviceLinkingService.DeriveSharedKeyForNewDevice(sharedKey, newDeviceKeyPair.PublicKey);
+                var derivedKey = _deviceLinkingSvc.DeriveSharedKeyForNewDevice(sharedKey, newDeviceKeyPair.PublicKey);
 
                 // Validate derived key properties
                 Assert.IsNotNull(derivedKey, "Derived key should not be null");

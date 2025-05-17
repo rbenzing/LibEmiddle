@@ -36,6 +36,20 @@ namespace LibEmiddle.Abstractions
         Task<bool> SendMessageAsync(string message);
 
         /// <summary>
+        /// Async Encrypt a message
+        /// </summary>
+        /// <param name="message"></param>
+        /// <returns></returns>
+        Task<EncryptedMessage?> EncryptAsync(string message);
+
+        /// <summary>
+        /// Async Decrypt a message
+        /// </summary>
+        /// <param name="encryptedMessage"></param>
+        /// <returns></returns>
+        Task<string?> DecryptAsync(EncryptedMessage encryptedMessage);
+
+        /// <summary>
         /// Processes an incoming encrypted message.
         /// </summary>
         /// <param name="encryptedMessage">The encrypted message to process.</param>

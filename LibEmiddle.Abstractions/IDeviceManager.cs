@@ -1,7 +1,7 @@
 ﻿using LibEmiddle.Domain;
 using System.Security;
 
-namespace LibEmiddle.MultiDevice
+namespace LibEmiddle.Abstractions
 {
     /// <summary>
     /// Interface for managing multiple devices in an end-to-end encrypted system.

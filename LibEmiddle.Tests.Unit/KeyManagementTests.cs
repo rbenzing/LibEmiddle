@@ -1,10 +1,12 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.IO;
 using System.Security.Cryptography;
-using LibEmiddle.API;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.KeyManagement;
+using System;
+using Microsoft.VisualStudio.TestPlatform.ObjectModel.DataCollection;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -12,18 +14,20 @@ namespace LibEmiddle.Tests.Unit
     public class KeyManagementTests
     {
         private CryptoProvider _cryptoProvider;
+        private KeyManager _keyManager;
 
         [TestInitialize]
         public void Setup()
         {
             _cryptoProvider = new CryptoProvider();
+            _keyManager = new KeyManager(_cryptoProvider);
         }
 
         [TestMethod]
         public void GenerateSignatureKeyPair_ShouldReturnValidKeyPair()
         {
             // Act
-            KeyPair _identityKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+            KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Assert
             Assert.IsNotNull(_identityKeyPair.PublicKey);
@@ -36,7 +40,7 @@ namespace LibEmiddle.Tests.Unit
         public void GenerateKeyExchangeKeyPair_ShouldReturnValidKeyPair()
         {
             // Act
-            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Assert
             Assert.IsNotNull(_identityKeyPair.PublicKey);
@@ -46,44 +50,28 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void ExportImportKeyToBase64_ShouldReturnOriginalKey()
-        {
-            // Arrange
-            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
-
-            // Act
-            string base64Key = _cryptoProvider.ExportKeyToBase64(_identityKeyPair.PublicKey);
-            byte[] importedKey = _cryptoProvider.ImportKeyFromBase64(base64Key);
-
-            // Assert
-            CollectionAssert.AreEqual(_identityKeyPair.PublicKey, importedKey);
-        }
-
-        [TestMethod]
         public void StoreAndLoadKeyFromFile_WithoutPassword_ShouldReturnOriginalKey()
         {
             // Arrange
-            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
 
-            string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            string sessionId = new Guid().ToString();
 
             try
-            {
+            { 
                 // Act
-                LibEmiddleClient.StoreKeyToFile(publicKey, filePath);
-                byte[] loadedKey = LibEmiddleClient.LoadKeyFromFile(filePath);
+                bool success = _keyManager.StoreKeyAsync(sessionId, publicKey).GetAwaiter().GetResult();
+                byte[] loadedKey = _keyManager.RetrieveKeyAsync(sessionId).GetAwaiter().GetResult();
 
                 // Assert
+                Assert.IsTrue(success, "stored the key successfully");
                 CollectionAssert.AreEqual(publicKey, loadedKey);
             }
             finally
             {
                 // Cleanup
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
+                _keyManager.DeleteKeyAsync(sessionId).GetAwaiter().GetResult();
             }
         }
 
@@ -91,27 +79,26 @@ namespace LibEmiddle.Tests.Unit
         public void StoreAndLoadKeyFromFile_WithPassword_ShouldReturnOriginalKey()
         {
             // Arrange
-            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "TestP@ssw0rd";
+            string sessionId = new Guid().ToString();
 
             try
             {
                 // Act
-                LibEmiddleClient.StoreKeyToFile(publicKey, filePath, password);
-                byte[] loadedKey = LibEmiddleClient.LoadKeyFromFile(filePath, password);
+                bool success = _keyManager.StoreKeyAsync(sessionId, publicKey, password).GetAwaiter().GetResult();
+                byte[] loadedKey = _keyManager.RetrieveKeyAsync(sessionId, password).GetAwaiter().GetResult();
 
                 // Assert
+                Assert.IsTrue(success, "stored the key successfully");
                 CollectionAssert.AreEqual(publicKey, loadedKey);
             }
             finally
             {
                 // Cleanup
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
+                _keyManager.DeleteKeyAsync(sessionId, password).GetAwaiter().GetResult();
             }
         }
 
@@ -120,7 +107,7 @@ namespace LibEmiddle.Tests.Unit
         public void LoadKeyFromFile_WithNonExistentFile_ShouldThrowException()
         {
             // Act - should throw FileNotFoundException
-            LibEmiddleClient.LoadKeyFromFile("non-existent-file.key");
+            _keyManager.RetrieveKeyAsync("non-existent-file").GetAwaiter().GetResult();
         }
 
         [TestMethod]
@@ -128,27 +115,25 @@ namespace LibEmiddle.Tests.Unit
         public void LoadKeyFromFile_WithWrongPassword_ShouldThrowException()
         {
             // Arrange
-            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "CorrectP@ssw0rd";
             string wrongPassword = "WrongP@ssw0rd";
+            string sessionId = new Guid().ToString();
 
             try
             {
                 // Act
-                LibEmiddleClient.StoreKeyToFile(publicKey, filePath, password);
+                _keyManager.StoreKeyAsync(sessionId, publicKey, password).GetAwaiter().GetResult();
 
                 // Should throw CryptographicException
-                LibEmiddleClient.LoadKeyFromFile(filePath, wrongPassword);
+                _keyManager.RetrieveKeyAsync(sessionId, wrongPassword).GetAwaiter().GetResult();
             }
             finally
             {
                 // Cleanup
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
+                _keyManager.DeleteKeyAsync(sessionId, password).GetAwaiter().GetResult();
             }
         }
 
@@ -156,7 +141,7 @@ namespace LibEmiddle.Tests.Unit
         public void ValidateX25519PublicKey_WithValidKey_ShouldReturnTrue()
         {
             // Arrange
-            KeyPair _identityKeyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
 
             // Act
@@ -202,7 +187,7 @@ namespace LibEmiddle.Tests.Unit
             KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
-            byte[] x25519PrivateKey = _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(_identityKeyPair.PrivateKey);
+            byte[] x25519PrivateKey = _cryptoProvider.ConvertEd25519PrivateKeyToX25519(_identityKeyPair.PrivateKey);
 
             // Assert
             Assert.IsNotNull(x25519PrivateKey);

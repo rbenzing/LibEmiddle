@@ -421,12 +421,11 @@ namespace LibEmiddle.API
         /// <summary>
         /// Creates a device link message
         /// </summary>
-        /// <param name="mainDeviceKeyPair">Tuple of public and private keys</param>
         /// <param name="newDevicePublicKey">New device's public key</param>
         /// <returns>Encrypted link message</returns>
-        public static EncryptedMessage CreateDeviceLinkMessage(KeyPair mainDeviceKeyPair, byte[] newDevicePublicKey)
+        public EncryptedMessage CreateDeviceLinkMessage(byte[] newDevicePublicKey)
         {
-            return DeviceLinkingService.CreateDeviceLinkMessage(mainDeviceKeyPair, newDevicePublicKey);
+            return _deviceManager.CreateDeviceLinkMessage(newDevicePublicKey);
         }
 
         /// <summary>
@@ -450,18 +449,6 @@ namespace LibEmiddle.API
             return _deviceManager.IsDeviceLinked(devicePublicKey);
         }
 
-        /// <summary>
-        /// Processes a device revocation message
-        /// </summary>
-        /// <param name="revocationMessage">The revocation message</param>
-        /// <param name="trustedPublicKey">Trusted public key for verification</param>
-        /// <returns>True if the message was valid and processed</returns>
-        public bool ProcessDeviceRevocationMessage(DeviceRevocationMessage revocationMessage, byte[] trustedPublicKey)
-        {
-            ThrowIfDisposed();
-            return _deviceManager.ProcessRevocationMessage(revocationMessage, trustedPublicKey);
-        }
-
         #endregion
 
         #region Session Resumption
@@ -478,8 +465,10 @@ namespace LibEmiddle.API
         /// <param name="revokedDeviceKey">Public key of the device to revoke</param>
         /// <param name="authorityKeyPair">Key pair with authority to revoke devices</param>
         /// <returns>A signed revocation message that can be distributed to other devices</returns>
-        public static DeviceRevocationMessage CreateDeviceRevocationMessage(byte[] revokedDeviceKey, KeyPair authorityKeyPair)
+        public DeviceRevocationMessage CreateDeviceRevocationMessage(byte[] revokedDeviceKey, KeyPair authorityKeyPair)
         {
+            ThrowIfDisposed();
+
             long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             // Combine device key and timestamp for signing
@@ -495,32 +484,29 @@ namespace LibEmiddle.API
             // Create and return the revocation message
             return new DeviceRevocationMessage
             {
-                RevokedDeviceKey = revokedDeviceKey,
-                RevocationTimestamp = timestamp,
+                UserIdentityPublicKey = authorityKeyPair.PublicKey,
+                RevokedDevicePublicKey = revokedDeviceKey,
+                Timestamp = timestamp,
                 Signature = signature
             };
-        }
-
-        /// <summary>
-        /// Validates a device revocation message.
-        /// </summary>
-        /// <param name="revocationMessage">The revocation message to validate</param>
-        /// <param name="trustedPublicKey">The trusted public key for verification</param>
-        /// <returns>True if the message is valid and properly signed</returns>
-        public static bool ValidateDeviceRevocationMessage(DeviceRevocationMessage revocationMessage, byte[] trustedPublicKey)
-        {
-            return revocationMessage.Validate(trustedPublicKey);
         }
 
         /// <summary>
         /// Revokes a linked device and creates a revocation message
         /// </summary>
         /// <param name="devicePublicKey">Public key of the device to revoke</param>
+        /// <param name="ownerKeyPair">The KeyPair of the device holder</param>
         /// <returns>A revocation message that should be distributed to other devices</returns>
-        public DeviceRevocationMessage RevokeLinkedDevice(byte[] devicePublicKey)
+        public DeviceRevocationMessage? RevokeLinkedDevice(byte[] devicePublicKey, KeyPair ownerKeyPair)
         {
             ThrowIfDisposed();
-            return _deviceManager.RevokeLinkedDevice(devicePublicKey);
+
+            if (_deviceManager.RemoveLinkedDevice(devicePublicKey))
+            {
+                return CreateDeviceRevocationMessage(devicePublicKey, ownerKeyPair);
+            }
+
+            return null;
         }
 
         #endregion

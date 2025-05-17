@@ -66,7 +66,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] signature = _cryptoProvider.Sign(largeMessage, keyPair.PrivateKey);
 
             // Assert
-            bool verified = _cryptoProvider.Verify(largeMessage, signature, keyPair.PublicKey);
+            bool verified = _cryptoProvider.VerifySignature(largeMessage, signature, keyPair.PublicKey);
             Assert.IsTrue(verified, "Large message signature should verify correctly");
         }
 
@@ -94,7 +94,7 @@ namespace LibEmiddle.Tests.Unit
             signature[0] ^= 0xFF;
 
             // Act
-            bool verified = _cryptoProvider.Verify(message, signature, keyPair.PublicKey);
+            bool verified = _cryptoProvider.VerifySignature(message, signature, keyPair.PublicKey);
 
             // Assert
             Assert.IsFalse(verified, "Tampered signature should not verify");

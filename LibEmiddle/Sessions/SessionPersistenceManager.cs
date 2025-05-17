@@ -7,7 +7,7 @@ using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Chat;
 using LibEmiddle.Messaging.Group;
 using LibEmiddle.Domain.DTO;
-using LibEmiddle.KeyExchange;
+using LibEmiddle.KeyManagement;
 
 namespace LibEmiddle.Sessions
 {

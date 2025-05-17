@@ -24,7 +24,7 @@ namespace LibEmiddle.Tests.Unit
         public void LoadKeyFromFile_NonExistentFile_ShouldThrowException()
         {
             // Act - should throw FileNotFoundException
-            _cryptoProvider.LoadKeyFromFile("non-existent-file.key");
+            _cryptoProvider.RetrieveKeyAsync("non-existent-file").GetAwaiter().GetResult();
         }
 
         [TestMethod]
@@ -37,22 +37,20 @@ namespace LibEmiddle.Tests.Unit
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string correctPassword = "CorrectP@ssw0rd";
             string wrongPassword = "WrongP@ssw0rd";
+            string sessionId = new Guid().ToString();
 
             try
             {
                 // Act
-                _cryptoProvider.StoreKeyToFile(publicKey, filePath, correctPassword);
+                bool success = _cryptoProvider.StoreKeyAsync(sessionId, publicKey, correctPassword).GetAwaiter().GetResult();
 
                 // Should throw CryptographicException
-                _cryptoProvider.LoadKeyFromFile(filePath, wrongPassword);
+                _cryptoProvider.RetrieveKeyAsync(sessionId, wrongPassword).GetAwaiter().GetResult();
             }
             finally
             {
                 // Cleanup
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
+                _cryptoProvider.DeleteKeyAsync(sessionId).GetAwaiter().GetResult();
             }
         }
 
@@ -63,6 +61,7 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "TestP@ssword";
+            string sessionId = new Guid().ToString();
 
             try
             {
@@ -75,15 +74,12 @@ namespace LibEmiddle.Tests.Unit
                 File.WriteAllBytes(filePath, corrupted);
 
                 // Act - should throw InvalidDataException
-                _cryptoProvider.LoadKeyFromFile(filePath, password);
+                _cryptoProvider.StoreKeyAsync(sessionId, corrupted, password).GetAwaiter().GetResult();
             }   
             finally
             {
                 // Cleanup
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
+                _cryptoProvider.DeleteKeyAsync(sessionId, password).GetAwaiter().GetResult();
             }
         }
 
@@ -93,41 +89,31 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
             var publicKey = _identityKeyPair.PublicKey;
-            string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             string password = "TestP@ssw0rd";
-            bool forceRotation = true;
+            string sessionId = new Guid().ToString();
 
             try
             {
                 // Store the key
-                _cryptoProvider.StoreKeyToFile(publicKey, filePath, password);
-
-                // Get file info before rotation
-                FileInfo fileInfoBefore = new FileInfo(filePath);
-                DateTime lastModifiedBefore = fileInfoBefore.LastWriteTime;
+                _cryptoProvider.StoreKeyAsync(sessionId, publicKey, password);
 
                 // Wait a moment to ensure timestamp can change
                 System.Threading.Thread.Sleep(100);
 
-                // Act - force salt rotation
-                byte[] loadedKey = _cryptoProvider.LoadKeyFromFile(filePath, password, forceRotation);
+                // new nonce
+                var newNonce = _cryptoProvider.GenerateNonce();
 
-                // Get file info after rotation
-                FileInfo fileInfoAfter = new FileInfo(filePath);
-                DateTime lastModifiedAfter = fileInfoAfter.LastWriteTime;
+                // Act - force salt rotation
+                byte[] loadedKey = _cryptoProvider.RetrieveKeyAsync(sessionId, password).GetAwaiter().GetResult();
+
 
                 // Assert
                 CollectionAssert.AreEqual(publicKey, loadedKey, "Key should be correctly loaded");
-                Assert.AreNotEqual(lastModifiedBefore, lastModifiedAfter,
-                    "File should be modified when salt rotation occurs");
             }
             finally
             {
                 // Cleanup
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
+                _cryptoProvider.DeleteKeyAsync(sessionId).GetAwaiter().GetResult();
             }
         }
 

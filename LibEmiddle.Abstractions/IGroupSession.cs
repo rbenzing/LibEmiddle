@@ -10,5 +10,7 @@ namespace LibEmiddle.Abstractions
         Task<EncryptedGroupMessage?> EncryptMessageAsync(string message);
         Task<string?> DecryptMessageAsync(EncryptedGroupMessage message);
         Task<bool> RotateKeyAsync();
+        SenderKeyDistributionMessage CreateDistributionMessage();
+        bool ProcessDistributionMessage(SenderKeyDistributionMessage distribution);
     }
 }

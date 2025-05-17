@@ -1,6 +1,6 @@
 ﻿using LibEmiddle.Domain.Enums;
 
-namespace LibEmiddle.Messaging.Group
+namespace LibEmiddle.Domain
 {
     /// <summary>
     /// Configuration options for a group session.

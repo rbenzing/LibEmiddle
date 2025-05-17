@@ -43,12 +43,7 @@ namespace LibEmiddle.Sessions
         private readonly SemaphoreSlim _operationLock = new(1, 1);
         private bool _disposed;
 
-        /// <summary>
-        /// Creates a new session for secure messaging.
-        /// </summary>
-        /// <param name="recipientKey">The recipient's public key.</param>
-        /// <param name="options">Optional configuration options for the session.</param>
-        /// <returns>The created session.</returns>
+        /// <inheritdoc/>
         public async Task<ISession> CreateSessionAsync(byte[] recipientKey, object? options = null)
         {
             ThrowIfDisposed();
@@ -73,11 +68,7 @@ namespace LibEmiddle.Sessions
             }
         }
 
-        /// <summary>
-        /// Gets an existing session by ID.
-        /// </summary>
-        /// <param name="sessionId">The session ID.</param>
-        /// <returns>The session instance.</returns>
+        /// <inheritdoc/>
         public async Task<ISession> GetSessionAsync(string sessionId)
         {
             ThrowIfDisposed();
@@ -127,11 +118,7 @@ namespace LibEmiddle.Sessions
             }
         }
 
-        /// <summary>
-        /// Saves a session to persistent storage.
-        /// </summary>
-        /// <param name="session">The session to save.</param>
-        /// <returns>True if the session was saved successfully.</returns>
+        /// <inheritdoc/>
         public async Task<bool> SaveSessionAsync(ISession session)
         {
             ThrowIfDisposed();
@@ -153,11 +140,7 @@ namespace LibEmiddle.Sessions
             return false;
         }
 
-        /// <summary>
-        /// Deletes a session from persistent storage.
-        /// </summary>
-        /// <param name="sessionId">The ID of the session to delete.</param>
-        /// <returns>True if the session was deleted successfully.</returns>
+        /// <inheritdoc/>
         public async Task<bool> DeleteSessionAsync(string sessionId)
         {
             ThrowIfDisposed();
@@ -170,10 +153,7 @@ namespace LibEmiddle.Sessions
             return await _persistenceManager.DeleteSessionAsync(sessionId);
         }
 
-        /// <summary>
-        /// Lists all available session IDs.
-        /// </summary>
-        /// <returns>An array of session IDs.</returns>
+        /// <inheritdoc/>
         public async Task<string?[]> ListSessionsAsync()
         {
             ThrowIfDisposed();
@@ -182,12 +162,7 @@ namespace LibEmiddle.Sessions
             return await _persistenceManager.ListSessionsAsync();
         }
 
-        /// <summary>
-        /// Creates a new direct messaging session with another user.
-        /// </summary>
-        /// <param name="recipientIdentityKey">The recipient's identity key.</param>
-        /// <param name="recipientUserId">Optional user ID for the recipient.</param>
-        /// <returns>A fully initialized chat session.</returns>
+        /// <inheritdoc/>
         public async Task<IChatSession> CreateDirectMessageSessionAsync(
             byte[] recipientIdentityKey,
             string recipientUserId)
@@ -311,13 +286,7 @@ namespace LibEmiddle.Sessions
             }
         }
 
-        /// <summary>
-        /// Processes an incoming X3DH key exchange message and creates a new chat session.
-        /// </summary>
-        /// <param name="mailboxMessage">The mailbox message containing X3DH data.</param>
-        /// <param name="recipientBundle">The local recipient's key bundle.</param>
-        /// <param name="options">Optional chat session options.</param>
-        /// <returns>The created chat session.</returns>
+        /// <inheritdoc/>
         public async Task<IChatSession?> ProcessKeyExchangeMessageAsync(
             MailboxMessage mailboxMessage,
             X3DHKeyBundle recipientBundle,

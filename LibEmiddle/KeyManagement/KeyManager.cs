@@ -4,7 +4,7 @@ using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
 
-namespace LibEmiddle.KeyExchange
+namespace LibEmiddle.KeyManagement
 {
     /// <summary>
     /// Implements the IKeyManager interface, providing management of cryptographic keys
@@ -14,8 +14,8 @@ namespace LibEmiddle.KeyExchange
     {
         private readonly ICryptoProvider _cryptoProvider;
         private readonly KeyStorage _keyStorage;
-        private readonly ConcurrentDictionary<string, byte[]> _keyCache = new ConcurrentDictionary<string, byte[]>();
-        private readonly TimeSpan _cacheExpiration = TimeSpan.FromMinutes(10);
+        private readonly ConcurrentDictionary<string, byte[]> _keyCache = new();
+        //private readonly TimeSpan _cacheExpiration = TimeSpan.FromMinutes(10);
         private readonly Timer _cacheCleanupTimer;
         private bool _disposed;
 
@@ -32,37 +32,7 @@ namespace LibEmiddle.KeyExchange
             _cacheCleanupTimer = new Timer(CleanupCache, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
         }
 
-        /// <summary>
-        /// Generates a key pair for cryptographic operations.
-        /// </summary>
-        /// <param name="keyType">The type of key pair to generate.</param>
-        /// <returns>The generated key pair.</returns>
-        public async Task<KeyPair> GenerateKeyPairAsync(KeyType keyType)
-        {
-            try
-            {
-                KeyPair keyPair = await _cryptoProvider.GenerateKeyPairAsync(keyType);
-
-                // Log key generation (without revealing key material)
-                LoggingManager.LogInformation(nameof(KeyManager), $"Generated new {keyType} key pair");
-
-                return keyPair;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(KeyManager), $"Failed to generate {keyType} key pair: {ex.Message}");
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// Derives a key from input key material.
-        /// </summary>
-        /// <param name="inputKey">The input key material.</param>
-        /// <param name="salt">Optional salt for key derivation.</param>
-        /// <param name="info">Optional context info for key derivation.</param>
-        /// <param name="length">Desired output key length in bytes.</param>
-        /// <returns>The derived key.</returns>
+        /// <inheritdoc/>
         public async Task<byte[]> DeriveKeyAsync(byte[] inputKey, byte[]? salt = null, byte[]? info = null, int length = 32)
         {
             if (inputKey == null)
@@ -82,13 +52,7 @@ namespace LibEmiddle.KeyExchange
             }
         }
 
-        /// <summary>
-        /// Stores a key securely.
-        /// </summary>
-        /// <param name="keyId">The identifier for the key.</param>
-        /// <param name="key">The key to store.</param>
-        /// <param name="password">Optional password for additional protection.</param>
-        /// <returns>True if the key was stored successfully.</returns>
+        /// <inheritdoc/>
         public async Task<bool> StoreKeyAsync(string keyId, byte[] key, string? password = null)
         {
             if (string.IsNullOrEmpty(keyId))
@@ -116,12 +80,7 @@ namespace LibEmiddle.KeyExchange
             }
         }
 
-        /// <summary>
-        /// Retrieves a key from secure storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the key.</param>
-        /// <param name="password">Optional password if the key was protected with one.</param>
-        /// <returns>The retrieved key, or null if not found.</returns>
+        /// <inheritdoc/>
         public async Task<byte[]?> RetrieveKeyAsync(string keyId, string? password = null)
         {
             if (string.IsNullOrEmpty(keyId))
@@ -144,6 +103,9 @@ namespace LibEmiddle.KeyExchange
                     CacheKey(keyId, key);
                 }
 
+                if (key == null)
+                    throw new FileNotFoundException();
+
                 return key;
             }
             catch (Exception ex)
@@ -153,15 +115,18 @@ namespace LibEmiddle.KeyExchange
             }
         }
 
-        /// <summary>
-        /// Deletes a key from secure storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the key.</param>
-        /// <returns>True if the key was deleted successfully.</returns>
-        public async Task<bool> DeleteKeyAsync(string keyId)
+        /// <inheritdoc/>
+        public async Task<bool> DeleteKeyAsync(string keyId, string? password = null)
         {
             if (string.IsNullOrEmpty(keyId))
                 throw new ArgumentException("Key ID cannot be null or empty", nameof(keyId));
+
+            // Get the key first to authenticate
+            byte[]? success = RetrieveKeyAsync(keyId, password).GetAwaiter().GetResult();
+            if (success == null)
+            {
+                return false;
+            }
 
             try
             {
@@ -178,12 +143,7 @@ namespace LibEmiddle.KeyExchange
             }
         }
 
-        /// <summary>
-        /// Stores a serialized object in secure storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the object.</param>
-        /// <param name="jsonData">The serialized JSON data to store.</param>
-        /// <returns>True if the data was stored successfully.</returns>
+        /// <inheritdoc/>
         public async Task<bool> StoreJsonAsync(string keyId, string jsonData)
         {
             if (string.IsNullOrEmpty(keyId))
@@ -203,11 +163,7 @@ namespace LibEmiddle.KeyExchange
             }
         }
 
-        /// <summary>
-        /// Retrieves a serialized object from secure storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the object.</param>
-        /// <returns>The serialized JSON data, or null if not found.</returns>
+        /// <inheritdoc/>
         public async Task<string?> RetrieveJsonAsync(string keyId)
         {
             if (string.IsNullOrEmpty(keyId))
@@ -224,13 +180,7 @@ namespace LibEmiddle.KeyExchange
             }
         }
 
-        /// <summary>
-        /// Rotates a key, generating a new one and securely updating storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the key to rotate.</param>
-        /// <param name="keyType">The type of key to generate.</param>
-        /// <param name="password">Optional password for key protection.</param>
-        /// <returns>The new key pair.</returns>
+        /// <inheritdoc/>
         public async Task<KeyPair> RotateKeyPairAsync(string keyId, KeyType keyType, string? password = null)
         {
             if (string.IsNullOrEmpty(keyId))
@@ -239,7 +189,7 @@ namespace LibEmiddle.KeyExchange
             try
             {
                 // Generate a new key pair
-                KeyPair newKeyPair = await GenerateKeyPairAsync(keyType);
+                KeyPair newKeyPair = keyType == KeyType.Ed25519 ? Sodium.GenerateEd25519KeyPair() : Sodium.GenerateX25519KeyPair();
 
                 // Store the private key
                 bool success = await StoreKeyAsync($"{keyId}.private", newKeyPair.PrivateKey!, password);
@@ -277,12 +227,7 @@ namespace LibEmiddle.KeyExchange
             }
         }
 
-        /// <summary>
-        /// Gets the remaining time until a key should be rotated.
-        /// </summary>
-        /// <param name="keyId">The identifier for the key.</param>
-        /// <param name="rotationPeriod">The period after which keys should be rotated.</param>
-        /// <returns>The time remaining, or TimeSpan.Zero if rotation is needed.</returns>
+        /// <inheritdoc/>
         public async Task<TimeSpan> GetTimeUntilRotationAsync(string keyId, TimeSpan rotationPeriod)
         {
             if (string.IsNullOrEmpty(keyId))

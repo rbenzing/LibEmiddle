@@ -3,7 +3,7 @@ using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 
-namespace LibEmiddle.KeyExchange
+namespace LibEmiddle.KeyManagement
 {
     /// <summary>
     /// Provides secure storage and retrieval of cryptographic keys and sensitive data

@@ -10,13 +10,6 @@ namespace LibEmiddle.Abstractions
     public interface IKeyManager
     {
         /// <summary>
-        /// Generates a key pair for cryptographic operations.
-        /// </summary>
-        /// <param name="keyType">The type of key pair to generate.</param>
-        /// <returns>The generated key pair.</returns>
-        Task<KeyPair> GenerateKeyPairAsync(KeyType keyType);
-
-        /// <summary>
         /// Derives a key from input key material.
         /// </summary>
         /// <param name="inputKey">The input key material.</param>
@@ -47,8 +40,9 @@ namespace LibEmiddle.Abstractions
         /// Deletes a key from secure storage.
         /// </summary>
         /// <param name="keyId">The identifier for the key.</param>
+        /// <param name="password">Optional password if the key was protected with one.</param>
         /// <returns>True if the key was deleted successfully.</returns>
-        Task<bool> DeleteKeyAsync(string keyId);
+        Task<bool> DeleteKeyAsync(string keyId, string? password = null);
 
         /// <summary>
         /// Stores a serialized object in secure storage.

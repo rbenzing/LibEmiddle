@@ -9,6 +9,7 @@ namespace LibEmiddle.Messaging.Chat
 {
     /// <summary>
     /// Represents an end-to-end encrypted chat session with a remote party,
+    /// Represents an end-to-end encrypted chat session with a remote party,
     /// managing Double Ratchet state, message history, and session lifecycle.
     /// </summary>
     public class ChatSession : IChatSession, ISession, IDisposable

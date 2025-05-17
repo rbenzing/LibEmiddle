@@ -3,6 +3,7 @@ using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Abstractions;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace LibEmiddle.MultiDevice
 {
@@ -345,14 +346,151 @@ namespace LibEmiddle.MultiDevice
         }
 
         /// <summary>
-        /// Throws if this object has been disposed.
+        /// Creates a device revocation message.
         /// </summary>
-        private void ThrowIfDisposed()
+        /// <param name="userIdentityKeyPair">The user's identity key pair used to sign the revocation.</param>
+        /// <param name="deviceToRevokePublicKey">The public key of the device to revoke.</param>
+        /// <param name="reason">Optional reason for the revocation.</param>
+        /// <returns>A signed device revocation message.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if user identity key pair is null or incomplete.</exception>
+        /// <exception cref="ArgumentException">Thrown if device public key is invalid.</exception>
+        public DeviceRevocationMessage CreateDeviceRevocationMessage(
+            KeyPair userIdentityKeyPair,
+            byte[] deviceToRevokePublicKey,
+            string? reason = null)
         {
-            if (_disposed)
+            ArgumentNullException.ThrowIfNull(userIdentityKeyPair, nameof(userIdentityKeyPair));
+            ArgumentNullException.ThrowIfNull(userIdentityKeyPair.PublicKey, nameof(userIdentityKeyPair.PublicKey));
+            ArgumentNullException.ThrowIfNull(userIdentityKeyPair.PrivateKey, nameof(userIdentityKeyPair.PrivateKey));
+            ArgumentNullException.ThrowIfNull(deviceToRevokePublicKey, nameof(deviceToRevokePublicKey));
+
+            // Normalize device key to X25519 format if needed
+            byte[]? normalizedDeviceKey = null;
+            try
             {
-                throw new ObjectDisposedException(nameof(DeviceLinkingService));
+                // Validate and normalize the device key format
+                if (deviceToRevokePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
+                {
+                    normalizedDeviceKey = _cryptoProvider.ConvertEd25519PublicKeyToX25519(deviceToRevokePublicKey);
+                }
+                else if (deviceToRevokePublicKey.Length == Constants.X25519_KEY_SIZE)
+                {
+                    if (!_cryptoProvider.ValidateX25519PublicKey(deviceToRevokePublicKey))
+                    {
+                        throw new ArgumentException("Invalid X25519 public key.", nameof(deviceToRevokePublicKey));
+                    }
+                    normalizedDeviceKey = deviceToRevokePublicKey.ToArray();
+                }
+                else
+                {
+                    throw new ArgumentException($"Invalid device public key length: {deviceToRevokePublicKey.Length}. " +
+                        $"Expected {Constants.ED25519_PUBLIC_KEY_SIZE} or {Constants.X25519_KEY_SIZE} bytes.",
+                        nameof(deviceToRevokePublicKey));
+                }
+
+                // Create the revocation message
+                var revocationMessage = new DeviceRevocationMessage
+                {
+                    RevokedDevicePublicKey = normalizedDeviceKey,
+                    UserIdentityPublicKey = userIdentityKeyPair.PublicKey,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    Reason = reason,
+                    Version = ProtocolVersion.FULL_VERSION
+                };
+
+                // Create data to sign (revoked device key + user identity + timestamp)
+                byte[] dataToSign = GetDataToSign(revocationMessage);
+
+                // Sign with the user's identity private key
+                revocationMessage.Signature = _cryptoProvider.Sign(dataToSign, userIdentityKeyPair.PrivateKey);
+
+                return revocationMessage;
             }
+            finally
+            {
+                // We don't need to clear normalizedDeviceKey here as it's stored in the returned object
+            }
+        }
+
+        /// <summary>
+        /// Verifies a device revocation message.
+        /// </summary>
+        /// <param name="revocationMessage">The revocation message to verify.</param>
+        /// <param name="trustedUserIdentityKey">The trusted identity key of the user who owns the devices.</param>
+        /// <returns>True if the revocation message is valid and properly signed.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if parameters are null.</exception>
+        public bool VerifyDeviceRevocationMessage(
+            DeviceRevocationMessage revocationMessage,
+            byte[] trustedUserIdentityKey)
+        {
+            ArgumentNullException.ThrowIfNull(revocationMessage, nameof(revocationMessage));
+            ArgumentNullException.ThrowIfNull(trustedUserIdentityKey, nameof(trustedUserIdentityKey));
+
+            if (revocationMessage.Signature == null)
+                throw new ArgumentNullException(nameof(revocationMessage.Signature));
+
+            // Basic validation of the revocation message
+            if (!revocationMessage.IsValid())
+            {
+                LoggingManager.LogWarning(nameof(DeviceLinkingService),
+                    "Revocation message failed basic validation");
+                return false;
+            }
+
+            // Verify that the message is from the expected user identity
+            if (!SecureMemory.SecureCompare(revocationMessage.UserIdentityPublicKey, trustedUserIdentityKey))
+            {
+                LoggingManager.LogWarning(nameof(DeviceLinkingService),
+                    "Revocation message has unexpected user identity key");
+                return false;
+            }
+
+            // Check timestamp to prevent replay attacks
+            long currentTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            long messageAge = currentTimestamp - revocationMessage.Timestamp;
+
+            // Message too old or from the future (with some tolerance for clock skew)
+            if (messageAge < -AllowedTimestampSkewMilliseconds || messageAge > Constants.MAX_REVOCATION_AGE_MS)
+            {
+                LoggingManager.LogWarning(nameof(DeviceLinkingService),
+                    $"Revocation message has invalid timestamp. Age: {messageAge}ms");
+                return false;
+            }
+
+            // Get the data that was signed
+            byte[] dataToSign = GetDataToSign(revocationMessage);
+
+            // Verify the signature
+            return _cryptoProvider.VerifySignature(dataToSign, revocationMessage.Signature, trustedUserIdentityKey);
+        }
+
+        /// <summary>
+        /// Constructs the data to be signed for a device revocation message.
+        /// </summary>
+        /// <param name="revocationMessage">The revocation message.</param>
+        /// <returns>The byte array representing the data to sign.</returns>
+        private byte[] GetDataToSign(DeviceRevocationMessage revocationMessage)
+        {
+            if (revocationMessage.RevokedDevicePublicKey == null)
+                throw new ArgumentNullException(nameof(revocationMessage.RevokedDevicePublicKey));
+            if (revocationMessage.UserIdentityPublicKey == null)
+                throw new ArgumentNullException(nameof(revocationMessage.UserIdentityPublicKey));
+
+            // Combine revoked device key + user identity + timestamp for signing
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms);
+
+            writer.Write(revocationMessage.RevokedDevicePublicKey);
+            writer.Write(revocationMessage.UserIdentityPublicKey);
+            writer.Write(revocationMessage.Timestamp);
+            writer.Write(Encoding.UTF8.GetBytes(revocationMessage.Id));
+
+            if (!string.IsNullOrEmpty(revocationMessage.Reason))
+            {
+                writer.Write(Encoding.UTF8.GetBytes(revocationMessage.Reason));
+            }
+
+            return ms.ToArray();
         }
 
         /// <summary>

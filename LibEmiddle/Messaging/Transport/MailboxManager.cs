@@ -287,7 +287,22 @@ namespace LibEmiddle.Messaging.Transport
         }
 
         /// <summary>
-        /// Deletes a message.
+        /// Async Sends a message.
+        /// </summary>
+        /// <param name="recipientKey"></param>
+        /// <param name="message"></param>
+        /// <param name="session"></param>
+        /// <param name="messageType"></param>
+        /// <param name="timeToLive"></param>
+        /// <returns></returns>
+        public async Task<string> SendMessageAsync(byte[] recipientKey, string message, DoubleRatchetSession session, MessageType messageType = MessageType.Chat, long timeToLive = 0)
+        {
+            return await Task.Run(() => SendMessage(recipientKey, message, session, messageType));
+        }
+
+
+        /// <summary>
+        /// Async Deletes a message.
         /// </summary>
         /// <param name="messageId">The message ID</param>
         /// <returns>True if the message was deleted</returns>

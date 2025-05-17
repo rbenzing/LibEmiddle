@@ -2,7 +2,7 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using LibEmiddle.Core;
-using LibEmiddle.KeyExchange;
+using LibEmiddle.KeyManagement;
 using LibEmiddle.Sessions;
 using LibEmiddle.Domain;
 using LibEmiddle.Protocol;

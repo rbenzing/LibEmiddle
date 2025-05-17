@@ -1,6 +1,6 @@
 ﻿using LibEmiddle.Domain.Enums;
 
-namespace LibEmiddle.Messaging.Chat
+namespace LibEmiddle.Domain
 {
     /// <summary>
     /// Configuration options for a chat session.

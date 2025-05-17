@@ -6,7 +6,6 @@ using System.Diagnostics;
 using System.Reflection;
 using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Group;
-using LibEmiddle.Abstractions;
 using LibEmiddle.Crypto;
 using System.Threading.Tasks;
 using LibEmiddle.Core;

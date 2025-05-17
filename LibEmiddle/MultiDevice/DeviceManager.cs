@@ -6,7 +6,6 @@ using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Abstractions;
-using LibEmiddle.Domain.Enums;
 
 namespace LibEmiddle.MultiDevice
 {
@@ -29,6 +28,10 @@ namespace LibEmiddle.MultiDevice
         // Device storage with thread-safe dictionaries
         private readonly ConcurrentDictionary<string, DeviceInfo> _linkedDevices =
             new ConcurrentDictionary<string, DeviceInfo>(StringComparer.Ordinal);
+
+        // Store revocation messages we've processed for replay protection
+        private readonly ConcurrentDictionary<string, DeviceRevocationMessage> _processedRevocations =
+            new ConcurrentDictionary<string, DeviceRevocationMessage>();
 
         // Store revoked devices with their revocation timestamp
         private readonly ConcurrentDictionary<string, long> _revokedDevices =
@@ -441,6 +444,226 @@ namespace LibEmiddle.MultiDevice
         }
 
         /// <summary>
+        /// Creates a revocation message for a device.
+        /// </summary>
+        /// <param name="devicePublicKey">Public key of the device to revoke</param>
+        /// <param name="reason">Optional reason for revocation</param>
+        /// <returns>A signed revocation message</returns>
+        /// <exception cref="ArgumentNullException">If devicePublicKey is null</exception>
+        /// <exception cref="InvalidOperationException">If attempting to revoke self</exception>
+        /// <exception cref="ArgumentException">If devicePublicKey has invalid format</exception>
+        public DeviceRevocationMessage CreateDeviceRevocationMessage(byte[] devicePublicKey, string? reason = null)
+        {
+            ThrowIfDisposed();
+
+            ArgumentNullException.ThrowIfNull(devicePublicKey, nameof(devicePublicKey));
+
+            // Prevent revoking our own device
+            if (devicePublicKey.Length == _deviceKeyPair.PublicKey.Length &&
+                SecureMemory.SecureCompare(devicePublicKey, _deviceKeyPair.PublicKey))
+            {
+                throw new InvalidOperationException("Cannot revoke your own device");
+            }
+
+            // Create the revocation message
+            try
+            {
+                var revocationMessage = _deviceLinkingService.CreateDeviceRevocationMessage(
+                    _deviceKeyPair, devicePublicKey, reason);
+
+                // Record the revocation locally
+                ProcessDeviceRevocationMessage(revocationMessage);
+
+                return revocationMessage;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(DeviceManager),
+                    $"Failed to create device revocation message: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Processes a device revocation message, marking the device as revoked if validated.
+        /// </summary>
+        /// <param name="revocationMessage">The revocation message to process</param>
+        /// <returns>True if the revocation message was valid and processed</returns>
+        /// <exception cref="ArgumentNullException">Thrown if revocationMessage is null</exception>
+        public bool ProcessDeviceRevocationMessage(DeviceRevocationMessage revocationMessage)
+        {
+            ThrowIfDisposed();
+
+            ArgumentNullException.ThrowIfNull(revocationMessage, nameof(revocationMessage));
+            ArgumentNullException.ThrowIfNull(revocationMessage.RevokedDevicePublicKey, nameof(revocationMessage.RevokedDevicePublicKey));
+
+            try
+            {
+                // Check if we've already processed this revocation message
+                if (_processedRevocations.ContainsKey(revocationMessage.Id))
+                {
+                    // Already processed, but return success
+                    return true;
+                }
+
+                // First verify the revocation with our identity key as the trusted key
+                if (!_deviceLinkingService.VerifyDeviceRevocationMessage(revocationMessage, _deviceKeyPair.PublicKey))
+                {
+                    LoggingManager.LogWarning(nameof(DeviceManager),
+                        "Revocation message signature verification failed");
+                    return false;
+                }
+
+                // Mark the device as revoked
+                string deviceId = Convert.ToBase64String(revocationMessage.RevokedDevicePublicKey);
+
+                // Remove the device from linked devices if present
+                if (_linkedDevices.TryRemove(deviceId, out var deviceInfo))
+                {
+                    LoggingManager.LogInformation(nameof(DeviceManager),
+                        $"Revoked linked device {deviceId}: {revocationMessage.Reason ?? "No reason provided"}");
+
+                    // Securely clear the device info
+                    if (deviceInfo.PublicKey != null)
+                    {
+                        SecureMemory.SecureClear(deviceInfo.PublicKey);
+                    }
+                }
+
+                // Store the revocation message to prevent replay attacks
+                _processedRevocations[revocationMessage.Id] = revocationMessage;
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(DeviceManager),
+                    $"Error processing device revocation message: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Checks if a device has been revoked.
+        /// </summary>
+        /// <param name="devicePublicKey">Public key of the device to check</param>
+        /// <returns>True if the device was revoked</returns>
+        public bool IsDeviceRevoked(byte[] devicePublicKey)
+        {
+            if (devicePublicKey == null)
+                return false;
+
+            byte[]? normalizedKey = NormalizeDeviceKey(devicePublicKey);
+            if (normalizedKey == null)
+                return false;
+
+            try
+            {
+                string deviceId = Convert.ToBase64String(normalizedKey);
+
+                // Check all processed revocations to see if this device was revoked
+                foreach (var revocation in _processedRevocations.Values)
+                {
+                    if (revocation.RevokedDevicePublicKey == null)
+                        continue;
+
+                    string revokedId = Convert.ToBase64String(revocation.RevokedDevicePublicKey);
+                    if (revokedId == deviceId)
+                        return true;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogWarning(nameof(DeviceManager),
+                    $"Error in IsDeviceRevoked: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                // Always securely clear sensitive key material
+                if (normalizedKey != null)
+                {
+                    SecureMemory.SecureClear(normalizedKey);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets a list of all revoked device public keys.
+        /// </summary>
+        /// <returns>A list of revoked device public keys (in normalized X25519 format)</returns>
+        public List<byte[]> GetRevokedDeviceKeys()
+        {
+            ThrowIfDisposed();
+
+            var revokedKeys = new List<byte[]>();
+
+            foreach (var revocation in _processedRevocations.Values)
+            {
+                if (revocation.RevokedDevicePublicKey != null)
+                {
+                    // Make a copy to prevent external modification
+                    revokedKeys.Add(revocation.RevokedDevicePublicKey.ToArray());
+                }
+            }
+
+            return revokedKeys;
+        }
+
+        /// <summary>
+        /// Exports the device revocations for persistence.
+        /// </summary>
+        /// <returns>Serialized representation of all processed revocations</returns>
+        public string ExportRevocations()
+        {
+            ThrowIfDisposed();
+
+            var revocations = _processedRevocations.Values.ToList();
+            return JsonSerialization.Serialize(revocations);
+        }
+
+        /// <summary>
+        /// Imports device revocations from a serialized representation.
+        /// </summary>
+        /// <param name="serializedRevocations">The serialized revocations</param>
+        /// <returns>The number of imported revocations</returns>
+        public int ImportRevocations(string serializedRevocations)
+        {
+            ThrowIfDisposed();
+
+            if (string.IsNullOrEmpty(serializedRevocations))
+                return 0;
+
+            try
+            {
+                var revocations = JsonSerialization.Deserialize<List<DeviceRevocationMessage>>(serializedRevocations);
+                if (revocations == null)
+                    return 0;
+
+                int importedCount = 0;
+
+                foreach (var revocation in revocations)
+                {
+                    // Verify and process each revocation
+                    if (revocation.IsValid() && ProcessDeviceRevocationMessage(revocation))
+                    {
+                        importedCount++;
+                    }
+                }
+
+                return importedCount;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(DeviceManager),
+                    $"Error importing revocations: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
         /// Creates a sync message for a specific device.
         /// </summary>
         private EncryptedMessage CreateSyncMessageForDevice(byte[] syncData, byte[] deviceKey, byte[] senderX25519Private)
@@ -682,6 +905,101 @@ namespace LibEmiddle.MultiDevice
         }
 
         /// <summary>
+        /// Exports linked devices to a serialized representation for persistence.
+        /// </summary>
+        /// <returns>A JSON serialized representation of linked devices.</returns>
+        public string ExportLinkedDevices()
+        {
+            ThrowIfDisposed();
+
+            var linkedDevicesList = new List<LinkedDeviceInfo>();
+
+            foreach (var kvp in _linkedDevices)
+            {
+                // Create a serializable representation
+                var deviceInfo = new LinkedDeviceInfo
+                {
+                    Id = kvp.Key,
+                    PublicKey = Convert.ToBase64String(kvp.Value.PublicKey),
+                    LinkedAt = kvp.Value.LinkedAt
+                };
+
+                linkedDevicesList.Add(deviceInfo);
+            }
+
+            return JsonSerialization.Serialize(linkedDevicesList);
+        }
+
+        /// <summary>
+        /// Imports linked devices from a serialized representation.
+        /// </summary>
+        /// <param name="serializedDevices">The serialized devices data.</param>
+        /// <returns>The number of imported devices.</returns>
+        public int ImportLinkedDevices(string serializedDevices)
+        {
+            ThrowIfDisposed();
+
+            if (string.IsNullOrEmpty(serializedDevices))
+                return 0;
+
+            try
+            {
+                var devicesList = JsonSerialization.Deserialize<List<LinkedDeviceInfo>>(serializedDevices);
+                if (devicesList == null)
+                    return 0;
+
+                int importedCount = 0;
+
+                foreach (var deviceInfo in devicesList)
+                {
+                    // Skip if already exists
+                    if (_linkedDevices.ContainsKey(deviceInfo.Id))
+                        continue;
+
+                    // Check if device has been revoked
+                    try
+                    {
+                        byte[] publicKey = Convert.FromBase64String(deviceInfo.PublicKey);
+
+                        if (IsDeviceRevoked(publicKey))
+                        {
+                            LoggingManager.LogWarning(nameof(DeviceManager),
+                                $"Skipping import of revoked device: {deviceInfo.Id}");
+                            continue;
+                        }
+
+                        // Recreate the device info
+                        var newDeviceInfo = new DeviceInfo
+                        {
+                            PublicKey = publicKey,
+                            LinkedAt = deviceInfo.LinkedAt
+                        };
+
+                        // Add to linked devices
+                        if (_linkedDevices.TryAdd(deviceInfo.Id, newDeviceInfo))
+                        {
+                            importedCount++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggingManager.LogWarning(nameof(DeviceManager),
+                            $"Error importing device {deviceInfo.Id}: {ex.Message}");
+                        // Continue with next device
+                    }
+                }
+
+                return importedCount;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(DeviceManager),
+                    $"Error importing linked devices: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
         /// Checks if two device keys represent the same device.
         /// </summary>
         private bool IsSameDeviceKey(byte[] key1, byte[] key2)
@@ -750,41 +1068,6 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
-        /// <summary>
-        /// Checks if a device has been revoked.
-        /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to check</param>
-        /// <returns>True if the device was revoked</returns>
-        public bool IsDeviceRevoked(byte[] devicePublicKey)
-        {
-            if (devicePublicKey == null)
-                return false;
-
-            byte[]? normalizedKey = NormalizeDeviceKey(devicePublicKey);
-            if (normalizedKey == null)
-                return false;
-
-            try
-            {
-                string deviceId = Convert.ToBase64String(normalizedKey);
-                return _revokedDevices.ContainsKey(deviceId);
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogWarning(nameof(DeviceManager),
-                    $"Error in IsDeviceRevoked: {ex.Message}");
-                return false;
-            }
-            finally
-            {
-                // Always securely clear sensitive key material
-                if (normalizedKey != null)
-                {
-                    SecureMemory.SecureClear(normalizedKey);
-                }
-            }
-        }
-
         /// <summary> Cleans up resources. </summary>
         public void Dispose()
         {
@@ -799,7 +1082,20 @@ namespace LibEmiddle.MultiDevice
 
             if (disposing)
             {
+                // Dispose of managed resources
+                _stateLock.Dispose();
 
+                // Clear any sensitive data
+                foreach (var device in _linkedDevices.Values)
+                {
+                    if (device.PublicKey != null)
+                    {
+                        SecureMemory.SecureClear(device.PublicKey);
+                    }
+                }
+
+                // Clear revocations 
+                _processedRevocations.Clear();
             }
 
             _disposed = true;

@@ -18,8 +18,7 @@ LibEmiddle/
 │   │   ├── Messaging/
 │   │   │   ├── Chat/
 │   │   │   │   ├── ChatSession.cs
-│   │   │   │   ├── ChatSessionManager.cs
-│   │   │   │   └── ChatSessionOptions.cs
+│   │   │   │   └── ChatSessionManager.cs
 │   │   │   ├── Group/
 │   │   │   │   ├── GroupChatManager.cs
 │   │   │   │   ├── GroupKeyManager.cs
@@ -27,7 +26,6 @@ LibEmiddle/
 │   │   │   │   ├── GroupMessageCrypto.cs
 │   │   │   │   ├── GroupSecurityValidator.cs
 │   │   │   │   ├── GroupSession.cs
-│   │   │   │   ├── GroupSessionOptions.cs
 │   │   │   │   └── SenderKeyDistribution.cs
 │   │   │   └── Transport/
 │   │   │       ├── BaseMailboxTransport.cs
@@ -88,12 +86,14 @@ LibEmiddle/
 │   │   ├── Helpers/
 │   │   │   ├── Helpers.cs
 │   │   │   └── JsonSerialization.cs
+│   │   ├── ChatSessionOptions.cs
 │   │   ├── DeviceRevocationMessage.cs
 │   │   ├── DeviceSyncMessage.cs
 │   │   ├── DoubleRatchetSession.cs
 │   │   ├── EncyptedGroupMessage.cs
 │   │   ├── EncryptedMessage.cs
 │   │   ├── EncryptedSenderKeyDistribution.cs
+│   │   ├── GroupSessionOptions.cs
 │   │   ├── InitialMessageData.cs
 │   │   ├── KeyFileMetadata.cs
 │   │   ├── KeyPair.cs

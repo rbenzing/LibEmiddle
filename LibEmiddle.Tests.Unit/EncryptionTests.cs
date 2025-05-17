@@ -49,8 +49,8 @@ namespace LibEmiddle.Tests.Unit
             byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act
-            byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, key, nonce);
-            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce);
+            byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, key, nonce, null);
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce, null);
 
             // Assert
             CollectionAssert.AreEqual(plaintext, decrypted);
@@ -93,10 +93,10 @@ namespace LibEmiddle.Tests.Unit
             byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act
-            byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, correctKey, nonce);
+            byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, correctKey, nonce, null);
 
             // Should throw an exception
-            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, wrongKey, nonce);
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, wrongKey, nonce, null);
         }
 
         [TestMethod]
@@ -108,7 +108,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act & Assert - Should throw ArgumentNullException
-            _cryptoProvider.Encrypt(plaintext, null, nonce);
+            _cryptoProvider.Encrypt(plaintext, null, nonce, null);
         }
 
         [TestMethod]
@@ -206,8 +206,8 @@ namespace LibEmiddle.Tests.Unit
             try
             {
                 // Attempt to encrypt the invalid UTF-8
-                byte[] ciphertext = _cryptoProvider.Encrypt(invalidUtf8, key, nonce);
-                byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce);
+                byte[] ciphertext = _cryptoProvider.Encrypt(invalidUtf8, key, nonce, null);
+                byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce, null);
 
                 // Convert back to string should fail or result in replacement characters
                 string result = Encoding.UTF8.GetString(decrypted);
@@ -232,8 +232,8 @@ namespace LibEmiddle.Tests.Unit
             byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act
-            byte[] ciphertextWithTag = _cryptoProvider.Encrypt(plaintext, key, nonce);
-            byte[] decrypted = _cryptoProvider.Decrypt(ciphertextWithTag, key, nonce);
+            byte[] ciphertextWithTag = _cryptoProvider.Encrypt(plaintext, key, nonce, null);
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertextWithTag, key, nonce, null);
 
             // Assert
             Assert.IsTrue(ciphertextWithTag.Length > plaintext.Length,
@@ -252,14 +252,14 @@ namespace LibEmiddle.Tests.Unit
             byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Encrypt the message
-            byte[] ciphertextWithTag = _cryptoProvider.Encrypt(plaintext, key, nonce);
+            byte[] ciphertextWithTag = _cryptoProvider.Encrypt(plaintext, key, nonce, null);
 
             // Tamper with the authentication tag (last 16 bytes)
             int tagStart = ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE;
             ciphertextWithTag[tagStart] ^= 1; // Flip one bit in the tag
 
             // Act & Assert - Should throw CryptographicException
-            _cryptoProvider.Decrypt(ciphertextWithTag, key, nonce);
+            _cryptoProvider.Decrypt(ciphertextWithTag, key, nonce, null);
         }
 
         [TestMethod]
@@ -278,12 +278,12 @@ namespace LibEmiddle.Tests.Unit
             Stopwatch stopwatch = new Stopwatch();
 
             stopwatch.Start();
-            byte[] ciphertext = _cryptoProvider.Encrypt(largeData, key, nonce);
+            byte[] ciphertext = _cryptoProvider.Encrypt(largeData, key, nonce, null);
             stopwatch.Stop();
             long encryptTime = stopwatch.ElapsedMilliseconds;
 
             stopwatch.Restart();
-            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce);
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce, null);
             stopwatch.Stop();
             long decryptTime = stopwatch.ElapsedMilliseconds;
 
@@ -310,8 +310,8 @@ namespace LibEmiddle.Tests.Unit
             byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act
-            byte[] ciphertext = _cryptoProvider.Encrypt(zeroData, key, nonce);
-            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce);
+            byte[] ciphertext = _cryptoProvider.Encrypt(zeroData, key, nonce, null);
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce, null);
 
             // Assert
             CollectionAssert.AreEqual(zeroData, decrypted, "Decrypted zero data should match original");

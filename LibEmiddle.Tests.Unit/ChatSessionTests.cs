@@ -9,6 +9,7 @@ using LibEmiddle.Messaging.Chat;
 using LibEmiddle.Domain.Enums;
 using LibEmiddle.Protocol;
 using LibEmiddle.Abstractions;
+using LibEmiddle.Sessions;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -17,12 +18,15 @@ namespace LibEmiddle.Tests.Unit
     {
         private KeyPair _aliceKeyPair;
         private KeyPair _bobKeyPair;
-        private DoubleRatchetSession _aliceRatchetSession;
-        private DoubleRatchetSession _bobRatchetSession;
-        private ChatSession _aliceChatSession;
+
         private CryptoProvider _cryptoProvider;
         private DoubleRatchetProtocol _doubleRatchetProtocol;
         private X3DHProtocol _x3DHProtocol;
+        private ProtocolAdapter _protocolAdapter;
+
+        private ISessionManager _sessionManager;
+        private ChatSession _aliceChatSession;
+        private DoubleRatchetSession _doubleRatchetSession;
 
         [TestInitialize]
         public void Setup()
@@ -30,29 +34,40 @@ namespace LibEmiddle.Tests.Unit
             _cryptoProvider = new CryptoProvider();
             _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
             _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
+            _protocolAdapter = new ProtocolAdapter(_x3DHProtocol, _doubleRatchetProtocol, _cryptoProvider);
 
             // Generate proper key pairs for Alice and Bob
             _aliceKeyPair = Sodium.GenerateEd25519KeyPair();
             _bobKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            byte[] _alicePrivateKey = _cryptoProvider.ConvertEd25519PrivateKeyToX25519(_aliceKeyPair.PrivateKey);
+            string sessionId = new Guid().ToString();
 
-            string sessionId = Guid.NewGuid().ToString();
+            // Session manager instance
+            _sessionManager = new SessionManager(_cryptoProvider, _x3DHProtocol, _doubleRatchetProtocol, _aliceKeyPair);
 
-            // Init Session
-            X3DHKeyBundle aliceX3DHBundle =  _x3DHProtocol.CreateKeyBundleAsync(_aliceKeyPair).GetAwaiter().GetResult();
+            // Init Alice/Bob Bundles
+            X3DHKeyBundle bobX3DHBundle = _x3DHProtocol.CreateKeyBundleAsync(_bobKeyPair).GetAwaiter().GetResult();
+
+            X3DHPublicBundle bobPublicBundle = bobX3DHBundle.ToPublicBundle();
 
             // Create Alice's sending session
-            _aliceRatchetSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync().GetAwaiter().GetResult();
+            (DoubleRatchetSession chatSession, InitialMessageData initialMessage) = _protocolAdapter.PrepareSenderSessionAsync(
+                bobPublicBundle, _aliceKeyPair, sessionId).GetAwaiter().GetResult();
 
             // Create Bob's receiving session
-            _bobRatchetSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync();
+            SenderSessionResult sessionSenderResult = _x3DHProtocol.InitiateSessionAsSenderAsync(bobPublicBundle, _aliceKeyPair)
+                .GetAwaiter().GetResult();
+
+            // Create Bob's receiving DR session
+            _doubleRatchetSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(sessionSenderResult.SharedKey, 
+                initialMessage.SenderIdentityKeyPublic, sessionId).GetAwaiter().GetResult();
 
             // Create Alice's chat session
             _aliceChatSession = new ChatSession(
-                _aliceRatchetSession,
+                _doubleRatchetSession,
                 _bobKeyPair.PublicKey,
-                _aliceKeyPair.PublicKey
+                _aliceKeyPair.PublicKey,
+                _doubleRatchetProtocol
             );
         }
 
@@ -236,9 +251,10 @@ namespace LibEmiddle.Tests.Unit
 
             // Create Bob's chat session
             var bobChatSession = new ChatSession(
-                _bobRatchetSession,
+                _doubleRatchetSession,
                 _aliceKeyPair.PublicKey,
-                _bobKeyPair.PublicKey
+                _bobKeyPair.PublicKey,
+                _doubleRatchetProtocol
             );
 
             // Suspend Bob's session
@@ -263,9 +279,10 @@ namespace LibEmiddle.Tests.Unit
 
             // Create Bob's chat session
             var bobChatSession = new ChatSession(
-                _bobRatchetSession,
+                _doubleRatchetSession,
                 _aliceKeyPair.PublicKey,
-                _bobKeyPair.PublicKey
+                _bobKeyPair.PublicKey,
+                _doubleRatchetProtocol
             );
 
             // Terminate Bob's session
@@ -285,9 +302,10 @@ namespace LibEmiddle.Tests.Unit
 
             // Create Bob's chat session
             var bobChatSession = new ChatSession(
-                _bobRatchetSession,
+                _doubleRatchetSession,
                 _aliceKeyPair.PublicKey,
-                _bobKeyPair.PublicKey
+                _bobKeyPair.PublicKey,
+                _doubleRatchetProtocol
             );
             await bobChatSession.ActivateAsync();
 

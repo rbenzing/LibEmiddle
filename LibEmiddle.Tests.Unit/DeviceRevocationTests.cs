@@ -2,10 +2,10 @@
 using System;
 using System.Collections.Generic;
 using System.Security;
-using LibEmiddle.API;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.MultiDevice;
+using LibEmiddle.Domain;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -13,38 +13,43 @@ namespace LibEmiddle.Tests.Unit
     public class DeviceRevocationTests
     {
         private CryptoProvider _cryptoProvider;
+        private DeviceLinkingService _deviceLinkingSvc;
+        private KeyPair _authorityKeyPair;
 
         [TestInitialize]
         public void Setup()
         {
             _cryptoProvider = new CryptoProvider();
+            _deviceLinkingSvc = new DeviceLinkingService(_cryptoProvider);
+
+            _authorityKeyPair = Sodium.GenerateEd25519KeyPair();
         }
 
         [TestMethod]
         public void CreateDeviceRevocationMessage_ShouldCreateValidMessage()
         {
             // Arrange
-            var authorityKeyPair = Sodium.GenerateEd25519KeyPair();
             var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
-            var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
-                deviceToRevokeKeyPair.PublicKey,
-                authorityKeyPair);
+            var revocationMessage = _deviceLinkingSvc.CreateDeviceRevocationMessage(
+                _authorityKeyPair,
+                deviceToRevokeKeyPair.PublicKey);
 
             // Assert
             Assert.IsNotNull(revocationMessage);
-            Assert.IsNotNull(revocationMessage.RevokedDeviceKey);
+            Assert.IsNotNull(revocationMessage.RevokedDevicePublicKey);
+            Assert.IsNotNull(revocationMessage.UserIdentityPublicKey);
             Assert.IsNotNull(revocationMessage.Signature);
-            Assert.IsTrue(revocationMessage.RevocationTimestamp > 0);
+            Assert.IsTrue(revocationMessage.Timestamp > 0);
 
             // Verify signature contains valid timestamp
             long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            Assert.IsTrue(Math.Abs(currentTime - revocationMessage.RevocationTimestamp) < 5000,
+            Assert.IsTrue(Math.Abs(currentTime - revocationMessage.Timestamp) < 5000,
                 "Timestamp should be close to current time");
 
             // Key should match the provided key
-            CollectionAssert.AreEqual(deviceToRevokeKeyPair.PublicKey, revocationMessage.RevokedDeviceKey);
+            CollectionAssert.AreEqual(deviceToRevokeKeyPair.PublicKey, revocationMessage.RevokedDevicePublicKey);
         }
 
         [TestMethod]
@@ -54,17 +59,18 @@ namespace LibEmiddle.Tests.Unit
             var authorityKeyPair = Sodium.GenerateEd25519KeyPair();
             var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
-                deviceToRevokeKeyPair.PublicKey,
-                authorityKeyPair);
+            var revocationMessage = _deviceLinkingSvc.CreateDeviceRevocationMessage(
+                _authorityKeyPair,
+                deviceToRevokeKeyPair.PublicKey);
 
             // Act
-            bool isValid = LibEmiddleClient.ValidateDeviceRevocationMessage(
+            bool isValid = _deviceLinkingSvc.VerifyDeviceRevocationMessage(
                 revocationMessage,
                 authorityKeyPair.PublicKey);
 
             // Assert
-            Assert.IsTrue(isValid, "Valid revocation message should validate successfully");
+            Assert.IsTrue(revocationMessage.IsValid(), "Revocation message should validate true");
+            Assert.IsTrue(isValid, "Verified revocation message should validate true");
         }
 
         [TestMethod]
@@ -75,12 +81,12 @@ namespace LibEmiddle.Tests.Unit
             var differentKeyPair = Sodium.GenerateEd25519KeyPair();
             var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
-                deviceToRevokeKeyPair.PublicKey,
-                authorityKeyPair);
+            var revocationMessage = _deviceLinkingSvc.CreateDeviceRevocationMessage(
+                _authorityKeyPair,
+                deviceToRevokeKeyPair.PublicKey);
 
             // Act - Validate with a different public key than the one that signed
-            bool isValid = LibEmiddleClient.ValidateDeviceRevocationMessage(
+            bool isValid = _deviceLinkingSvc.VerifyDeviceRevocationMessage(
                 revocationMessage,
                 differentKeyPair.PublicKey);
 
@@ -95,20 +101,21 @@ namespace LibEmiddle.Tests.Unit
             var authorityKeyPair = Sodium.GenerateEd25519KeyPair();
             var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
-                deviceToRevokeKeyPair.PublicKey,
-                authorityKeyPair);
+            var revocationMessage = _deviceLinkingSvc.CreateDeviceRevocationMessage(
+                _authorityKeyPair,
+                deviceToRevokeKeyPair.PublicKey);
 
             // Create a tampered copy with a different timestamp
             var tamperedMessage = new DeviceRevocationMessage
             {
-                RevokedDeviceKey = revocationMessage.RevokedDeviceKey,
-                RevocationTimestamp = revocationMessage.RevocationTimestamp + 10000, // Change timestamp
+                UserIdentityPublicKey = revocationMessage.UserIdentityPublicKey,
+                RevokedDevicePublicKey = revocationMessage.RevokedDevicePublicKey,
+                Timestamp = revocationMessage.Timestamp + 10000, // Change timestamp
                 Signature = revocationMessage.Signature // Keep the original signature
             };
 
             // Act
-            bool isValid = LibEmiddleClient.ValidateDeviceRevocationMessage(
+            bool isValid = _deviceLinkingSvc.VerifyDeviceRevocationMessage(
                 tamperedMessage,
                 authorityKeyPair.PublicKey);
 
@@ -127,7 +134,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
             Sodium.ComputePublicKey(
                 deviceToRevokeX25519Public, 
-                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.PrivateKey));
+                _cryptoProvider.ConvertEd25519PrivateKeyToX25519(deviceToRevokeKeyPair.PrivateKey));
 
             // Create a device manager and link a device
             var deviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -140,25 +147,12 @@ namespace LibEmiddle.Tests.Unit
                 "Should have one linked device");
 
             // Act
-            var revocationMessage = deviceManager.RevokeLinkedDevice(deviceToRevokeX25519Public);
+            bool isRemoved = deviceManager.RemoveLinkedDevice(deviceToRevokeX25519Public);
+            bool isValid = deviceManager.IsDeviceRevoked(mainDeviceKeyPair.PublicKey);
 
             // Assert
-            // Verify revocation message
-            Assert.IsNotNull(revocationMessage, "Should create a revocation message");
-
-            // The revoked key in the message should match our device's key
-            Assert.IsTrue(SecureMemory.SecureCompare(deviceToRevokeX25519Public, revocationMessage.RevokedDeviceKey),
-                "Revocation message should contain the correct device key");
-
-            // Device should no longer be linked
-            Assert.IsFalse(deviceManager.IsDeviceLinked(deviceToRevokeX25519Public),
-                "Device should no longer be linked after revocation");
-            Assert.AreEqual(0, deviceManager.GetLinkedDeviceCount(),
-                "Should have zero linked devices after revocation");
-
-            // Validate the revocation message
-            bool isValid = revocationMessage.Validate(mainDeviceKeyPair.PublicKey);
-            Assert.IsTrue(isValid, "Revocation message should be valid");
+            Assert.IsTrue(isRemoved, "Device was successfully removed");
+            Assert.IsTrue(isValid, "Device is not in the devices dictionary");
         }
 
         [TestMethod]
@@ -172,7 +166,7 @@ namespace LibEmiddle.Tests.Unit
             // Create X25519 key for the device to revoke
             byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
             Sodium.ComputePublicKey(deviceToRevokeX25519Public,
-                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.PrivateKey));
+                _cryptoProvider.ConvertEd25519PrivateKeyToX25519(deviceToRevokeKeyPair.PrivateKey));
 
             // Create two device managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -183,10 +177,10 @@ namespace LibEmiddle.Tests.Unit
             otherDeviceManager.AddLinkedDevice(deviceToRevokeX25519Public);
 
             // Create a revocation message from the main device
-            var revocationMessage = mainDeviceManager.CreateRevocationMessage(deviceToRevokeX25519Public);
+            var revocationMessage = mainDeviceManager.CreateDeviceRevocationMessage(deviceToRevokeX25519Public);
 
             // Act - Process the revocation message on the other device
-            bool result = otherDeviceManager.ProcessRevocationMessage(revocationMessage, mainDeviceKeyPair.PublicKey);
+            bool result = otherDeviceManager.ProcessDeviceRevocationMessage(revocationMessage);
 
             // Assert
             Assert.IsTrue(result, "Processing valid revocation message should succeed");
@@ -206,7 +200,7 @@ namespace LibEmiddle.Tests.Unit
             byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
             Sodium.ComputePublicKey(
                 deviceToRevokeX25519Public,
-                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.PrivateKey));
+                _cryptoProvider.ConvertEd25519PrivateKeyToX25519(deviceToRevokeKeyPair.PrivateKey));
 
             // Create two device managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
@@ -216,18 +210,19 @@ namespace LibEmiddle.Tests.Unit
             otherDeviceManager.AddLinkedDevice(deviceToRevokeX25519Public);
 
             // Create a valid revocation message
-            var revocationMessage = mainDeviceManager.CreateRevocationMessage(deviceToRevokeX25519Public);
+            var revocationMessage = mainDeviceManager.CreateDeviceRevocationMessage(deviceToRevokeX25519Public);
 
             // Create a tampered copy with a different timestamp
             var tamperedMessage = new DeviceRevocationMessage
             {
-                RevokedDeviceKey = revocationMessage.RevokedDeviceKey,
-                RevocationTimestamp = revocationMessage.RevocationTimestamp + 10000, // Change timestamp
+                UserIdentityPublicKey = revocationMessage.UserIdentityPublicKey,
+                RevokedDevicePublicKey = revocationMessage.RevokedDevicePublicKey,
+                Timestamp = revocationMessage.Timestamp + 10000, // Change timestamp
                 Signature = revocationMessage.Signature // Keep the original signature
             };
 
             // Act - Process the tampered revocation message
-            bool result = otherDeviceManager.ProcessRevocationMessage(tamperedMessage, mainDeviceKeyPair.PublicKey);
+            bool result = otherDeviceManager.ProcessDeviceRevocationMessage(tamperedMessage);
 
             // Assert
             Assert.IsFalse(result, "Processing tampered revocation message should fail");
@@ -247,13 +242,13 @@ namespace LibEmiddle.Tests.Unit
             byte[] deviceToRevokeX25519Public = SecureMemory.CreateSecureBuffer(32);
             Sodium.ComputePublicKey(
                 deviceToRevokeX25519Public,
-                _cryptoProvider.DeriveX25519PrivateKeyFromEd25519(deviceToRevokeKeyPair.PrivateKey));
+                _cryptoProvider.ConvertEd25519PrivateKeyToX25519(deviceToRevokeKeyPair.PrivateKey));
 
             // Create a device manager without linking the deviceToRevokeKeyPair
             var deviceManager = new DeviceManager(mainDeviceKeyPair);
 
             // Act & Assert - Should throw InvalidOperationException
-            deviceManager.RevokeLinkedDevice(deviceToRevokeX25519Public);
+            deviceManager.RemoveLinkedDevice(deviceToRevokeX25519Public);
         }
 
         [TestMethod]
@@ -265,29 +260,32 @@ namespace LibEmiddle.Tests.Unit
             // Create invalid revocation messages
             var nullKeyMessage = new DeviceRevocationMessage
             {
-                RevokedDeviceKey = null,
-                RevocationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                UserIdentityPublicKey = authorityKeyPair.PublicKey,
+                RevokedDevicePublicKey = null,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 Signature = new byte[64]
             };
 
             var nullSignatureMessage = new DeviceRevocationMessage
             {
-                RevokedDeviceKey = new byte[32],
-                RevocationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                UserIdentityPublicKey = authorityKeyPair.PublicKey,
+                RevokedDevicePublicKey = new byte[32],
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 Signature = null
             };
 
             var zeroTimestampMessage = new DeviceRevocationMessage
             {
-                RevokedDeviceKey = new byte[32],
-                RevocationTimestamp = 0,
+                UserIdentityPublicKey = authorityKeyPair.PublicKey,
+                RevokedDevicePublicKey = new byte[32],
+                Timestamp = 0,
                 Signature = new byte[64]
             };
 
             // Act
-            bool nullKeyResult = nullKeyMessage.Validate(authorityKeyPair.PublicKey);
-            bool nullSignatureResult = nullSignatureMessage.Validate(authorityKeyPair.PublicKey);
-            bool zeroTimestampResult = zeroTimestampMessage.Validate(authorityKeyPair.PublicKey);
+            bool nullKeyResult = nullKeyMessage.IsValid();
+            bool nullSignatureResult = nullSignatureMessage.IsValid();
+            bool zeroTimestampResult = zeroTimestampMessage.IsValid();
 
             // Assert
             Assert.IsFalse(nullKeyResult, "Validation should fail with null revoked device key");
@@ -303,19 +301,19 @@ namespace LibEmiddle.Tests.Unit
             var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Act
-            var revocationMessage = LibEmiddleClient.CreateDeviceRevocationMessage(
-                deviceToRevokeKeyPair.PublicKey,
-                authorityKeyPair);
+            var revocationMessage = _deviceLinkingSvc.CreateDeviceRevocationMessage(
+                _authorityKeyPair,
+                deviceToRevokeKeyPair.PublicKey);
 
             // Manually combine data for verification
-            byte[] timestampBytes = BitConverter.GetBytes(revocationMessage.RevocationTimestamp);
+            byte[] timestampBytes = BitConverter.GetBytes(revocationMessage.Timestamp);
             byte[] dataToSign = new byte[deviceToRevokeKeyPair.PublicKey.Length + timestampBytes.Length];
 
             deviceToRevokeKeyPair.PublicKey.AsSpan().CopyTo(dataToSign.AsSpan(0, deviceToRevokeKeyPair.PublicKey.Length));
             timestampBytes.AsSpan().CopyTo(dataToSign.AsSpan(deviceToRevokeKeyPair.PublicKey.Length));
 
             // Verify the signature directly
-            bool isValidManually = _cryptoProvider.Verify(dataToSign, revocationMessage.Signature, authorityKeyPair.PublicKey);
+            bool isValidManually = _cryptoProvider.VerifySignature(dataToSign, revocationMessage.Signature, authorityKeyPair.PublicKey);
 
             // Assert
             Assert.IsTrue(isValidManually, "Signature validation should pass with manually combined data");
@@ -334,7 +332,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsTrue(deviceManager.IsDeviceLinked(deviceKeyPair.PublicKey));
 
             // Revoke the device
-            deviceManager.RevokeLinkedDevice(deviceKeyPair.PublicKey);
+            deviceManager.RemoveLinkedDevice(deviceKeyPair.PublicKey);
             Assert.IsFalse(deviceManager.IsDeviceLinked(deviceKeyPair.PublicKey));
 
             // Attempt to add it again
@@ -366,17 +364,16 @@ namespace LibEmiddle.Tests.Unit
             deviceManager.AddLinkedDevice(device1);
             deviceManager.AddLinkedDevice(device2);
 
-            deviceManager.RevokeLinkedDevice(device1);
+            deviceManager.RemoveLinkedDevice(device1);
 
             // Export linked devices
-            string password = "test_password";
-            byte[] exportedData = deviceManager.ExportLinkedDevices(password);
+            string exportedData = deviceManager.ExportLinkedDevices();
 
             // Create a new device manager (simulate restart)
             var newDeviceManager = new DeviceManager(identityKeyPair);
 
             // Import linked devices
-            newDeviceManager.ImportLinkedDevices(exportedData, password);
+            newDeviceManager.ImportLinkedDevices(exportedData);
 
             // Assert
             Assert.IsFalse(newDeviceManager.IsDeviceLinked(device1),

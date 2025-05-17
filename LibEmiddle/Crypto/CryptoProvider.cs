@@ -3,7 +3,7 @@ using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
-using LibEmiddle.KeyExchange;
+using LibEmiddle.KeyManagement;
 
 namespace LibEmiddle.Crypto
 {
@@ -24,11 +24,7 @@ namespace LibEmiddle.Crypto
             _keyStorage = new KeyStorage();
         }
 
-        /// <summary>
-        /// Generates a random cryptographically secure key pair.
-        /// </summary>
-        /// <param name="keyType">The type of key pair to generate.</param>
-        /// <returns>A newly generated key pair.</returns>
+        /// <inheritdoc/>
         public Task<KeyPair> GenerateKeyPairAsync(KeyType keyType)
         {
             try
@@ -58,12 +54,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Derives a public key from a private key.
-        /// </summary>
-        /// <param name="privateKey">The private key to derive from.</param>
-        /// <param name="keyType">The type of key to derive.</param>
-        /// <returns>The derived public key.</returns>
+        /// <inheritdoc/>
         public Span<byte> DerivePublicKey(Span<byte> privateKey, KeyType keyType)
         {
             if (privateKey == null)
@@ -90,11 +81,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Generates a specified number of random bytes.
-        /// </summary>
-        /// <param name="count">The number of random bytes to generate.</param>
-        /// <returns>An array of random bytes.</returns>
+        /// <inheritdoc/>
         public byte[] GenerateRandomBytes(int count)
         {
             if (count <= 0)
@@ -118,12 +105,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Signs data using a private key.
-        /// </summary>
-        /// <param name="data">The data to sign.</param>
-        /// <param name="privateKey">The private key to sign with.</param>
-        /// <returns>The signature.</returns>
+        /// <inheritdoc/>
         public byte[] Sign(byte[] data, byte[] privateKey)
         {
             if (data == null)
@@ -143,24 +125,13 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Async signs data using a private key.
-        /// </summary>
-        /// <param name="data"></param>
-        /// <param name="privateKey"></param>
-        /// <returns></returns>
+        /// <inheritdoc/>
         public Task<byte[]> SignAsync(byte[] data, byte[] privateKey)
         {
             return Task.Run(() => Sign(data, privateKey));
         }
 
-        /// <summary>
-        /// Verifies a signature against data using a public key.
-        /// </summary>
-        /// <param name="data">The data that was signed.</param>
-        /// <param name="signature">The signature to verify.</param>
-        /// <param name="publicKey">The public key to verify with.</param>
-        /// <returns>True if the signature is valid, false otherwise.</returns>
+        /// <inheritdoc/>
         public bool VerifySignature(byte[] data, byte[] signature, byte[] publicKey)
         {
             if (data == null)
@@ -183,14 +154,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Encrypts data using a key and nonce.
-        /// </summary>
-        /// <param name="plaintext">The data to encrypt.</param>
-        /// <param name="key">The encryption key.</param>
-        /// <param name="nonce">Optional nonce for encryption.</param>
-        /// <param name="associatedData">Optional associated data for AEAD encryption.</param>
-        /// <returns>The encrypted data.</returns>
+        /// <inheritdoc/>
         public byte[] Encrypt(byte[] plaintext, byte[] key, byte[]? nonce, byte[]? associatedData)
         {
             if (plaintext == null)
@@ -214,14 +178,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Decrypts data using a key and nonce.
-        /// </summary>
-        /// <param name="ciphertext">The data to decrypt.</param>
-        /// <param name="key">The decryption key.</param>
-        /// <param name="nonce">Optional nonce for decryption.</param>
-        /// <param name="associatedData">Optional associated data for AEAD decryption.</param>
-        /// <returns>The decrypted data.</returns>
+        /// <inheritdoc/>
         public byte[] Decrypt(byte[] ciphertext, byte[] key, byte[]? nonce, byte[]? associatedData)
         {
             if (ciphertext == null)
@@ -245,12 +202,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Performs scalar multiplication (X25519).
-        /// </summary>
-        /// <param name="privateKey">The private key.</param>
-        /// <param name="publicKey">The public key.</param>
-        /// <returns>The shared secret.</returns>
+        /// <inheritdoc/>
         public byte[] ScalarMult(byte[] privateKey, byte[] publicKey)
         {
             if (privateKey == null)
@@ -270,14 +222,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Derives a key from input key material.
-        /// </summary>
-        /// <param name="inputKeyMaterial">The input key material.</param>
-        /// <param name="salt">Optional salt.</param>
-        /// <param name="info">Optional context info.</param>
-        /// <param name="length">Optional desired output length. (default: 32)</param>
-        /// <returns>The derived key.</returns>
+        /// <inheritdoc/>
         public byte[] DeriveKey(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length = 32)
         {
             if (inputKeyMaterial == null)
@@ -304,24 +249,13 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Asynchronously derives a key from input key material.
-        /// </summary>
-        /// <param name="inputKeyMaterial">The input key material.</param>
-        /// <param name="salt">Optional salt.</param>
-        /// <param name="info">Optional context info.</param>
-        /// <param name="length">Optional desired output length. (default: 32)</param>
-        /// <returns>The derived key.</returns>
+        /// <inheritdoc/>
         public Task<byte[]> DeriveKeyAsync(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length = 32)
         {
             return Task.Run(() => DeriveKey(inputKeyMaterial, salt, info, length));
         }
 
-        /// <summary>
-        /// Derives a key from a password.
-        /// </summary>
-        /// <param name="password">The password.</param>
-        /// <returns>The derived key.</returns>
+        /// <inheritdoc/>
         public byte[] DeriveKeyFromPassword(string password)
         {
             if (string.IsNullOrEmpty(password))
@@ -339,21 +273,13 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Asynchronously derives a key from a password.
-        /// </summary>
-        /// <param name="password">The password.</param>
-        /// <returns>The derived key.</returns>
+        /// <inheritdoc/>
         public Task<byte[]> DeriveKeyFromPasswordAsync(string password)
         {
             return Task.Run(() => DeriveKeyFromPassword(password));
         }
 
-        /// <summary>
-        /// Converts an Ed25519 public key to an X25519 public key.
-        /// </summary>
-        /// <param name="ed25519PublicKey">The Ed25519 public key.</param>
-        /// <returns>The X25519 public key.</returns>
+        /// <inheritdoc/>
         public byte[] ConvertEd25519PublicKeyToX25519(byte[] ed25519PublicKey)
         {
             if (ed25519PublicKey == null)
@@ -373,11 +299,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Converts an Ed25519 private key to an X25519 private key.
-        /// </summary>
-        /// <param name="ed25519PrivateKey">The Ed25519 private key.</param>
-        /// <returns>The X25519 private key.</returns>
+        /// <inheritdoc/>
         public byte[] ConvertEd25519PrivateKeyToX25519(byte[] ed25519PrivateKey)
         {
             if (ed25519PrivateKey == null)
@@ -397,11 +319,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Validates that an Ed25519 public key is properly formatted.
-        /// </summary>
-        /// <param name="publicKey">The public key to validate.</param>
-        /// <returns>True if the key is valid, false otherwise.</returns>
+        /// <inheritdoc/>
         public bool ValidateEd25519PublicKey(byte[] publicKey)
         {
             if (publicKey == null)
@@ -421,11 +339,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Validates that an X25519 public key is properly formatted.
-        /// </summary>
-        /// <param name="publicKey">The public key to validate.</param>
-        /// <returns>True if the key is valid, false otherwise.</returns>
+        /// <inheritdoc/>
         public bool ValidateX25519PublicKey(byte[] publicKey)
         {
             if (publicKey == null)
@@ -445,13 +359,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Stores a key in the platform's secure key storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the key.</param>
-        /// <param name="key">The key to store.</param>
-        /// <param name="password">Optional password for additional protection.</param>
-        /// <returns>True if the key was stored successfully.</returns>
+        /// <inheritdoc/>
         public Task<bool> StoreKeyAsync(string keyId, byte[] key, string? password = null)
         {
             if (string.IsNullOrEmpty(keyId))
@@ -468,13 +376,13 @@ namespace LibEmiddle.Crypto
                     byte[] encryptionKey = DeriveKeyFromPassword(password);
                     try
                     {
-                        byte[] nonce = GenerateRandomBytes(Constants.NONCE_SIZE);
+                        byte[] nonce = GenerateNonce(Constants.NONCE_SIZE);
                         byte[] encryptedKey = Encrypt(key, encryptionKey, nonce, null);
 
                         // Store encrypted key with nonce
                         byte[] combinedData = new byte[nonce.Length + encryptedKey.Length];
-                        Buffer.BlockCopy(nonce, 0, combinedData, 0, nonce.Length);
-                        Buffer.BlockCopy(encryptedKey, 0, combinedData, nonce.Length, encryptedKey.Length);
+                        nonce.AsSpan().CopyTo(combinedData.AsSpan(0));
+                        encryptedKey.AsSpan().CopyTo(combinedData.AsSpan(nonce.Length));
 
                         return Task.FromResult(_keyStorage.StoreKey(keyId, combinedData));
                     }
@@ -496,12 +404,13 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Retrieves a key from the platform's secure key storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the key.</param>
-        /// <param name="password">Optional password if the key was protected with one.</param>
-        /// <returns>The retrieved key, or null if not found.</returns>
+        /// <inheritdoc/>
+        public byte[] GenerateNonce(uint size = Constants.NONCE_SIZE)
+        {
+            return Nonce.GenerateNonce(size);
+        }
+
+        /// <inheritdoc/>
         public Task<byte[]?> RetrieveKeyAsync(string keyId, string? password = null)
         {
             if (string.IsNullOrEmpty(keyId))
@@ -520,11 +429,11 @@ namespace LibEmiddle.Crypto
                     try
                     {
                         // Extract nonce and encrypted key
-                        byte[] nonce = new byte[Constants.NONCE_SIZE];
+                        byte[] nonce = GenerateNonce(Constants.NONCE_SIZE);
                         byte[] encryptedKey = new byte[storedData.Length - Constants.NONCE_SIZE];
 
-                        Buffer.BlockCopy(storedData, 0, nonce, 0, Constants.NONCE_SIZE);
-                        Buffer.BlockCopy(storedData, Constants.NONCE_SIZE, encryptedKey, 0, encryptedKey.Length);
+                        storedData.AsSpan(0, Constants.NONCE_SIZE).CopyTo(nonce);
+                        storedData.AsSpan(Constants.NONCE_SIZE).CopyTo(encryptedKey);
 
                         // Decrypt the key
                         return Task.FromResult<byte[]?>(Decrypt(encryptedKey, encryptionKey, nonce, null));
@@ -552,15 +461,17 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Deletes a key from the platform's secure key storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the key.</param>
-        /// <returns>True if the key was deleted successfully.</returns>
-        public Task<bool> DeleteKeyAsync(string keyId)
+        /// <inheritdoc/>
+        public Task<bool> DeleteKeyAsync(string keyId, string? password = null)
         {
             if (string.IsNullOrEmpty(keyId))
                 throw new ArgumentException("Key ID cannot be null or empty.", nameof(keyId));
+
+            byte[]? keyFound = RetrieveKeyAsync(keyId, password).GetAwaiter().GetResult();
+            if (keyFound == null && password == null)
+                throw new FileNotFoundException();
+            if (keyFound == null && password != null)
+                throw new ArgumentException("Invalid request.", nameof(password));
 
             try
             {
@@ -573,33 +484,19 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Stores a JSON string in the platform's secure storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the data.</param>
-        /// <param name="jsonData">The JSON data to store.</param>
-        /// <returns>True if the data was stored successfully.</returns>
+        /// <inheritdoc/>
         public Task<bool> StoreJsonAsync(string keyId, string jsonData)
         {
             return StoreAsync(keyId, jsonData);
         }
 
-        /// <summary>
-        /// Retrieves a JSON string from the platform's secure storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the data.</param>
-        /// <returns>The retrieved JSON data, or null if not found.</returns>
+        /// <inheritdoc/>
         public Task<string?> RetrieveJsonAsync(string keyId)
         {
             return RetrieveAsync(keyId);
         }
 
-        /// <summary>
-        /// Stores data in the platform's secure storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the data.</param>
-        /// <param name="data">The data to store.</param>
-        /// <returns>True if the data was stored successfully.</returns>
+        /// <inheritdoc/>
         public Task<bool> StoreAsync(string keyId, string data)
         {
             if (string.IsNullOrEmpty(keyId))
@@ -620,11 +517,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Retrieves data from the platform's secure storage.
-        /// </summary>
-        /// <param name="keyId">The identifier for the data.</param>
-        /// <returns>The retrieved data, or null if not found.</returns>
+        /// <inheritdoc/>
         public Task<string?> RetrieveAsync(string keyId)
         {
             if (string.IsNullOrEmpty(keyId))
@@ -645,28 +538,7 @@ namespace LibEmiddle.Crypto
             }
         }
 
-        /// <summary>
-        /// Compares two byte arrays in constant time to prevent timing attacks.
-        /// </summary>
-        /// <param name="a">The first array.</param>
-        /// <param name="b">The second array.</param>
-        /// <returns>True if the arrays are equal, false otherwise.</returns>
-        public bool ConstantTimeEquals(byte[] a, byte[] b)
-        {
-            try
-            {
-                return Sodium.ConstantTimeEquals(a, b);
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(CryptoProvider), $"Error comparing arrays: {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Disposes of resources used by the CryptoProvider.
-        /// </summary>
+        /// <inheritdoc/>
         public void Dispose()
         {
             Dispose(true);
