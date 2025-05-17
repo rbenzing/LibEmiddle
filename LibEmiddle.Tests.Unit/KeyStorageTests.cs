@@ -122,17 +122,15 @@ namespace LibEmiddle.Tests.Unit
         public void StoreKeyToFile_NullKey_ShouldThrowException()
         {
             // Act - should throw ArgumentException or ArgumentNullException
-            string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            string sessionId = new Guid().ToString();
             try
             {
-                _cryptoProvider.StoreKeyToFile(null, filePath);
+                _cryptoProvider.StoreKeyAsync(sessionId, null);
             }
             finally
             {
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
+                // remove key
+                _cryptoProvider.DeleteKeyAsync(sessionId).GetAwaiter().GetResult();
             }
         }
 
@@ -141,17 +139,15 @@ namespace LibEmiddle.Tests.Unit
         public void StoreKeyToFile_EmptyKey_ShouldThrowException()
         {
             // Act - should throw ArgumentException
-            string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            string sessionId = new Guid().ToString();
             try
             {
-                _cryptoProvider.StoreKeyToFile(new byte[0], filePath);
+                _cryptoProvider.StoreKeyAsync(sessionId, new byte[0]);
             }
             finally
             {
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
+                // remove key
+                _cryptoProvider.DeleteKeyAsync(sessionId).GetAwaiter().GetResult();
             }
         }
     }
