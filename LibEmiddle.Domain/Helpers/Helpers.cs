@@ -42,56 +42,6 @@ namespace LibEmiddle.Domain
         }
 
         /// <summary>
-        /// Validates a message ID against recently processed IDs to prevent replay attacks
-        /// </summary>
-        /// <param name="messageId">Message ID to validate</param>
-        /// <param name="recentlyProcessedIds">Queue of recently processed message IDs</param>
-        /// <returns>True if the message ID is new and valid</returns>
-        public static bool ValidateMessageId(Guid messageId, Queue<Guid> recentlyProcessedIds)
-        {
-            lock (recentlyProcessedIds)
-            {
-                // Check if we've seen this message ID before
-                if (recentlyProcessedIds.Contains(messageId))
-                {
-                    return false;
-                }
-
-                // Add the new message ID to the queue
-                recentlyProcessedIds.Enqueue(messageId);
-
-                // If queue exceeds capacity, remove oldest ID
-                if (recentlyProcessedIds.Count > Constants.MAX_TRACKED_MESSAGE_IDS)
-                {
-                    recentlyProcessedIds.Dequeue();
-                }
-
-                return true;
-            }
-        }
-
-        /// <summary>
-        /// Validates if a string is a valid Base64 encoding
-        /// </summary>
-        /// <param name="base64">The string to validate</param>
-        /// <returns>True if the string is valid Base64</returns>
-        public static bool IsValidBase64(string base64)
-        {
-            if (string.IsNullOrEmpty(base64))
-                return false;
-
-            try
-            {
-                Convert.FromBase64String(base64);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>
         /// Gets bytes from a Base64 string with error checking
         /// </summary>
         /// <param name="dict">Dictionary containing the key</param>
@@ -143,47 +93,6 @@ namespace LibEmiddle.Domain
         }
 
         /// <summary>
-        /// Converts an object to an Int32 value with error checking
-        /// </summary>
-        /// <param name="value">Object to convert</param>
-        /// <returns>Int32 value</returns>
-        public static int GetInt32Value(object value)
-        {
-            if (value is int intValue)
-                return intValue;
-
-            if (value is JsonElement jsonElement)
-                return GetInt32Value(jsonElement);
-
-            if (value is string stringValue && int.TryParse(stringValue, out int result))
-                return result;
-
-            if (value != null)
-            {
-                if (int.TryParse(value.ToString(), out int parsed))
-                    return parsed;
-            }
-
-            throw new FormatException($"Cannot convert {value} to Int32");
-        }
-
-        /// <summary>
-        /// Gets an Int64 value from a dictionary with a default fallback
-        /// </summary>
-        /// <param name="dict">Dictionary containing the key</param>
-        /// <param name="key">Key to look up</param>
-        /// <param name="defaultValue">Default value if key not found or conversion fails</param>
-        /// <returns>Int64 value</returns>
-        public static long GetInt64Value(Dictionary<string, JsonElement> dict, string key, long defaultValue)
-        {
-            if (dict.TryGetValue(key, out JsonElement element))
-            {
-                return GetInt64Value(element, defaultValue);
-            }
-            return defaultValue;
-        }
-
-        /// <summary>
         /// Converts a JsonElement to an Int64 value with a default fallback
         /// </summary>
         /// <param name="element">JsonElement to convert</param>
@@ -197,61 +106,6 @@ namespace LibEmiddle.Domain
                 JsonValueKind.String => long.TryParse(element.GetString(), out long result) ? result : defaultValue,
                 _ => defaultValue
             };
-        }
-
-        /// <summary>
-        /// Converts an object to an Int64 value with error checking
-        /// </summary>
-        /// <param name="value">Object to convert</param>
-        /// <returns>Int64 value</returns>
-        public static long GetInt64Value(object value)
-        {
-            if (value is long longValue)
-                return longValue;
-
-            if (value is int intValue)
-                return intValue;
-
-            if (value is JsonElement jsonElement)
-            {
-                if (jsonElement.ValueKind == JsonValueKind.Number)
-                    return jsonElement.GetInt64();
-
-                if (jsonElement.ValueKind == JsonValueKind.String &&
-                    long.TryParse(jsonElement.GetString(), out long parsedValue))
-                    return parsedValue;
-            }
-
-            if (value is string stringValue && long.TryParse(stringValue, out long result))
-                return result;
-
-            if (value != null)
-            {
-                if (long.TryParse(value.ToString(), out long parsed))
-                    return parsed;
-            }
-
-            throw new FormatException($"Cannot convert {value} to Int64");
-        }
-
-        /// <summary>
-        /// Gets a Guid value from a dictionary with a default fallback
-        /// </summary>
-        /// <param name="dict">Dictionary containing the key</param>
-        /// <param name="key">Key to look up</param>
-        /// <param name="defaultValue">Default value if key not found or conversion fails</param>
-        /// <returns>Guid value</returns>
-        public static Guid GetGuidValue(Dictionary<string, JsonElement> dict, string key, Guid defaultValue)
-        {
-            if (dict.TryGetValue(key, out JsonElement element) && element.ValueKind == JsonValueKind.String)
-            {
-                string? guidStr = element.GetString();
-                if (!string.IsNullOrEmpty(guidStr) && Guid.TryParse(guidStr, out Guid result))
-                {
-                    return result;
-                }
-            }
-            return defaultValue;
         }
     }
 }

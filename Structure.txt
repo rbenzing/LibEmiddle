@@ -119,6 +119,7 @@ LibEmiddle/
 │       ├── E2EETestFixture.cs
 │       ├── EncryptionTests.cs
 │       ├── ErrorRecoveryTests.cs
+│       ├── GroupMessageDeserializationTests.cs
 │       ├── GroupMessagingTests.cs
 │       ├── IntegrationTests.cs
 │       ├── KeyAuthTests.cs
@@ -136,7 +137,6 @@ LibEmiddle/
 │       ├── SecurityTests.cs
 │       ├── SessionPersistenceTests.cs
 │       ├── SignatureTests.cs
-│       ├── TestsHelpers.cs
 │       └── X3DHExceptionTests.cs
 ├── docs/
 │   ├── api/
