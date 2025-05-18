@@ -2,16 +2,16 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Security.Cryptography;
 using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using LibEmiddle.Core;
 using System.Linq;
-using System.Diagnostics;
+using System.Reflection;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.Domain.Enums;
 using LibEmiddle.Messaging.Transport;
 
 namespace LibEmiddle.Tests.Unit
@@ -20,9 +20,9 @@ namespace LibEmiddle.Tests.Unit
     public class MailboxManagerTests
     {
         private Mock<IMailboxTransport> _mockTransport;
+        private Mock<IDoubleRatchetProtocol> _mockDoubleRatchetProtocol;
         private KeyPair _testIdentityKeyPair;
         private List<MailboxMessage> _testMessages;
-
         private CryptoProvider _cryptoProvider;
 
         [TestInitialize]
@@ -30,50 +30,42 @@ namespace LibEmiddle.Tests.Unit
         {
             _cryptoProvider = new CryptoProvider();
 
+            // Initialize Sodium
+            Sodium.Initialize();
+
             // Create test identity key pair
             _testIdentityKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Setup mock transport
             _mockTransport = new Mock<IMailboxTransport>();
+            _mockDoubleRatchetProtocol = new Mock<IDoubleRatchetProtocol>();
 
             // Create some test messages
             _testMessages = new List<MailboxMessage>
             {
-                new MailboxMessage
-                {
-                    MessageId = Guid.NewGuid().ToString(),
-                    RecipientKey = _testIdentityKeyPair.PublicKey,
-                    SenderKey = Sodium.GenerateEd25519KeyPair().PublicKey,
-                    IsRead = false,
-                    Type = MessageType.Chat,
-                    EncryptedPayload = new EncryptedMessage
+                new MailboxMessage(_testIdentityKeyPair.PublicKey, Sodium.GenerateEd25519KeyPair().PublicKey, new EncryptedMessage
                     {
                         Ciphertext = new byte[16],
                         Nonce = new byte[12],
                         SenderDHKey = new byte[32],
-                        MessageId = Guid.NewGuid(),
+                        MessageId = Guid.NewGuid().ToString(),
                         Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                         SessionId = Guid.NewGuid().ToString(),
-                        MessageNumber = 1
-                    }
-                },
-                new MailboxMessage
+                        SenderMessageNumber = 1
+                    }),
+                new MailboxMessage(_testIdentityKeyPair.PublicKey, Sodium.GenerateEd25519KeyPair().PublicKey, new EncryptedMessage
+                    {
+                        Ciphertext = new byte[16],
+                        Nonce = new byte[12],
+                        SenderDHKey = new byte[32],
+                        MessageId = Guid.NewGuid().ToString(),
+                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        SessionId = Guid.NewGuid().ToString(),
+                        SenderMessageNumber = 2
+                    })
                 {
-                    MessageId = Guid.NewGuid().ToString(),
-                    RecipientKey = _testIdentityKeyPair.PublicKey,
-                    SenderKey = Sodium.GenerateEd25519KeyPair().PublicKey,
                     IsRead = true,
                     Type = MessageType.DeviceSync,
-                    EncryptedPayload = new EncryptedMessage
-                    {
-                        Ciphertext = new byte[16],
-                        Nonce = new byte[12],
-                        SenderDHKey = new byte[32],
-                        MessageId = Guid.NewGuid(),
-                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                        SessionId = Guid.NewGuid().ToString(),
-                        MessageNumber = 2
-                    }
                 }
             };
         }
@@ -91,7 +83,7 @@ namespace LibEmiddle.Tests.Unit
             MailboxMessage lastReceivedMessage = null;
 
             // Create testable mailbox manager for better testing
-            var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+            var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider);
 
             try
             {
@@ -131,21 +123,57 @@ namespace LibEmiddle.Tests.Unit
                 .Callback<MailboxMessage>(msg =>
                 {
                     messageSent = true;
-                    sentMessageId = msg.MessageId;
+                    sentMessageId = msg.Id;
                 })
                 .ReturnsAsync(true);
 
             var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
+            var dummyEncryptedMessage = new EncryptedMessage
+            {
+                Ciphertext = _cryptoProvider.GenerateRandomBytes(16),
+                Nonce = _cryptoProvider.GenerateRandomBytes(12),
+                SenderDHKey = _cryptoProvider.GenerateRandomBytes(32),
+                MessageId = Guid.NewGuid().ToString(),
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                SessionId = Guid.NewGuid().ToString(),
+                SenderMessageNumber = 1
+            };
+
+            var doubleRatchetSession = new DoubleRatchetSession
+            {
+                SessionId = Guid.NewGuid().ToString(),
+                RootKey = _cryptoProvider.GenerateRandomBytes(32),
+                SenderRatchetKeyPair = Sodium.GenerateX25519KeyPair(),
+                ReceiverRatchetPublicKey = recipientKeyPair.PublicKey,
+                IsInitialized = true
+            };
+
+            _mockDoubleRatchetProtocol
+                .Setup(dr => dr.EncryptAsync(It.IsAny<DoubleRatchetSession>(), It.IsAny<string>(), It.IsAny<KeyRotationStrategy>()))
+                .ReturnsAsync((doubleRatchetSession, dummyEncryptedMessage));
+
+            // Setup reflection access to _sessions field for the test
+            var sessionsField = typeof(MailboxManager).GetField("_sessions",
+                BindingFlags.NonPublic | BindingFlags.Instance);
 
             // Create testable mailbox manager
-            var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+            var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider);
 
             try
             {
+                // Get the _sessions dictionary
+                var sessions = (System.Collections.Concurrent.ConcurrentDictionary<string, DoubleRatchetSession>)
+                    sessionsField.GetValue(mailboxManager);
+
+                // Add the session to the manager's session dictionary
+                string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
+                sessions[recipientId] = doubleRatchetSession;
+
                 // Act
                 string messageId = mailboxManager.SendMessage(
                     recipientKeyPair.PublicKey,
                     "Test message content",
+                    doubleRatchetSession,
                     MessageType.Chat);
 
                 // Process outgoing messages directly using our test method
@@ -182,7 +210,7 @@ namespace LibEmiddle.Tests.Unit
                 .ReturnsAsync(true);
 
             // Create testable mailbox manager
-            var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+            var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider);
 
             try
             {
@@ -196,7 +224,7 @@ namespace LibEmiddle.Tests.Unit
                 var messages = mailboxManager.GetMessages();
                 Assert.IsTrue(messages.Count > 0, "Should have received at least one message");
 
-                string testMessageId = messages[0].Message.MessageId;
+                string testMessageId = messages[0].Message.Id;
 
                 // Act
                 bool result = await mailboxManager.MarkMessageAsReadAsync(testMessageId);
@@ -217,6 +245,7 @@ namespace LibEmiddle.Tests.Unit
                 mailboxManager.Dispose();
             }
         }
+
         [TestMethod]
         public async Task DeleteMessage_ShouldRemoveMessageLocally()
         {
@@ -230,7 +259,7 @@ namespace LibEmiddle.Tests.Unit
                 .ReturnsAsync(true);
 
             // Create mailbox manager
-            var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+            var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider);
 
             try
             {
@@ -244,7 +273,7 @@ namespace LibEmiddle.Tests.Unit
                 var messagesBefore = mailboxManager.GetMessages();
                 Assert.IsTrue(messagesBefore.Count > 0, "Should have received at least one message");
 
-                string testMessageId = messagesBefore[0].Message.MessageId;
+                string testMessageId = messagesBefore[0].Message.Id;
 
                 // Act
                 bool result = await mailboxManager.DeleteMessageAsync(testMessageId);
@@ -260,7 +289,7 @@ namespace LibEmiddle.Tests.Unit
                 bool stillPresent = false;
                 foreach (var (msg, _) in messagesAfter)
                 {
-                    if (msg.MessageId == testMessageId)
+                    if (msg.Id == testMessageId)
                     {
                         stillPresent = true;
                         break;
@@ -283,7 +312,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             // Create mailbox manager
-            var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+            var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider);
 
             try
             {
@@ -306,7 +335,7 @@ namespace LibEmiddle.Tests.Unit
         public void SetPollingInterval_WithTooSmallValue_ShouldThrowException()
         {
             // Arrange
-            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider))
             {
                 // Act & Assert - Should throw ArgumentException
                 mailboxManager.SetPollingInterval(TimeSpan.FromSeconds(1)); // Too small
@@ -317,7 +346,7 @@ namespace LibEmiddle.Tests.Unit
         public void GetStatistics_ShouldReturnValidData()
         {
             // Arrange
-            using (var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            using (var mailboxManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider))
             {
                 // Add test messages
                 foreach (var message in _testMessages)
@@ -325,13 +354,49 @@ namespace LibEmiddle.Tests.Unit
                     mailboxManager.AddTestMessage(message);
                 }
 
-                // Send a few messages to populate outgoing queue
                 var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
+                var dummyEncryptedMessage = new EncryptedMessage
+                {
+                    Ciphertext = _cryptoProvider.GenerateRandomBytes(16),
+                    Nonce = _cryptoProvider.GenerateRandomBytes(12),
+                    SenderDHKey = _cryptoProvider.GenerateRandomBytes(32),
+                    MessageId = Guid.NewGuid().ToString(),
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    SessionId = Guid.NewGuid().ToString()
+                };
+
+                var doubleRatchetSession = new DoubleRatchetSession
+                {
+                    SessionId = Guid.NewGuid().ToString(),
+                    RootKey = _cryptoProvider.GenerateRandomBytes(32),
+                    SenderRatchetKeyPair = Sodium.GenerateX25519KeyPair(),
+                    ReceiverRatchetPublicKey = recipientKeyPair.PublicKey,
+                    IsInitialized = true
+                };
+
+                _mockDoubleRatchetProtocol
+                    .Setup(dr => dr.EncryptAsync(It.IsAny<DoubleRatchetSession>(), It.IsAny<string>(), It.IsAny<KeyRotationStrategy>()))
+                    .ReturnsAsync((doubleRatchetSession, dummyEncryptedMessage));
+
+                // Setup reflection access to _sessions field for the test
+                var sessionsField = typeof(MailboxManager).GetField("_sessions",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+
+                // Get the _sessions dictionary
+                var sessions = (System.Collections.Concurrent.ConcurrentDictionary<string, DoubleRatchetSession>)
+                    sessionsField.GetValue(mailboxManager);
+
+                // Add the session to the manager's session dictionary
+                string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
+                sessions[recipientId] = doubleRatchetSession;
+
+                // Send a few messages to populate outgoing queue
                 for (int i = 0; i < 3; i++)
                 {
                     mailboxManager.SendMessage(
                         recipientKeyPair.PublicKey,
                         $"Test message {i}",
+                        doubleRatchetSession,
                         MessageType.Chat);
                 }
 
@@ -349,6 +414,7 @@ namespace LibEmiddle.Tests.Unit
                     "unreadMessages",
                     "activeSessions"
                 };
+
                 foreach (var key in expectedKeys)
                 {
                     Assert.IsTrue(stats.ContainsKey(key), $"Statistics should include {key}");
@@ -376,16 +442,32 @@ namespace LibEmiddle.Tests.Unit
             var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
             string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
 
-            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider))
             {
-                // Send a message to create a session
-                mailboxManager.SendMessage(recipientKeyPair.PublicKey, "Test message", MessageType.Chat);
+                // Create a Double Ratchet session for testing
+                var session = new DoubleRatchetSession
+                {
+                    SessionId = Guid.NewGuid().ToString(),
+                    RootKey = _cryptoProvider.GenerateRandomBytes(32),
+                    SenderChainKey = _cryptoProvider.GenerateRandomBytes(32),
+                    SenderRatchetKeyPair = Sodium.GenerateX25519KeyPair(),
+                    ReceiverRatchetPublicKey = recipientKeyPair.PublicKey,
+                    IsInitialized = true,
+                    CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+
+                // Add the session to mailbox manager (using reflection)
+                var sessionsField = typeof(MailboxManager).GetField("_sessions",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                var sessions = (System.Collections.Concurrent.ConcurrentDictionary<string, DoubleRatchetSession>)
+                    sessionsField.GetValue(mailboxManager);
+                sessions[recipientId] = session;
 
                 // Act
                 byte[] sessionData = mailboxManager.ExportSession(recipientId);
 
                 // Create a new mailbox manager (simulating a new device)
-                using (var newMailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+                using (var newMailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider))
                 {
                     // Import the session
                     bool result = newMailboxManager.ImportSession(recipientId, sessionData);
@@ -393,9 +475,15 @@ namespace LibEmiddle.Tests.Unit
                     // Assert
                     Assert.IsTrue(result, "Session import should succeed");
 
-                    // Verify we can now send messages with the imported session
-                    string messageId = newMailboxManager.SendMessage(recipientKeyPair.PublicKey, "Test with imported session", MessageType.Chat);
-                    Assert.IsFalse(string.IsNullOrEmpty(messageId), "Should be able to send messages with imported session");
+                    // Get the new sessions dictionary
+                    var newSessionsField = typeof(MailboxManager).GetField("_sessions",
+                        BindingFlags.NonPublic | BindingFlags.Instance);
+                    var newSessions = (System.Collections.Concurrent.ConcurrentDictionary<string, DoubleRatchetSession>)
+                        newSessionsField.GetValue(newMailboxManager);
+
+                    // Verify the session was imported
+                    Assert.IsTrue(newSessions.ContainsKey(recipientId), "Imported session should be in sessions dictionary");
+                    Assert.AreEqual(session.SessionId, newSessions[recipientId].SessionId, "Session IDs should match");
                 }
             }
         }
@@ -408,7 +496,7 @@ namespace LibEmiddle.Tests.Unit
             string recipientId = Convert.ToBase64String(recipientKeyPair.PublicKey);
             byte[] invalidSessionData = Encoding.Default.GetBytes("This is not valid session data");
 
-            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider))
             {
                 // Act
                 bool result = mailboxManager.ImportSession(recipientId, invalidSessionData);
@@ -432,16 +520,32 @@ namespace LibEmiddle.Tests.Unit
             // Make sure keys are different
             wrongKey[0] = (byte)(correctKey[0] ^ 0xFF);
 
-            using (var sourceManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            using (var sourceManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider))
             {
-                // Send a message to create a session
-                sourceManager.SendMessage(recipientKeyPair.PublicKey, "Test message", MessageType.Chat);
+                // Create a session for testing
+                var session = new DoubleRatchetSession
+                {
+                    SessionId = Guid.NewGuid().ToString(),
+                    RootKey = _cryptoProvider.GenerateRandomBytes(32),
+                    SenderChainKey = _cryptoProvider.GenerateRandomBytes(32),
+                    SenderRatchetKeyPair = Sodium.GenerateX25519KeyPair(),
+                    ReceiverRatchetPublicKey = recipientKeyPair.PublicKey,
+                    IsInitialized = true,
+                    CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+
+                // Add session to the session manager
+                var sessionsField = typeof(MailboxManager).GetField("_sessions",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                var sessions = (System.Collections.Concurrent.ConcurrentDictionary<string, DoubleRatchetSession>)
+                    sessionsField.GetValue(sourceManager);
+                sessions[recipientId] = session;
 
                 // Export with the correct key
                 byte[] sessionData = sourceManager.ExportSession(recipientId, correctKey);
 
                 // Create a new mailbox manager
-                using (var targetManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+                using (var targetManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider))
                 {
                     // Act - Try to import with the wrong key
                     bool result = targetManager.ImportSession(recipientId, sessionData, wrongKey);
@@ -453,18 +557,16 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
+        [ExpectedException(typeof(KeyNotFoundException))]
         public void ExportSession_NonexistentRecipient_ShouldThrowException()
         {
             // Arrange
             string nonExistentRecipientId = Convert.ToBase64String(SecureMemory.CreateSecureBuffer(32));
 
-            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object))
+            using (var mailboxManager = new MailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider))
             {
                 // Act & Assert
-                Assert.ThrowsException<KeyNotFoundException>(() =>
-                {
-                    mailboxManager.ExportSession(nonExistentRecipientId);
-                }, "ExportSession should throw KeyNotFoundException for nonexistent recipient");
+                mailboxManager.ExportSession(nonExistentRecipientId);
             }
         }
 
@@ -473,58 +575,47 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             // Create test messages, one of which is expired
-            var normalMessage = new MailboxMessage
+            var normalMessage = new MailboxMessage(_testIdentityKeyPair.PublicKey, Sodium.GenerateEd25519KeyPair().PublicKey, new EncryptedMessage
             {
-                MessageId = Guid.NewGuid().ToString(),
-                RecipientKey = _testIdentityKeyPair.PublicKey,
-                SenderKey = Sodium.GenerateEd25519KeyPair().PublicKey,
-                EncryptedPayload = new EncryptedMessage
-                {
-                    Ciphertext = new byte[16], // Must be non-empty 
-                    Nonce = new byte[Constants.NONCE_SIZE], // Must be correct size
-                    MessageNumber = 1,
-                    SenderDHKey = new byte[Constants.X25519_KEY_SIZE], // Must be correct size
-                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    MessageId = Guid.NewGuid()
-                },
+                Ciphertext = new byte[16], // Must be non-empty 
+                Nonce = new byte[Constants.NONCE_SIZE], // Must be correct size
+                SenderMessageNumber = 1,
+                SenderDHKey = new byte[Constants.X25519_KEY_SIZE], // Must be correct size
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                MessageId = Guid.NewGuid().ToString()
+            })
+            {
                 Type = MessageType.Chat,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds() // Not expired
             };
 
-            var expiredMessage = new MailboxMessage
+            var expiredMessage = new MailboxMessage(_testIdentityKeyPair.PublicKey, Sodium.GenerateEd25519KeyPair().PublicKey, new EncryptedMessage
             {
-                MessageId = Guid.NewGuid().ToString(),
-                RecipientKey = _testIdentityKeyPair.PublicKey,
-                SenderKey = Sodium.GenerateEd25519KeyPair().PublicKey,
-                EncryptedPayload = new EncryptedMessage
-                {
-                    Ciphertext = new byte[16], // Must be non-empty
-                    Nonce = new byte[Constants.NONCE_SIZE], // Must be correct size
-                    MessageNumber = 2,
-                    SenderDHKey = new byte[Constants.X25519_KEY_SIZE], // Must be correct size
-                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    MessageId = Guid.NewGuid()
-                },
+                Ciphertext = new byte[16], // Must be non-empty
+                Nonce = new byte[Constants.NONCE_SIZE], // Must be correct size
+                SenderMessageNumber = 2,
+                SenderDHKey = new byte[Constants.X25519_KEY_SIZE], // Must be correct size
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                MessageId = Guid.NewGuid().ToString()
+            })
+            {
                 Type = MessageType.Chat,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds() // Already expired
             };
 
-            // Generate valid data using Sodium to ensure proper sizes
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(normalMessage.EncryptedPayload.Ciphertext);
-                rng.GetBytes(normalMessage.EncryptedPayload.Nonce);
-                rng.GetBytes(normalMessage.EncryptedPayload.SenderDHKey);
+            // Generate valid data to ensure proper sizes
+            normalMessage.EncryptedPayload.Ciphertext = _cryptoProvider.GenerateRandomBytes(16);
+            normalMessage.EncryptedPayload.Nonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
+            normalMessage.EncryptedPayload.SenderDHKey = _cryptoProvider.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
 
-                rng.GetBytes(expiredMessage.EncryptedPayload.Ciphertext);
-                rng.GetBytes(expiredMessage.EncryptedPayload.Nonce);
-                rng.GetBytes(expiredMessage.EncryptedPayload.SenderDHKey);
-            }
+            expiredMessage.EncryptedPayload.Ciphertext = _cryptoProvider.GenerateRandomBytes(16);
+            expiredMessage.EncryptedPayload.Nonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
+            expiredMessage.EncryptedPayload.SenderDHKey = _cryptoProvider.GenerateRandomBytes(Constants.X25519_KEY_SIZE);
 
             // Create a testable subclass that exposes the protected method
-            var testableManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object);
+            var testableManager = new TestableMailboxManager(_testIdentityKeyPair, _mockTransport.Object, _mockDoubleRatchetProtocol.Object, _cryptoProvider);
 
             // Act & Assert
             Assert.IsTrue(testableManager.TestShouldProcessMessage(normalMessage), "Normal message should be processed");
@@ -535,7 +626,7 @@ namespace LibEmiddle.Tests.Unit
             var processedMessages = testMessages.Where(m => testableManager.TestShouldProcessMessage(m)).ToList();
 
             Assert.AreEqual(1, processedMessages.Count, "Only one message should pass filtering");
-            Assert.AreEqual(normalMessage.MessageId, processedMessages[0].MessageId, "Only the non-expired message should pass filtering");
+            Assert.AreEqual(normalMessage.Id, processedMessages[0].Id, "Only the non-expired message should pass filtering");
         }
     }
 
@@ -546,8 +637,8 @@ namespace LibEmiddle.Tests.Unit
         private readonly IMailboxTransport _testTransport;
         private readonly KeyPair _testIdentityKeyPair;
 
-        public TestableMailboxManager(KeyPair identityKeyPair, IMailboxTransport transport)
-            : base(identityKeyPair, transport)
+        public TestableMailboxManager(KeyPair identityKeyPair, IMailboxTransport transport, IDoubleRatchetProtocol doubleRatchetProtocol, ICryptoProvider cryptoProvider)
+            : base(identityKeyPair, transport, doubleRatchetProtocol, cryptoProvider)
         {
             // Store these for our test methods
             _testIdentityKeyPair = identityKeyPair;
@@ -555,10 +646,20 @@ namespace LibEmiddle.Tests.Unit
 
             // Get access to the _incomingMessages field using reflection
             var incomingMessagesField = typeof(MailboxManager).GetField("_incomingMessages",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                BindingFlags.NonPublic | BindingFlags.Instance);
 
             _incomingMessages = (System.Collections.Concurrent.ConcurrentDictionary<string, MailboxMessage>)
                 incomingMessagesField.GetValue(this);
+        }
+
+        // Add a method to directly add test messages to the internal collection
+        public void AddTestMessage(MailboxMessage message)
+        {
+            if (message == null)
+                throw new ArgumentNullException(nameof(message));
+
+            // Add the message to the internal collection
+            _incomingMessages.TryAdd(message.Id, message);
         }
 
         // Expose the ShouldProcessMessage method for testing
@@ -581,7 +682,7 @@ namespace LibEmiddle.Tests.Unit
                     {
                         if (ShouldProcessMessage(message))
                         {
-                            _incomingMessages.TryAdd(message.MessageId, message);
+                            _incomingMessages.TryAdd(message.Id, message);
                             message.IsDelivered = true;
                             message.DeliveredAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                             OnMessageReceived(message);
@@ -596,7 +697,7 @@ namespace LibEmiddle.Tests.Unit
             }
             catch (Exception ex)
             {
-                Trace.TraceError($"Error in TestPollForMessagesAsync: {ex}");
+                LoggingManager.LogError(nameof(TestableMailboxManager), $"Error in TestPollForMessagesAsync: {ex.Message}");
                 throw;
             }
         }
@@ -608,7 +709,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 // Get access to the outgoing queue field
                 var outgoingQueueField = typeof(MailboxManager).GetField("_outgoingQueue",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    BindingFlags.NonPublic | BindingFlags.Instance);
 
                 var outgoingQueue = outgoingQueueField.GetValue(this) as System.Collections.Concurrent.ConcurrentQueue<MailboxMessage>;
 
@@ -636,21 +737,9 @@ namespace LibEmiddle.Tests.Unit
             }
             catch (Exception ex)
             {
-                Trace.TraceError($"Error in TestProcessOutgoingMessagesAsync: {ex}");
+                LoggingManager.LogError(nameof(TestableMailboxManager), $"Error in TestProcessOutgoingMessagesAsync: {ex.Message}");
                 throw;
             }
-        }
-
-        // Add a method to manually add a message to the incoming messages collection
-        public void AddTestMessage(MailboxMessage message)
-        {
-            _incomingMessages.TryAdd(message.MessageId, message);
-        }
-
-        // Expose the OnMessageReceived method for testing
-        protected new void OnMessageReceived(MailboxMessage message)
-        {
-            base.OnMessageReceived(message);
         }
     }
 }

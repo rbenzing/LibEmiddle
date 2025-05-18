@@ -47,7 +47,7 @@ namespace LibEmiddle.API
             _deviceManager = new DeviceManager(_identityKeyPair);
             _chatSessionManager = new ChatSessionManager(_identityKeyPair);
             _mailboxTransport = new InMemoryMailboxTransport(_cryptoProvider);
-            _mailboxManager = new MailboxManager(_identityKeyPair, _mailboxTransport, _doubleRatchetProtocol);
+            _mailboxManager = new MailboxManager(_identityKeyPair, _mailboxTransport, _doubleRatchetProtocol, _cryptoProvider);
         }
 
         #region Key Management
@@ -521,7 +521,7 @@ namespace LibEmiddle.API
         public MailboxManager CreateMailboxManager(IMailboxTransport transport)
         {
             ThrowIfDisposed();
-            return new MailboxManager(_identityKeyPair, transport, _doubleRatchetProtocol);
+            return new MailboxManager(_identityKeyPair, transport, _doubleRatchetProtocol, _cryptoProvider);
         }
 
         #endregion

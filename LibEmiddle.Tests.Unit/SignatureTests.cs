@@ -31,7 +31,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Act
             byte[] signature = _cryptoProvider.Sign(message, privateKey);
-            bool isValid = _cryptoProvider.Verify(message, signature, publicKey);
+            bool isValid = _cryptoProvider.VerifySignature(message, signature, publicKey);
 
             // Assert
             Assert.IsTrue(isValid);
@@ -49,7 +49,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Act
             byte[] signature = _cryptoProvider.Sign(originalMessage, privateKey);
-            bool isValid = _cryptoProvider.Verify(tamperedMessage, signature, publicKey);
+            bool isValid = _cryptoProvider.VerifySignature(tamperedMessage, signature, publicKey);
 
             // Assert
             Assert.IsFalse(isValid);
@@ -146,9 +146,9 @@ namespace LibEmiddle.Tests.Unit
             long largeSignTime = stopwatch.ElapsedMilliseconds;
 
             // Assert - Verify signatures and check performance is reasonable
-            Assert.IsTrue(_cryptoProvider.Verify(smallMessage, smallSignature, publicKey));
-            Assert.IsTrue(_cryptoProvider.Verify(mediumMessage, mediumSignature, publicKey));
-            Assert.IsTrue(_cryptoProvider.Verify(largeMessage, largeSignature, publicKey));
+            Assert.IsTrue(_cryptoProvider.VerifySignature(smallMessage, smallSignature, publicKey));
+            Assert.IsTrue(_cryptoProvider.VerifySignature(mediumMessage, mediumSignature, publicKey));
+            Assert.IsTrue(_cryptoProvider.VerifySignature(largeMessage, largeSignature, publicKey));
 
             // Small message should be fast (we're using a loose constraint to allow for slow CI environments)
             Assert.IsTrue(smallSignTime < 500, $"Small message signing took {smallSignTime}ms");
@@ -199,14 +199,14 @@ namespace LibEmiddle.Tests.Unit
             CollectionAssert.AreNotEqual(signature2, signature3);
 
             // Ensure signatures verify correctly
-            Assert.IsTrue(_cryptoProvider.Verify(messageBytes, signature1, _signIdentityKeyPair1.PublicKey));
-            Assert.IsTrue(_cryptoProvider.Verify(messageBytes, signature2, _signIdentityKeyPair2.PublicKey));
-            Assert.IsTrue(_cryptoProvider.Verify(messageBytes, signature3, _signIdentityKeyPair3.PublicKey));
+            Assert.IsTrue(_cryptoProvider.VerifySignature(messageBytes, signature1, _signIdentityKeyPair1.PublicKey));
+            Assert.IsTrue(_cryptoProvider.VerifySignature(messageBytes, signature2, _signIdentityKeyPair2.PublicKey));
+            Assert.IsTrue(_cryptoProvider.VerifySignature(messageBytes, signature3, _signIdentityKeyPair3.PublicKey));
 
             // Ensure signatures don't verify with the wrong key
-            Assert.IsFalse(_cryptoProvider.Verify(messageBytes, signature1, _signIdentityKeyPair2.PublicKey));
-            Assert.IsFalse(_cryptoProvider.Verify(messageBytes, signature2, _signIdentityKeyPair3.PublicKey));
-            Assert.IsFalse(_cryptoProvider.Verify(messageBytes, signature3, _signIdentityKeyPair1.PublicKey));
+            Assert.IsFalse(_cryptoProvider.VerifySignature(messageBytes, signature1, _signIdentityKeyPair2.PublicKey));
+            Assert.IsFalse(_cryptoProvider.VerifySignature(messageBytes, signature2, _signIdentityKeyPair3.PublicKey));
+            Assert.IsFalse(_cryptoProvider.VerifySignature(messageBytes, signature3, _signIdentityKeyPair1.PublicKey));
         }
     }
 }

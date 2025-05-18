@@ -231,7 +231,7 @@ namespace LibEmiddle.Tests.Unit
                 });
 
             // Create a mailbox manager with our mocked transport
-            var mailboxManager = new MailboxManager(senderKeyPair, mockTransport.Object, _doubleRatchetProtocol);
+            var mailboxManager = new MailboxManager(senderKeyPair, mockTransport.Object, _doubleRatchetProtocol, _cryptoProvider);
 
             // Call the polling method via reflection since it's private
             var pollMethod = typeof(MailboxManager).GetMethod("PollForMessagesAsync",
@@ -440,7 +440,7 @@ namespace LibEmiddle.Tests.Unit
                 .Setup(t => t.FetchMessagesAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<MailboxMessage>());
 
-            using (var mailboxManager = new MailboxManager(identityKeyPair, mockTransport.Object, _doubleRatchetProtocol))
+            using (var mailboxManager = new MailboxManager(identityKeyPair, mockTransport.Object, _doubleRatchetProtocol, _cryptoProvider))
             {
                 // Act - Send a message
                 string messageId = await mailboxManager.SendMessageAsync(

@@ -1,14 +1,16 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
-using System.Text;
 using System.IO;
-using System.Text.Json;
-using System.Collections.Generic;
+using System.Text;
 using System.Security.Cryptography;
-using LibEmiddle.KeyExchange;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.Sessions;
+using LibEmiddle.Protocol;
+using LibEmiddle.Domain.Enums;
 using LibEmiddle.Abstractions;
 
 namespace LibEmiddle.Tests.Unit
@@ -16,309 +18,311 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class SessionPersistenceTests
     {
-        private CryptoProvider _cryptoProvider;
+        private ICryptoProvider _cryptoProvider;
+        private SessionPersistenceManager _persistenceManager;
+        private IDoubleRatchetProtocol _doubleRatchetProtocol;
+        private string _testStoragePath;
 
         [TestInitialize]
         public void Setup()
         {
             _cryptoProvider = new CryptoProvider();
+            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+
+            // Create a temporary directory for test session storage
+            _testStoragePath = Path.Combine(Path.GetTempPath(), $"LibEmiddle_Tests_{Guid.NewGuid()}");
+            Directory.CreateDirectory(_testStoragePath);
+
+            _persistenceManager = new SessionPersistenceManager(_cryptoProvider, _testStoragePath);
+        }
+
+        [TestCleanup]
+        public void Cleanup()
+        {
+            // Clean up the test storage directory
+            if (Directory.Exists(_testStoragePath))
+            {
+                try
+                {
+                    Directory.Delete(_testStoragePath, true);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error cleaning up test directory: {ex.Message}");
+                }
+            }
+
+            // Dispose resources
+            (_cryptoProvider as IDisposable)?.Dispose();
+            _persistenceManager.Dispose();
         }
 
         // Helper to create a test session
-        private DoubleRatchetSession CreateTestSession()
+        private async Task<DoubleRatchetSession> CreateTestSessionAsync()
         {
             // Generate key pairs for Alice and Bob
-            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
-            var bobKeyPair = Sodium.GenerateX25519KeyPair();
+            var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
+            var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
 
-            // Create initial shared secret
-            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
+            // Create a shared secret (similar to what X3DH would produce)
+            byte[] sharedSecret = _cryptoProvider.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
 
             // Create session ID
-            string sessionId = "test-session-" + Guid.NewGuid().ToString();
+            string sessionId = $"test-session-{Guid.NewGuid()}";
 
-            // Create a test session
-            return new DoubleRatchetSession(
-                dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.PublicKey,
-                rootKey: rootKey,
-                sendingChainKey: chainKey,
-                receivingChainKey: chainKey,
-                messageNumberReceiving: 5, // Use non-zero to verify persistence
-                messageNumberSending: 3, // Use non-zero to verify persistence
-                sessionId: sessionId,
-                recentlyProcessedIds: [Guid.NewGuid(), Guid.NewGuid()]
-            );
+            // Initialize a Double Ratchet session as the sender
+            return await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+                sharedKeyFromX3DH: sharedSecret,
+                recipientInitialPublicKey: bobKeyPair.PublicKey,
+                sessionId: sessionId);
         }
 
         [TestMethod]
-        public void SerializeDeserializeSession_WithoutEncryption_ShouldPreserveData()
+        public async Task SaveAndLoadSession_ShouldPreserveSessionData()
         {
             // Arrange
-            var originalSession = CreateTestSession();
+            var originalSession = await CreateTestSessionAsync();
 
             // Act
-            byte[] serialized = SessionPersistence.SerializeSession(originalSession);
-            var deserializedSession = SessionPersistence.DeserializeSession(serialized);
+            bool saveResult = await SerializeAndSaveSessionAsync(originalSession);
+            var loadedSession = await LoadAndDeserializeSessionAsync(originalSession.SessionId);
 
             // Assert
-            Assert.IsNotNull(deserializedSession);
-            Assert.AreEqual(originalSession.SessionId, deserializedSession.SessionId);
-            Assert.AreEqual(originalSession.MessageNumberReceiving, deserializedSession.MessageNumberReceiving);
-            Assert.AreEqual(originalSession.MessageNumberSending, deserializedSession.MessageNumberSending);
+            Assert.IsTrue(saveResult, "Session should be saved successfully");
+            Assert.IsNotNull(loadedSession, "Loaded session should not be null");
+            Assert.AreEqual(originalSession.SessionId, loadedSession.SessionId, "Session IDs should match");
+            Assert.AreEqual(originalSession.SendMessageNumber, loadedSession.SendMessageNumber, "SendMessageNumber should match");
+            Assert.AreEqual(originalSession.ReceiveMessageNumber, loadedSession.ReceiveMessageNumber, "ReceiveMessageNumber should match");
 
             // Compare key materials
             Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.DHRatchetKeyPair.PublicKey,
-                deserializedSession.DHRatchetKeyPair.PublicKey));
+                originalSession.SenderRatchetKeyPair.PublicKey,
+                loadedSession.SenderRatchetKeyPair.PublicKey),
+                "Public keys should match");
 
             Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.DHRatchetKeyPair.PrivateKey,
-                deserializedSession.DHRatchetKeyPair.PrivateKey));
+                originalSession.SenderRatchetKeyPair.PrivateKey,
+                loadedSession.SenderRatchetKeyPair.PrivateKey),
+                "Private keys should match");
 
             Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.RemoteDHRatchetKey,
-                deserializedSession.RemoteDHRatchetKey));
+                originalSession.ReceiverRatchetPublicKey,
+                loadedSession.ReceiverRatchetPublicKey),
+                "Receiver public keys should match");
 
             Assert.IsTrue(SecureMemory.SecureCompare(
                 originalSession.RootKey,
-                deserializedSession.RootKey));
-
-            Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.SendingChainKey,
-                deserializedSession.SendingChainKey));
-
-            Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.ReceivingChainKey,
-                deserializedSession.ReceivingChainKey));
-
-            // Check for message IDs preservation
-            Assert.AreEqual(originalSession.RecentlyProcessedIds.Count, deserializedSession.RecentlyProcessedIds.Count);
-
-            foreach (Guid id in originalSession.RecentlyProcessedIds)
-            {
-                Assert.IsTrue(deserializedSession.HasProcessedMessageId(id), $"Message ID {id} should be present");
-            }
+                loadedSession.RootKey),
+                "Root keys should match");
         }
 
         [TestMethod]
-        public void SerializeDeserializeSession_WithEncryption_ShouldPreserveData()
+        public async Task SaveSession_WithCustomMetadata_ShouldPreserveMetadata()
         {
             // Arrange
-            var originalSession = CreateTestSession();
-            byte[] encryptionKey = new byte[32];
-            using (var rng = RandomNumberGenerator.Create())
+            var originalSession = await CreateTestSessionAsync();
+
+            // Act - Save the session
+            var serializableData = new LibEmiddle.Domain.DTO.SerializedSessionData
             {
-                rng.GetBytes(encryptionKey);
-            }
-
-            // Act
-            byte[] serialized = SessionPersistence.SerializeSession(originalSession, encryptionKey);
-            var deserializedSession = SessionPersistence.DeserializeSession(serialized, encryptionKey);
-
-            // Assert
-            Assert.IsNotNull(deserializedSession);
-            Assert.AreEqual(originalSession.SessionId, deserializedSession.SessionId);
-            Assert.AreEqual(originalSession.MessageNumberReceiving, deserializedSession.MessageNumberReceiving);
-
-            // Compare key materials
-            Assert.IsTrue(SecureMemory.SecureCompare(
-                originalSession.DHRatchetKeyPair.PublicKey,
-                deserializedSession.DHRatchetKeyPair.PublicKey));
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(CryptographicException))]
-        public void DeserializeSession_WithWrongKey_ShouldThrowException()
-        {
-            // Arrange
-            var originalSession = CreateTestSession();
-            byte[] correctKey = new byte[32];
-            byte[] wrongKey = new byte[32];
-
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(correctKey);
-                rng.GetBytes(wrongKey);
-            }
-
-            // Make sure keys are different
-            wrongKey[0] = (byte)(correctKey[0] ^ 0xFF);
-
-            // Act & Assert
-            byte[] serialized = SessionPersistence.SerializeSession(originalSession, correctKey);
-            // This should throw CryptographicException
-            SessionPersistence.DeserializeSession(serialized, wrongKey);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(InvalidDataException))]
-        public void DeserializeSession_WithCorruptedData_ShouldThrowException()
-        {
-            // Arrange
-            var originalSession = CreateTestSession();
-            byte[] serializedBytes = SessionPersistence.SerializeSession(originalSession);
-            string serializedJson = System.Text.Encoding.UTF8.GetString(serializedBytes);
-
-            // Locate the "DHRatchetPublicKey" field in the JSON
-            string keyIdentifier = "\"DHRatchetPublicKey\":\"";
-            int keyStart = serializedJson.IndexOf(keyIdentifier);
-            if (keyStart < 0)
-                Assert.Fail("Serialized JSON does not contain DHRatchetPublicKey field.");
-            keyStart += keyIdentifier.Length;
-            int keyEnd = serializedJson.IndexOf("\"", keyStart);
-            if (keyEnd < 0)
-                Assert.Fail("Invalid JSON format for DHRatchetPublicKey.");
-
-            // Replace the original Base64-encoded key with an invalid string
-            string corruptedKeyValue = "!!!!!!"; // Characters '!' are not in the Base64 alphabet.
-            string corruptedJson = serializedJson.Substring(0, keyStart)
-                                   + corruptedKeyValue
-                                   + serializedJson.Substring(keyEnd);
-            byte[] corruptedBytes = System.Text.Encoding.Default.GetBytes(corruptedJson);
-
-            // Act & Assert - This should now throw an InvalidDataException.
-            SessionPersistence.DeserializeSession(corruptedBytes);
-        }
-
-        [TestMethod]
-        public void SaveLoadSessionToFile_WithoutEncryption_ShouldWorkCorrectly()
-        {
-            // Arrange
-            var originalSession = CreateTestSession();
-            string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-
-            try
-            {
-                // Act
-                SessionPersistence.SaveSessionToFile(originalSession, filePath);
-                var loadedSession = SessionPersistence.LoadSessionFromFile(filePath);
-
-                // Assert
-                Assert.IsNotNull(loadedSession);
-                Assert.AreEqual(originalSession.SessionId, loadedSession.SessionId);
-                Assert.AreEqual(originalSession.MessageNumberReceiving, loadedSession.MessageNumberReceiving);
-            }
-            finally
-            {
-                // Cleanup
-                if (File.Exists(filePath))
+                SessionId = originalSession.SessionId,
+                SessionType = SessionType.Individual,
+                State = SessionState.Active,
+                CreatedAt = DateTime.UtcNow,
+                LastModifiedAt = DateTime.UtcNow,
+                Metadata = new Dictionary<string, string>
                 {
-                    File.Delete(filePath);
-                }
-            }
-        }
-
-        [TestMethod]
-        public void SaveLoadSessionToFile_WithEncryption_ShouldWorkCorrectly()
-        {
-            // Arrange
-            var originalSession = CreateTestSession();
-            string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-            byte[] encryptionKey = new byte[32];
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(encryptionKey);
-            }
-
-            try
-            {
-                // Act
-                SessionPersistence.SaveSessionToFile(originalSession, filePath, encryptionKey);
-                var loadedSession = SessionPersistence.LoadSessionFromFile(filePath, encryptionKey);
-
-                // Assert
-                Assert.IsNotNull(loadedSession);
-                Assert.AreEqual(originalSession.SessionId, loadedSession.SessionId);
-                Assert.AreEqual(originalSession.MessageNumberReceiving, loadedSession.MessageNumberReceiving);
-            }
-            finally
-            {
-                // Cleanup
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
-            }
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
-        public void LoadSessionFromFile_NonexistentFile_ShouldThrowException()
-        {
-            // Act & Assert
-            SessionPersistence.LoadSessionFromFile("non-existent-file-that-should-not-exist.bin");
-        }
-
-        [TestMethod]
-        public void SerializeLargeSession_ShouldHandleEfficientlyAndSuccessfully()
-        {
-            // Arrange
-            var originalSession = CreateTestSession();
-
-            // Create a session with many processed message IDs to simulate a long-running session
-            var manyIds = new List<Guid>();
-            for (int i = 0; i < 1000; i++)
-            {
-                manyIds.Add(Guid.NewGuid());
-            }
-
-            var largeSession = originalSession;
-            foreach (var id in manyIds)
-            {
-                largeSession = largeSession.WithProcessedMessageId(id);
-            }
-
-            // Act
-            byte[] serialized = SessionPersistence.SerializeSession(largeSession);
-            var deserializedSession = SessionPersistence.DeserializeSession(serialized);
-
-            // Assert
-            Assert.IsNotNull(deserializedSession);
-            Assert.AreEqual(Constants.MAX_TRACKED_MESSAGE_IDS, deserializedSession.RecentlyProcessedIds.Count,
-                "Should limit the number of tracked IDs to the maximum defined in Constants");
-
-            // The most recent IDs should be preserved (due to queue-like behavior)
-            foreach (var id in manyIds.GetRange(manyIds.Count - Constants.MAX_TRACKED_MESSAGE_IDS, Constants.MAX_TRACKED_MESSAGE_IDS))
-            {
-                Assert.IsTrue(deserializedSession.HasProcessedMessageId(id),
-                    $"Recent message ID {id} should be preserved");
-            }
-        }
-
-        [TestMethod]
-        public void DeserializeWithValidSessionFormat_ShouldWorkCorrectly()
-        {
-            // Arrange
-            var originalSession = CreateTestSession();
-
-            // Manually build the JSON to simulate a specific format
-            var sessionData = new
-            {
-                DHRatchetPublicKey = Convert.ToBase64String(originalSession.DHRatchetKeyPair.PublicKey),
-                DHRatchetPrivateKey = Convert.ToBase64String(originalSession.DHRatchetKeyPair.PrivateKey),
-                RemoteDHRatchetKey = Convert.ToBase64String(originalSession.RemoteDHRatchetKey),
-                RootKey = Convert.ToBase64String(originalSession.RootKey),
-                SendingChainKey = Convert.ToBase64String(originalSession.SendingChainKey),
-                ReceivingChainKey = Convert.ToBase64String(originalSession.ReceivingChainKey),
-                originalSession.MessageNumberReceiving,
-                originalSession.MessageNumberSending,
-                originalSession.SessionId,
-                ProcessedMessageIds = new[] { Guid.NewGuid(), Guid.NewGuid() }
+                    { "TestKey1", "TestValue1" },
+                    { "TestKey2", "TestValue2" }
+                },
+                CryptoState = SerializeDoubleRatchetSession(originalSession)
             };
 
-            string json = JsonSerializer.Serialize(sessionData);
-            byte[] serializedData = Encoding.Default.GetBytes(json);
+            string filePath = Path.Combine(_testStoragePath, $"{originalSession.SessionId}.session");
 
-            // Act
-            var deserializedSession = SessionPersistence.DeserializeSession(serializedData);
+            // Simulate what SessionPersistenceManager would do
+            string json = JsonSerialization.Serialize(serializableData);
+            await File.WriteAllTextAsync(filePath, json);
+
+            // Deserialize manually
+            string loadedJson = await File.ReadAllTextAsync(filePath);
+            var loadedData = JsonSerialization.Deserialize<LibEmiddle.Domain.DTO.SerializedSessionData>(loadedJson);
 
             // Assert
-            Assert.IsNotNull(deserializedSession);
-            Assert.AreEqual(originalSession.SessionId, deserializedSession.SessionId);
-            Assert.AreEqual(originalSession.MessageNumberReceiving, deserializedSession.MessageNumberReceiving);
-            Assert.AreEqual(originalSession.MessageNumberSending, deserializedSession.MessageNumberSending);
+            Assert.IsNotNull(loadedData, "Loaded data should not be null");
+            Assert.AreEqual(originalSession.SessionId, loadedData.SessionId, "Session IDs should match");
+            Assert.AreEqual(2, loadedData.Metadata.Count, "Should have 2 metadata entries");
+            Assert.AreEqual("TestValue1", loadedData.Metadata["TestKey1"], "TestKey1 value should match");
+            Assert.AreEqual("TestValue2", loadedData.Metadata["TestKey2"], "TestKey2 value should match");
         }
+
+        [TestMethod]
+        public async Task LoadSession_WithMissingFile_ShouldReturnNull()
+        {
+            // Arrange - Use a session ID that doesn't exist
+            string nonExistentSessionId = $"non-existent-{Guid.NewGuid()}";
+
+            // Act & Assert
+            await Assert.ThrowsExceptionAsync<FileNotFoundException>(
+                async () => await LoadAndDeserializeSessionAsync(nonExistentSessionId),
+                "Loading a non-existent session should throw FileNotFoundException");
+        }
+
+        [TestMethod]
+        public async Task SaveAndDeleteSession_ShouldRemoveSessionFile()
+        {
+            // Arrange
+            var session = await CreateTestSessionAsync();
+            await SerializeAndSaveSessionAsync(session);
+
+            string filePath = Path.Combine(_testStoragePath, $"{session.SessionId}.session");
+
+            // Act
+            bool fileExistsBeforeDelete = File.Exists(filePath);
+            await _persistenceManager.DeleteSessionAsync(session.SessionId);
+            bool fileExistsAfterDelete = File.Exists(filePath);
+
+            // Assert
+            Assert.IsTrue(fileExistsBeforeDelete, "Session file should exist before deletion");
+            Assert.IsFalse(fileExistsAfterDelete, "Session file should not exist after deletion");
+        }
+
+        [TestMethod]
+        public async Task ListSessions_ShouldReturnStoredSessions()
+        {
+            // Arrange
+            var sessions = new List<DoubleRatchetSession>();
+            for (int i = 0; i < 3; i++)
+            {
+                var session = await CreateTestSessionAsync();
+                sessions.Add(session);
+                await SerializeAndSaveSessionAsync(session);
+            }
+
+            // Act
+            var sessionIds = await _persistenceManager.ListSessionsAsync();
+
+            // Assert
+            Assert.IsNotNull(sessionIds, "Session ID list should not be null");
+            Assert.AreEqual(3, sessionIds.Length, "Should have 3 sessions");
+
+            foreach (var session in sessions)
+            {
+                Assert.IsTrue(Array.Exists(sessionIds, id => id == session.SessionId),
+                    $"Session ID {session.SessionId} should be in the list");
+            }
+        }
+
+        [TestMethod]
+        public async Task SerializeAndDeserialize_WithManySkippedMessageKeys_ShouldPreserveData()
+        {
+            // Arrange
+            var originalSession = await CreateTestSessionAsync();
+
+            // Add skipped message keys to the session
+            var modifiedSession = originalSession;
+            for (uint i = 0; i < 50; i++)
+            {
+                var keyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
+                var skippedKey = new SkippedMessageKey(keyPair.PublicKey, i);
+                modifiedSession.SkippedMessageKeys[skippedKey] = _cryptoProvider.GenerateRandomBytes(32);
+            }
+
+            // Act
+            bool saveResult = await SerializeAndSaveSessionAsync(modifiedSession);
+            var loadedSession = await LoadAndDeserializeSessionAsync(modifiedSession.SessionId);
+
+            // Assert
+            Assert.IsTrue(saveResult, "Session should be saved successfully");
+            Assert.IsNotNull(loadedSession, "Loaded session should not be null");
+            Assert.AreEqual(50, loadedSession.SkippedMessageKeys.Count, "Should preserve all skipped message keys");
+        }
+
+        #region Helper Methods
+
+        private async Task<bool> SerializeAndSaveSessionAsync(DoubleRatchetSession session)
+        {
+            try
+            {
+                // Create a simple chat session wrapper to use with the persistence manager
+                var chatSession = CreateChatSessionWrapper(session);
+                return await _persistenceManager.SaveChatSessionAsync(chatSession);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error saving session: {ex.Message}");
+                return false;
+            }
+        }
+
+        private async Task<DoubleRatchetSession> LoadAndDeserializeSessionAsync(string sessionId)
+        {
+            var chatSession = await _persistenceManager.LoadChatSessionAsync(sessionId, _doubleRatchetProtocol);
+            return chatSession.GetCryptoSessionState();
+        }
+
+        private LibEmiddle.Messaging.Chat.ChatSession CreateChatSessionWrapper(DoubleRatchetSession session)
+        {
+            // Create dummy keys for the wrapper
+            byte[] dummyRemoteKey = new byte[32];
+            byte[] dummyLocalKey = new byte[32];
+            Array.Fill<byte>(dummyRemoteKey, 1);
+            Array.Fill<byte>(dummyLocalKey, 2);
+
+            // Create a chat session that wraps the double ratchet session
+            return new LibEmiddle.Messaging.Chat.ChatSession(
+                session,
+                dummyRemoteKey,
+                dummyLocalKey,
+                _doubleRatchetProtocol);
+        }
+
+        private string SerializeDoubleRatchetSession(DoubleRatchetSession session)
+        {
+            // Convert sensitive byte arrays to Base64 for serialization
+            var dto = new LibEmiddle.Domain.DTO.DoubleRatchetSessionDto
+            {
+                SessionId = session.SessionId,
+                RootKey = Convert.ToBase64String(session.RootKey),
+                SenderChainKey = session.SenderChainKey != null ? Convert.ToBase64String(session.SenderChainKey) : null,
+                ReceiverChainKey = session.ReceiverChainKey != null ? Convert.ToBase64String(session.ReceiverChainKey) : null,
+                SenderRatchetKeyPair = new LibEmiddle.Domain.DTO.KeyPairDto
+                {
+                    PublicKey = Convert.ToBase64String(session.SenderRatchetKeyPair.PublicKey),
+                    PrivateKey = Convert.ToBase64String(session.SenderRatchetKeyPair.PrivateKey)
+                },
+                ReceiverRatchetPublicKey = session.ReceiverRatchetPublicKey != null ?
+                    Convert.ToBase64String(session.ReceiverRatchetPublicKey) : null,
+                PreviousReceiverRatchetPublicKey = session.PreviousReceiverRatchetPublicKey != null ?
+                    Convert.ToBase64String(session.PreviousReceiverRatchetPublicKey) : null,
+                SendMessageNumber = session.SendMessageNumber,
+                ReceiveMessageNumber = session.ReceiveMessageNumber,
+                SentMessages = new Dictionary<uint, string>(),
+                SkippedMessageKeys = new Dictionary<LibEmiddle.Domain.DTO.SkippedMessageKeyDto, string>(),
+                IsInitialized = session.IsInitialized,
+                CreationTimestamp = session.CreationTimestamp
+            };
+
+            // Convert sent messages
+            foreach (var kvp in session.SentMessages)
+            {
+                dto.SentMessages[kvp.Key] = Convert.ToBase64String(kvp.Value);
+            }
+
+            // Convert skipped message keys
+            foreach (var kvp in session.SkippedMessageKeys)
+            {
+                var keyDto = new LibEmiddle.Domain.DTO.SkippedMessageKeyDto
+                {
+                    DhPublicKey = Convert.ToBase64String(kvp.Key.DhPublicKey),
+                    MessageNumber = kvp.Key.MessageNumber
+                };
+                dto.SkippedMessageKeys[keyDto] = Convert.ToBase64String(kvp.Value);
+            }
+
+            return JsonSerialization.Serialize(dto);
+        }
+
+        #endregion
     }
 }

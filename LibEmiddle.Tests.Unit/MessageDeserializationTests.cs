@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Text;
+using System.Text.Json;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using LibEmiddle.Domain;
 
@@ -12,16 +14,16 @@ namespace LibEmiddle.Tests.Unit
         public void EncryptedMessage_FromDictionary_ValidInput_ShouldDeserializeCorrectly()
         {
             // Arrange
-            var guid = Guid.NewGuid();
+            var guid = Guid.NewGuid().ToString();
             var messageDict = new Dictionary<string, object>
             {
-                ["ciphertext"] = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }),
-                ["nonce"] = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }),
-                ["messageNumber"] = 42,
-                ["senderDHKey"] = Convert.ToBase64String(new byte[] { 9, 10, 11, 12 }),
-                ["timestamp"] = 1634567890123L,
-                ["messageId"] = guid.ToString(),
-                ["sessionId"] = "test-session-123"
+                ["Ciphertext"] = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }),
+                ["Nonce"] = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }),
+                ["SenderMessageNumber"] = 42,
+                ["SenderDHKey"] = Convert.ToBase64String(new byte[] { 9, 10, 11, 12 }),
+                ["Timestamp"] = 1634567890123L,
+                ["MessageId"] = guid,
+                ["SessionId"] = "test-session-123"
             };
 
             // Act
@@ -31,7 +33,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(message);
             CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, message.Ciphertext);
             CollectionAssert.AreEqual(new byte[] { 5, 6, 7, 8 }, message.Nonce);
-            Assert.AreEqual(42, message.MessageNumber);
+            Assert.AreEqual(42, message.SenderMessageNumber);
             CollectionAssert.AreEqual(new byte[] { 9, 10, 11, 12 }, message.SenderDHKey);
             Assert.AreEqual(1634567890123L, message.Timestamp);
             Assert.AreEqual(guid, message.MessageId);
@@ -50,13 +52,13 @@ namespace LibEmiddle.Tests.Unit
         [ExpectedException(typeof(FormatException))]
         public void EncryptedMessage_FromDictionary_MissingRequiredField_ShouldThrowException()
         {
-            // Arrange - Missing required senderDHKey
+            // Arrange - Missing required SenderDHKey
             var messageDict = new Dictionary<string, object>
             {
-                ["ciphertext"] = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }),
-                ["nonce"] = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }),
-                ["messageNumber"] = 42
-                // senderDHKey is missing
+                ["Ciphertext"] = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }),
+                ["Nonce"] = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }),
+                ["SenderMessageNumber"] = 42
+                // SenderDHKey is missing
             };
 
             // Act & Assert - should throw FormatException
@@ -70,10 +72,10 @@ namespace LibEmiddle.Tests.Unit
             // Arrange - Invalid Base64 string
             var messageDict = new Dictionary<string, object>
             {
-                ["ciphertext"] = "Not a valid Base64 string!!!",
-                ["nonce"] = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }),
-                ["messageNumber"] = 42,
-                ["senderDHKey"] = Convert.ToBase64String(new byte[] { 9, 10, 11, 12 })
+                ["Ciphertext"] = "Not a valid Base64 string!!!",
+                ["Nonce"] = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }),
+                ["SenderMessageNumber"] = 42,
+                ["SenderDHKey"] = Convert.ToBase64String(new byte[] { 9, 10, 11, 12 })
             };
 
             // Act & Assert - should throw FormatException
@@ -87,10 +89,10 @@ namespace LibEmiddle.Tests.Unit
             // Arrange - Non-integer message number
             var messageDict = new Dictionary<string, object>
             {
-                ["ciphertext"] = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }),
-                ["nonce"] = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }),
-                ["messageNumber"] = "not a number",
-                ["senderDHKey"] = Convert.ToBase64String(new byte[] { 9, 10, 11, 12 })
+                ["Ciphertext"] = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }),
+                ["Nonce"] = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }),
+                ["SenderMessageNumber"] = "not a number",
+                ["SenderDHKey"] = Convert.ToBase64String(new byte[] { 9, 10, 11, 12 })
             };
 
             // Act & Assert - should throw FormatException
@@ -103,10 +105,10 @@ namespace LibEmiddle.Tests.Unit
             // Arrange - Only required fields
             var messageDict = new Dictionary<string, object>
             {
-                ["ciphertext"] = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }),
-                ["nonce"] = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }),
-                ["messageNumber"] = 42,
-                ["senderDHKey"] = Convert.ToBase64String(new byte[] { 9, 10, 11, 12 })
+                ["Ciphertext"] = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }),
+                ["Nonce"] = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }),
+                ["SenderMessageNumber"] = 42,
+                ["SenderDHKey"] = Convert.ToBase64String(new byte[] { 9, 10, 11, 12 })
                 // timestamp and messageId are missing
             };
 
@@ -116,21 +118,21 @@ namespace LibEmiddle.Tests.Unit
             // Assert
             Assert.IsNotNull(message);
             Assert.IsTrue(message.Timestamp > 0); // Should have a valid timestamp
-            Assert.AreNotEqual(Guid.Empty, message.MessageId); // Should have a valid GUID
+            Assert.IsNotNull(message.MessageId); // Should have a valid message ID
         }
 
         [TestMethod]
         public void EncryptedMessage_FromJson_ValidJson_ShouldDeserializeCorrectly()
         {
             // Arrange
-            var guid = Guid.NewGuid();
+            var guid = Guid.NewGuid().ToString();
             string json = $@"{{
-                ""ciphertext"": ""{Convert.ToBase64String(new byte[] { 1, 2, 3, 4 })}"",
-                ""nonce"": ""{Convert.ToBase64String(new byte[] { 5, 6, 7, 8 })}"",
-                ""messageNumber"": 42,
-                ""senderDHKey"": ""{Convert.ToBase64String(new byte[] { 9, 10, 11, 12 })}"",
-                ""timestamp"": 1634567890123,
-                ""messageId"": ""{guid}""
+                ""Ciphertext"": ""{Convert.ToBase64String(new byte[] { 1, 2, 3, 4 })}"",
+                ""Nonce"": ""{Convert.ToBase64String(new byte[] { 5, 6, 7, 8 })}"",
+                ""SenderMessageNumber"": 42,
+                ""SenderDHKey"": ""{Convert.ToBase64String(new byte[] { 9, 10, 11, 12 })}"",
+                ""Timestamp"": 1634567890123,
+                ""MessageId"": ""{guid}""
             }}";
 
             // Act
@@ -140,7 +142,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(message);
             CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, message.Ciphertext);
             CollectionAssert.AreEqual(new byte[] { 5, 6, 7, 8 }, message.Nonce);
-            Assert.AreEqual(42, message.MessageNumber);
+            Assert.AreEqual(42, message.SenderMessageNumber);
             CollectionAssert.AreEqual(new byte[] { 9, 10, 11, 12 }, message.SenderDHKey);
             Assert.AreEqual(1634567890123L, message.Timestamp);
             Assert.AreEqual(guid, message.MessageId);
@@ -169,12 +171,12 @@ namespace LibEmiddle.Tests.Unit
         public void EncryptedMessage_ToDictionary_ShouldConvertCorrectly()
         {
             // Arrange
-            var guid = Guid.NewGuid();
+            var guid = Guid.NewGuid().ToString();
             var message = new EncryptedMessage
             {
                 Ciphertext = new byte[] { 1, 2, 3, 4 },
                 Nonce = new byte[] { 5, 6, 7, 8 },
-                MessageNumber = 42,
+                SenderMessageNumber = 42,
                 SenderDHKey = new byte[] { 9, 10, 11, 12 },
                 Timestamp = 1634567890123L,
                 MessageId = guid,
@@ -186,12 +188,13 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsNotNull(dict);
-            Assert.AreEqual(Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }), dict["ciphertext"]);
-            Assert.AreEqual(Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }), dict["nonce"]);
-            Assert.AreEqual(42, dict["messageNumber"]);
-            Assert.AreEqual(Convert.ToBase64String(new byte[] { 9, 10, 11, 12 }), dict["senderDHKey"]);
-            Assert.AreEqual(1634567890123L, dict["timestamp"]);
-            Assert.AreEqual(guid.ToString(), dict["messageId"]);
+            Assert.AreEqual(Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }), dict["Ciphertext"]);
+            Assert.AreEqual(Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }), dict["Nonce"]);
+            Assert.AreEqual(42, dict["SenderMessageNumber"]);
+            Assert.AreEqual(Convert.ToBase64String(new byte[] { 9, 10, 11, 12 }), dict["SenderDHKey"]);
+            Assert.AreEqual(1634567890123L, dict["Timestamp"]);
+            Assert.AreEqual(guid, dict["MessageId"]);
+            Assert.AreEqual("test-session-123", dict["SessionId"]);
         }
 
         [TestMethod]
@@ -203,7 +206,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 Ciphertext = null,
                 Nonce = new byte[] { 5, 6, 7, 8 },
-                MessageNumber = 42,
+                SenderMessageNumber = 42,
                 SenderDHKey = new byte[] { 9, 10, 11, 12 }
             };
 
@@ -219,13 +222,13 @@ namespace LibEmiddle.Tests.Unit
             {
                 Ciphertext = new byte[] { 1, 2, 3, 4 },
                 Nonce = new byte[] { 5, 6, 7, 8 },
-                MessageNumber = 42,
+                SenderMessageNumber = 42,
                 SenderDHKey = new byte[] { 9, 10, 11, 12 },
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             };
 
             // Act
-            bool isValid = message.Validate();
+            bool isValid = message.IsValid();
 
             // Assert
             Assert.IsTrue(isValid, "Valid message should pass validation");
@@ -239,12 +242,12 @@ namespace LibEmiddle.Tests.Unit
             {
                 Ciphertext = null,
                 Nonce = new byte[] { 5, 6, 7, 8 },
-                MessageNumber = 42,
+                SenderMessageNumber = 42,
                 SenderDHKey = new byte[] { 9, 10, 11, 12 }
             };
 
             // Act
-            bool isValid = message.Validate();
+            bool isValid = message.IsValid();
 
             // Assert
             Assert.IsFalse(isValid, "Message with null ciphertext should fail validation");
@@ -258,45 +261,45 @@ namespace LibEmiddle.Tests.Unit
             {
                 Ciphertext = new byte[] { 1, 2, 3, 4 },
                 Nonce = new byte[] { 5, 6, 7, 8 },
-                MessageNumber = 42,
+                SenderMessageNumber = 42,
                 SenderDHKey = new byte[] { 9, 10, 11, 12 },
                 // Set timestamp to 10 minutes in the future
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 10 * 60 * 1000
             };
 
             // Act
-            bool isValid = message.Validate();
+            bool isValid = message.IsValid();
 
             // Assert
             Assert.IsFalse(isValid, "Message with future timestamp should fail validation");
         }
 
         [TestMethod]
-        public void EncryptedMessage_WithNewEncryption_ShouldCreateNewInstance()
+        public void EncryptedMessage_WithClone_ShouldCreateNewInstance()
         {
             // Arrange
             var originalMessage = new EncryptedMessage
             {
                 Ciphertext = new byte[] { 1, 2, 3, 4 },
                 Nonce = new byte[] { 5, 6, 7, 8 },
-                MessageNumber = 42,
+                SenderMessageNumber = 42,
                 SenderDHKey = new byte[] { 9, 10, 11, 12 },
                 Timestamp = 1634567890123L,
-                MessageId = Guid.NewGuid()
+                MessageId = Guid.NewGuid().ToString()
             };
 
             byte[] newCiphertext = new byte[] { 13, 14, 15, 16 };
             byte[] newNonce = new byte[] { 17, 18, 19, 20 };
 
             // Act
-            var newMessage = originalMessage.WithNewEncryption(newCiphertext, newNonce);
+            var newMessage = originalMessage.Clone();
 
             // Assert
             Assert.IsNotNull(newMessage);
             Assert.AreNotSame(originalMessage, newMessage, "Should create a new instance");
             CollectionAssert.AreEqual(newCiphertext, newMessage.Ciphertext);
             CollectionAssert.AreEqual(newNonce, newMessage.Nonce);
-            Assert.AreEqual(originalMessage.MessageNumber, newMessage.MessageNumber);
+            Assert.AreEqual(originalMessage.SenderMessageNumber, newMessage.SenderMessageNumber);
             CollectionAssert.AreEqual(originalMessage.SenderDHKey, newMessage.SenderDHKey);
             Assert.AreEqual(originalMessage.MessageId, newMessage.MessageId);
             Assert.IsTrue(newMessage.Timestamp >= originalMessage.Timestamp, "New timestamp should be later");

@@ -8,6 +8,7 @@ using LibEmiddle.API;
 using LibEmiddle.Domain;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Crypto;
+using LibEmiddle.Core;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -31,9 +32,9 @@ namespace LibEmiddle.Tests.Unit
             byte[] nonce3 = _cryptoProvider.GenerateNonce();
 
             // Assert
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(nonce1, nonce2));
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(nonce2, nonce3));
-            Assert.IsFalse(TestsHelpers.AreByteArraysEqual(nonce1, nonce3));
+            Assert.IsFalse(SecureMemory.SecureCompare(nonce1, nonce2));
+            Assert.IsFalse(SecureMemory.SecureCompare(nonce2, nonce3));
+            Assert.IsFalse(SecureMemory.SecureCompare(nonce1, nonce3));
         }
 
         [TestMethod]

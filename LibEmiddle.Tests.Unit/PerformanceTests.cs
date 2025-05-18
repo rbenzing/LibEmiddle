@@ -2,12 +2,14 @@
 using System;
 using System.Text;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 using LibEmiddle.API;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.KeyExchange;
+using LibEmiddle.Domain.Enums;
 using LibEmiddle.Messaging.Group;
+using LibEmiddle.Protocol;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -15,11 +17,15 @@ namespace LibEmiddle.Tests.Unit
     public class PerformanceTests
     {
         private CryptoProvider _cryptoProvider;
+        private X3DHProtocol _x3dhProtocol;
+        private DoubleRatchetProtocol _doubleRatchetProtocol;
 
         [TestInitialize]
         public void Setup()
         {
             _cryptoProvider = new CryptoProvider();
+            _x3dhProtocol = new X3DHProtocol(_cryptoProvider);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
         }
 
         [TestMethod]
@@ -147,9 +153,10 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var groupChatManager = new GroupChatManager(aliceKeyPair);
+            var groupChatManager = new GroupChatManager(_cryptoProvider, aliceKeyPair);
             string groupId = "performance-test-group";
-            groupChatManager.CreateGroup(groupId);
+            string groupName = "Performance Test Group";
+            groupChatManager.CreateGroupAsync(groupId, groupName).GetAwaiter().GetResult();
 
             // Create a message of moderate size
             StringBuilder messageBuilder = new StringBuilder(50 * 1024);
@@ -166,7 +173,7 @@ namespace LibEmiddle.Tests.Unit
             // Measure time to encrypt 10 messages
             for (int i = 0; i < 10; i++)
             {
-                var encryptedMessage = groupChatManager.EncryptGroupMessage(groupId, message);
+                var encryptedMessage = groupChatManager.SendMessageAsync(groupId, message).GetAwaiter().GetResult();
             }
 
             stopwatch.Stop();
@@ -178,72 +185,72 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void Performance_DoubleRatchetMessageExchangeTest()
+        public async Task Performance_DoubleRatchetMessageExchangeTest()
         {
-            // Arrange - Set up Double Ratchet sessions
-            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
-            var bobKeyPair = Sodium.GenerateX25519KeyPair();
+            // Arrange - Set up X3DH and Double Ratchet sessions
+            // 1. Generate identity key pairs for Alice and Bob
+            var aliceIdentityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var bobIdentityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            // Initial shared secret
-            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
+            // 2. Create Bob's key bundle (recipient)
+            var bobKeyBundle = await _x3dhProtocol.CreateKeyBundleAsync(bobIdentityKeyPair, numOneTimeKeys: 1);
 
-            // Create a session ID that will be shared between Alice and Bob
-            string sessionId = "alice-bob-session-" + Guid.NewGuid().ToString();
+            // 3. Alice initiates session with Bob's bundle (Alice is the sender)
+            string sessionId = $"test-session-{Guid.NewGuid():N}";
+            var x3dhResult = await _x3dhProtocol.InitiateSessionAsSenderAsync(bobKeyBundle.ToPublicBundle(), aliceIdentityKeyPair);
 
-            var aliceDRSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.PublicKey,
-                rootKey: rootKey,
-                sendingChainKey: chainKey,
-                receivingChainKey: chainKey,
-                messageNumberReceiving: 0,
-                messageNumberSending: 0,
-                sessionId: sessionId
-            );
+            // 4. Initialize Alice's Double Ratchet session with the shared key from X3DH
+            var aliceSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+                x3dhResult.SharedKey,
+                bobKeyBundle.SignedPreKey,
+                sessionId);
 
-            var bobDRSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: bobKeyPair,
-                remoteDHRatchetKey: aliceKeyPair.PublicKey,
-                rootKey: rootKey,
-                sendingChainKey: chainKey,
-                receivingChainKey: chainKey,
-                messageNumberReceiving: 0,
-                messageNumberSending: 0,
-                sessionId: sessionId
-            );
+            // 5. Bob processes the initial message and establishes his session
+            var bobSharedKey = await _x3dhProtocol.EstablishSessionAsReceiverAsync(
+                x3dhResult.MessageDataToSend,
+                bobKeyBundle);
 
-            // Create a message
+            // 6. Create a signed prekey pair for Bob's Double Ratchet initialization
+            var bobSignedPreKeyPair = new KeyPair
+            {
+                PublicKey = bobKeyBundle.SignedPreKey,
+                PrivateKey = bobKeyBundle.GetSignedPreKeyPrivate()
+            };
+
+            // 7. Initialize Bob's Double Ratchet session
+            var bobSession = await _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
+                bobSharedKey,
+                bobSignedPreKeyPair,
+                x3dhResult.MessageDataToSend.SenderEphemeralKeyPublic,
+                sessionId);
+
+            // Create a test message
             string message = "Performance test message for Double Ratchet";
 
             // Act - Measure performance of 50 message exchanges
             System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
             stopwatch.Start();
 
-            var currentAliceSession = aliceDRSession;
-            var currentBobSession = bobDRSession;
+            var currentAliceSession = aliceSession;
+            var currentBobSession = bobSession;
 
             for (int i = 0; i < 50; i++)
             {
                 // Alice to Bob
-                var (aliceUpdatedSession, encryptedMessage) =
-                    _cryptoProvider.DoubleRatchetEncrypt(currentAliceSession, message);
+                (DoubleRatchetSession aliceUpdatedSession, EncryptedMessage encryptedMessage) =
+                    await _doubleRatchetProtocol.EncryptAsync(currentAliceSession, message);
 
-                // Add required security fields
-                encryptedMessage.MessageId = Guid.NewGuid();
-                encryptedMessage.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                encryptedMessage.SessionId = sessionId;
+                // Bob decrypts Alice's message
+                (DoubleRatchetSession bobUpdatedSession, string decryptedMessage) =
+                    await _doubleRatchetProtocol.DecryptAsync(currentBobSession, encryptedMessage);
 
-                var (bobUpdatedSession, decryptedMessage) =
-                    _cryptoProvider.DoubleRatchetDecrypt(currentBobSession, encryptedMessage);
-
-                // Make sure both sessions are valid before continuing
+                // Ensure everything worked correctly
                 Assert.IsNotNull(aliceUpdatedSession, $"Alice's updated session should not be null at iteration {i}");
                 Assert.IsNotNull(bobUpdatedSession, $"Bob's updated session should not be null at iteration {i}");
                 Assert.IsNotNull(decryptedMessage, $"Decrypted message should not be null at iteration {i}");
                 Assert.AreEqual(message, decryptedMessage, $"Decrypted message should match original at iteration {i}");
 
-                // Update sessions for next iteration - only if they're valid
+                // Update sessions for next iteration
                 currentAliceSession = aliceUpdatedSession;
                 currentBobSession = bobUpdatedSession;
             }

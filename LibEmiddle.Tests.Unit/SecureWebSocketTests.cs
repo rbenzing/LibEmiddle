@@ -9,11 +9,11 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using LibEmiddle.Abstractions;
-using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
-using LibEmiddle.KeyExchange;
 using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Domain.Enums;
+using LibEmiddle.Protocol;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -22,32 +22,45 @@ namespace LibEmiddle.Tests.Unit
     {
         private Mock<IWebSocketClient> _mockWebSocket;
         private DoubleRatchetSession _testSession;
+        private X3DHKeyBundle _bobKeyBundle;
+        private InitialMessageData _initialMessageData;
         private readonly string _serverUrl = "wss://test.example.com";
         private CryptoProvider _cryptoProvider;
+        private X3DHProtocol _x3DHProtocol;
+        private DoubleRatchetProtocol _doubleRatchetProtocol;
 
         [TestInitialize]
-        public void Setup()
+        public async Task Setup()
         {
             _mockWebSocket = new Mock<IWebSocketClient>();
             _cryptoProvider = new CryptoProvider();
+            _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
 
-            // Create a test session simulating key exchange and session initialization
-            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
-            var bobKeyPair = Sodium.GenerateX25519KeyPair();
-            byte[] sharedSecret = Sodium.ScalarMult(bobKeyPair.PublicKey, aliceKeyPair.PrivateKey);
-            var (rootKey, chainKey) = _cryptoProvider.DeriveDoubleRatchet(sharedSecret);
-            string sessionId = "test-session-" + Guid.NewGuid().ToString();
+            // Create identity key pairs for both parties
+            var aliceIdentityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var bobIdentityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            _testSession = new DoubleRatchetSession(
-                dhRatchetKeyPair: aliceKeyPair,
-                remoteDHRatchetKey: bobKeyPair.PublicKey,
-                rootKey: rootKey,
-                sendingChainKey: chainKey,
-                receivingChainKey: chainKey,
-                messageNumberReceiving: 0,
-                messageNumberSending: 0,
-                sessionId: sessionId
-            );
+            // Create Bob's key bundle (as the receiver)
+            var bobKeyBundle = await _x3DHProtocol.CreateKeyBundleAsync(bobIdentityKeyPair, numOneTimeKeys: 1);
+
+            // Perform X3DH key exchange (Alice initiates)
+            var x3dhResult = await _x3DHProtocol.InitiateSessionAsSenderAsync(bobKeyBundle.ToPublicBundle(), aliceIdentityKeyPair);
+
+            // Generate a unique session ID
+            string sessionId = $"test-session-{Guid.NewGuid():N}";
+
+            // Initialize Alice's Double Ratchet session with shared key from X3DH
+            _testSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+                x3dhResult.SharedKey,
+                bobKeyBundle.SignedPreKey,
+                sessionId);
+
+            // Store Bob's bundle for tests that need it
+            _bobKeyBundle = bobKeyBundle;
+
+            // Store the initial message data for tests that need it
+            _initialMessageData = x3dhResult.MessageDataToSend;
         }
 
         [TestMethod]

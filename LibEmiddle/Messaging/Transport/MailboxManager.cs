@@ -2,6 +2,7 @@
 using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
+using LibEmiddle.Domain.DTO;
 using LibEmiddle.Domain.Enums;
 
 namespace LibEmiddle.Messaging.Transport
@@ -16,12 +17,14 @@ namespace LibEmiddle.Messaging.Transport
     /// <param name="identityKeyPair">The user's identity key pair</param>
     /// <param name="doubleRatchet">The double ratchet protocol implementation to use</param>
     /// <param name="transport">The transport implementation to use</param>
-    public class MailboxManager(KeyPair identityKeyPair, IMailboxTransport transport, IDoubleRatchetProtocol doubleRatchet) : IDisposable
+    /// <param name="cryptoProvider">The crypto provider implementation to use</param>
+    public class MailboxManager(KeyPair identityKeyPair, IMailboxTransport transport, IDoubleRatchetProtocol doubleRatchet, ICryptoProvider cryptoProvider) : IDisposable
     {
         private readonly KeyPair _identityKeyPair = identityKeyPair;
 
         private readonly IDoubleRatchetProtocol _doubleRatchetProtocol = doubleRatchet ?? throw new ArgumentNullException(nameof(doubleRatchet));
         private readonly IMailboxTransport _mailboxTransport = transport ?? throw new ArgumentNullException(nameof(transport));
+        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
 
         private readonly CancellationTokenSource _cts = new();
         private readonly ConcurrentDictionary<string, DoubleRatchetSession> _sessions = new();
@@ -330,6 +333,197 @@ namespace LibEmiddle.Messaging.Transport
             catch (Exception ex)
             {
                 LoggingManager.LogError(nameof(MailboxManager), $"Error deleting message on server: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Exports a session for a specific recipient.
+        /// </summary>
+        /// <param name="recipientId">The Base64-encoded recipient public key.</param>
+        /// <param name="encryptionKey">Optional encryption key for the exported data.</param>
+        /// <returns>The serialized session data.</returns>
+        /// <exception cref="KeyNotFoundException">Thrown if session for the recipient doesn't exist.</exception>
+        public byte[] ExportSession(string recipientId, byte[]? encryptionKey = null)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(recipientId, nameof(recipientId));
+
+            // Try to get session for this recipient from the sessions dictionary
+            if (!_sessions.TryGetValue(recipientId, out var session))
+            {
+                throw new KeyNotFoundException($"No session found for recipient {recipientId}");
+            }
+
+            try
+            {
+                // Serialize the Double Ratchet session state
+                var dto = new DoubleRatchetSessionDto
+                {
+                    SessionId = session.SessionId,
+                    RootKey = Convert.ToBase64String(session.RootKey),
+                    SenderChainKey = session.SenderChainKey != null ? Convert.ToBase64String(session.SenderChainKey) : null,
+                    ReceiverChainKey = session.ReceiverChainKey != null ? Convert.ToBase64String(session.ReceiverChainKey) : null,
+                    SenderRatchetKeyPair = new KeyPairDto
+                    {
+                        PublicKey = Convert.ToBase64String(session.SenderRatchetKeyPair.PublicKey),
+                        PrivateKey = Convert.ToBase64String(session.SenderRatchetKeyPair.PrivateKey)
+                    },
+                    ReceiverRatchetPublicKey = session.ReceiverRatchetPublicKey != null ?
+                        Convert.ToBase64String(session.ReceiverRatchetPublicKey) : null,
+                    PreviousReceiverRatchetPublicKey = session.PreviousReceiverRatchetPublicKey != null ?
+                        Convert.ToBase64String(session.PreviousReceiverRatchetPublicKey) : null,
+                    SendMessageNumber = session.SendMessageNumber,
+                    ReceiveMessageNumber = session.ReceiveMessageNumber,
+                    SentMessages = session.SentMessages.ToDictionary(
+                        kvp => kvp.Key,
+                        kvp => Convert.ToBase64String(kvp.Value)
+                    ),
+                    SkippedMessageKeys = session.SkippedMessageKeys.ToDictionary(
+                        kvp => new SkippedMessageKeyDto
+                        {
+                            DhPublicKey = Convert.ToBase64String(kvp.Key.DhPublicKey),
+                            MessageNumber = kvp.Key.MessageNumber
+                        },
+                        kvp => Convert.ToBase64String(kvp.Value)
+                    ),
+                    IsInitialized = session.IsInitialized,
+                    CreationTimestamp = session.CreationTimestamp
+                };
+
+                string json = JsonSerialization.Serialize(dto);
+                byte[] data = System.Text.Encoding.Default.GetBytes(json);
+
+                // If encryption is requested, encrypt the data
+                if (encryptionKey != null)
+                {
+                    if (encryptionKey.Length != Constants.AES_KEY_SIZE)
+                        throw new ArgumentException($"Encryption key must be {Constants.AES_KEY_SIZE} bytes", nameof(encryptionKey));
+
+                    byte[] nonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
+                    byte[] encryptedData = _cryptoProvider.Encrypt(data, encryptionKey, nonce, null);
+
+                    // Combine nonce and encrypted data for export
+                    byte[] result = new byte[sizeof(int) + nonce.Length + encryptedData.Length];
+                    using (var ms = new MemoryStream(result))
+                    using (var writer = new BinaryWriter(ms))
+                    {
+                        writer.Write(nonce.Length);
+                        writer.Write(nonce);
+                        writer.Write(encryptedData);
+                    }
+
+                    return result;
+                }
+
+                return data;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(MailboxManager), $"Failed to export session for {recipientId}: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Imports a session for a specific recipient.
+        /// </summary>
+        /// <param name="recipientId">The Base64-encoded recipient public key.</param>
+        /// <param name="sessionData">The serialized session data.</param>
+        /// <param name="decryptionKey">Optional decryption key if the session data is encrypted.</param>
+        /// <returns>True if the session was imported successfully.</returns>
+        public bool ImportSession(string recipientId, byte[] sessionData, byte[]? decryptionKey = null)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(recipientId, nameof(recipientId));
+            ArgumentNullException.ThrowIfNull(sessionData, nameof(sessionData));
+
+            try
+            {
+                byte[] dataToDeserialize = sessionData;
+
+                // If decryption key provided, decrypt the data
+                if (decryptionKey != null)
+                {
+                    if (decryptionKey.Length != Constants.AES_KEY_SIZE)
+                        throw new ArgumentException($"Decryption key must be {Constants.AES_KEY_SIZE} bytes", nameof(decryptionKey));
+
+                    try
+                    {
+                        // Extract nonce and encrypted data
+                        using (var ms = new MemoryStream(sessionData))
+                        using (var reader = new BinaryReader(ms))
+                        {
+                            int nonceLength = reader.ReadInt32();
+                            byte[] nonce = reader.ReadBytes(nonceLength);
+                            byte[] encryptedData = reader.ReadBytes((int)(ms.Length - ms.Position));
+
+                            // Decrypt the data
+                            dataToDeserialize = _cryptoProvider.Decrypt(encryptedData, decryptionKey, nonce, null);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggingManager.LogError(nameof(MailboxManager), $"Error decrypting session data: {ex.Message}");
+                        return false;
+                    }
+                }
+
+                // Deserialize the session data
+                string json = System.Text.Encoding.UTF8.GetString(dataToDeserialize);
+                var dto = JsonSerialization.Deserialize<DoubleRatchetSessionDto>(json);
+                if (dto == null)
+                {
+                    LoggingManager.LogError(nameof(MailboxManager), "Failed to deserialize session data");
+                    return false;
+                }
+
+                // Create the DoubleRatchetSession from DTO
+                var session = new DoubleRatchetSession
+                {
+                    SessionId = dto.SessionId,
+                    RootKey = Convert.FromBase64String(dto.RootKey),
+                    SenderChainKey = dto.SenderChainKey != null ? Convert.FromBase64String(dto.SenderChainKey) : null,
+                    ReceiverChainKey = dto.ReceiverChainKey != null ? Convert.FromBase64String(dto.ReceiverChainKey) : null,
+                    SenderRatchetKeyPair = new KeyPair
+                    {
+                        PublicKey = Convert.FromBase64String(dto.SenderRatchetKeyPair.PublicKey),
+                        PrivateKey = Convert.FromBase64String(dto.SenderRatchetKeyPair.PrivateKey)
+                    },
+                    ReceiverRatchetPublicKey = dto.ReceiverRatchetPublicKey != null ?
+                        Convert.FromBase64String(dto.ReceiverRatchetPublicKey) : null,
+                    PreviousReceiverRatchetPublicKey = dto.PreviousReceiverRatchetPublicKey != null ?
+                        Convert.FromBase64String(dto.PreviousReceiverRatchetPublicKey) : null,
+                    SendMessageNumber = dto.SendMessageNumber,
+                    ReceiveMessageNumber = dto.ReceiveMessageNumber,
+                    SentMessages = new Dictionary<uint, byte[]>(),
+                    SkippedMessageKeys = new Dictionary<SkippedMessageKey, byte[]>(),
+                    IsInitialized = dto.IsInitialized,
+                    CreationTimestamp = dto.CreationTimestamp
+                };
+
+                // Reconstruct the dictionaries
+                foreach (var kvp in dto.SentMessages)
+                {
+                    session.SentMessages[kvp.Key] = Convert.FromBase64String(kvp.Value);
+                }
+
+                foreach (var kvp in dto.SkippedMessageKeys)
+                {
+                    var key = new SkippedMessageKey(
+                        Convert.FromBase64String(kvp.Key.DhPublicKey),
+                        kvp.Key.MessageNumber
+                    );
+                    session.SkippedMessageKeys[key] = Convert.FromBase64String(kvp.Value);
+                }
+
+                // Add the session to our dictionary
+                _sessions[recipientId] = session;
+
+                LoggingManager.LogInformation(nameof(MailboxManager), $"Successfully imported session for {recipientId}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(MailboxManager), $"Failed to import session for {recipientId}: {ex.Message}");
                 return false;
             }
         }
