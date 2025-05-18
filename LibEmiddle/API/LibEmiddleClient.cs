@@ -7,6 +7,7 @@ using LibEmiddle.Messaging.Group;
 using LibEmiddle.Messaging.Transport;
 using LibEmiddle.MultiDevice;
 using LibEmiddle.Protocol;
+using LibEmiddle.Sessions;
 
 namespace LibEmiddle.API
 {
@@ -19,12 +20,12 @@ namespace LibEmiddle.API
         private readonly GroupChatManager _groupChatManager;
         private readonly GroupMemberManager _groupMemberManager;
         private readonly DeviceManager _deviceManager;
-        private readonly ChatSessionManager _chatSessionManager;
         private readonly MailboxManager _mailboxManager;
         private readonly IMailboxTransport _mailboxTransport;
         private readonly ICryptoProvider _cryptoProvider;
         private readonly X3DHProtocol _x3DHProtocol;
         private readonly DoubleRatchetProtocol _doubleRatchetProtocol;
+        private readonly SessionManager _sessionManager;
 
         private readonly KeyPair _identityKeyPair;
         private bool _disposed;
@@ -36,16 +37,14 @@ namespace LibEmiddle.API
         public LibEmiddleClient(KeyPair identityKeyPair)
         {
             // Generate an X25519 identity key pair for this client
-            _cryptoProvider = new CryptoProvider();
-            _deviceManager = new DeviceManager(_identityKeyPair);
-            _chatSessionManager = new ChatSessionManager(_identityKeyPair);
             _identityKeyPair = identityKeyPair.ToString() == null ? Sodium.GenerateX25519KeyPair() : identityKeyPair;
+            _cryptoProvider = new CryptoProvider();
             _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
             _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+            _sessionManager = new SessionManager(_cryptoProvider, _x3DHProtocol, _doubleRatchetProtocol, _identityKeyPair);
             _groupChatManager = new GroupChatManager(_cryptoProvider, _identityKeyPair);
             _groupMemberManager = new GroupMemberManager(_cryptoProvider);
             _deviceManager = new DeviceManager(_identityKeyPair);
-            _chatSessionManager = new ChatSessionManager(_identityKeyPair);
             _mailboxTransport = new InMemoryMailboxTransport(_cryptoProvider);
             _mailboxManager = new MailboxManager(_identityKeyPair, _mailboxTransport, _doubleRatchetProtocol, _cryptoProvider);
         }
@@ -188,16 +187,19 @@ namespace LibEmiddle.API
         /// <param name="recipientBundle">Optional recipient's key bundle, required for new sessions</param>
         /// <returns>Chat session</returns>
         /// <exception cref="ArgumentNullException">Thrown when recipientPublicKey is null</exception>
-        public (ChatSession session, InitialMessageData? initialMessageData) GetOrCreateChatSession(
-            byte[] recipientPublicKey,
-            X3DHPublicBundle? recipientBundle = null)
+        public ChatSession GetOrCreateChatSession(byte[] recipientPublicKey)
         {
             ThrowIfDisposed();
 
             if (recipientPublicKey == null)
                 throw new ArgumentNullException(nameof(recipientPublicKey));
 
-            return _chatSessionManager.GetOrCreateSession(recipientPublicKey, recipientBundle);
+            ChatSession? session = _sessionManager.CreateSessionAsync(recipientPublicKey).GetAwaiter().GetResult() as ChatSession;
+
+            if (session == null)
+                throw new ArgumentNullException(nameof(session));
+
+            return session;
         }
 
         /// <summary>
@@ -212,17 +214,17 @@ namespace LibEmiddle.API
             if (recipientPublicKey == null)
                 throw new ArgumentNullException(nameof(recipientPublicKey));
 
-            _chatSessionManager.CloseSession(recipientPublicKey);
+            _sessionManager.DeleteSessionAsync(recipientPublicKey);
         }
 
         /// <summary>
         /// Gets all active chat sessions
         /// </summary>
         /// <returns>Collection of active session keys (Base64 encoded recipient public keys)</returns>
-        public IEnumerable<string> GetActiveChatSessions()
+        public IEnumerable<string?> GetActiveChatSessions()
         {
             ThrowIfDisposed();
-            return _chatSessionManager.GetActiveSessions();
+            return _sessionManager.ListSessionsAsync().GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -235,7 +237,7 @@ namespace LibEmiddle.API
         {
             ThrowIfDisposed();
 
-            _chatSessionManager.ConfigureStorage(sessionStoragePath, sessionEncryptionKey, enableLogging);
+            _chatSession.ConfigureStorage(sessionStoragePath, sessionEncryptionKey, enableLogging);
         }
 
         #endregion
@@ -575,7 +577,7 @@ namespace LibEmiddle.API
                 // Dispose managed resources
                 (_groupChatManager as IDisposable)?.Dispose();
                 _deviceManager.Dispose();
-                (_chatSessionManager as IDisposable)?.Dispose();
+                (_chatSession as IDisposable)?.Dispose();
             }
 
             _disposed = true;
@@ -609,15 +611,15 @@ namespace LibEmiddle.API
         /// <summary>
         /// Configures the storage options for the chat session manager
         /// </summary>
-        /// <param name="manager">Chat session manager to configure</param>
+        /// <param name="session">Chat session to configure</param>
         /// <param name="sessionStoragePath">Path to store session data</param>
         /// <param name="sessionEncryptionKey">Optional key to encrypt session data</param>
         /// <param name="enableLogging">Whether to enable detailed logging</param>
-        public static void ConfigureStorage(this ChatSessionManager manager, string sessionStoragePath, byte[]? sessionEncryptionKey = null, bool enableLogging = false)
+        public static void ConfigureStorage(this ChatSession session, string sessionStoragePath, byte[]? sessionEncryptionKey = null, bool enableLogging = false)
         {
-            // This extension method assumes these properties would be added to ChatSessionManager
-            // It serves as a placeholder until you can update the actual ChatSessionManager class
-            LoggingManager.LogInformation(nameof(ChatSessionManager), $"Configuring storage path: {sessionStoragePath}");
+            // This extension method assumes these properties would be added to ChatSession
+            // It serves as a placeholder until you can update the actual ChatSession class
+            LoggingManager.LogInformation(nameof(ChatSession), $"Configuring storage path: {sessionStoragePath}");
         }
     }
 }

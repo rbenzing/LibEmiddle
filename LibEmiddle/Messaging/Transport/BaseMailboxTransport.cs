@@ -1,8 +1,6 @@
-﻿using Microsoft.Extensions.Logging;
-using LibEmiddle.Abstractions;
+﻿using LibEmiddle.Abstractions;
 using LibEmiddle.Domain;
 using LibEmiddle.Core;
-using System;
 
 namespace LibEmiddle.Messaging.Transport
 {

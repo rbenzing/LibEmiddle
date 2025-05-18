@@ -17,8 +17,7 @@ LibEmiddle/
 │   │   │   └── KeyStorage.cs
 │   │   ├── Messaging/
 │   │   │   ├── Chat/
-│   │   │   │   ├── ChatSession.cs
-│   │   │   │   └── ChatSessionManager.cs
+│   │   │   │   └── ChatSession.cs
 │   │   │   ├── Group/
 │   │   │   │   ├── GroupChatManager.cs
 │   │   │   │   ├── GroupKeyManager.cs

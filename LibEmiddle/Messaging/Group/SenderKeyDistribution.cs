@@ -20,7 +20,7 @@ namespace LibEmiddle.Messaging.Group
 
         // Cache of distribution messages by group ID
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, SenderKeyDistributionMessage>> _distributionMessages =
-            new ConcurrentDictionary<string, ConcurrentDictionary<string, SenderKeyDistributionMessage>>();
+            new();
 
         /// <summary>
         /// Creates a new sender key distribution message for a group.

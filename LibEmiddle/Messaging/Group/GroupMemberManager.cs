@@ -9,21 +9,16 @@ namespace LibEmiddle.Messaging.Group
     /// Manages group membership, including members, admins, roles,
     /// and permissions within group chat contexts.
     /// </summary>
-    public class GroupMemberManager
+    /// <remarks>
+    /// Initializes a new instance of the GroupMemberManager class.
+    /// </remarks>
+    /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
+    public class GroupMemberManager(ICryptoProvider cryptoProvider)
     {
-        private readonly ICryptoProvider _cryptoProvider;
+        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
 
         // Group information
-        private readonly ConcurrentDictionary<string, GroupInfo> _groups = new ConcurrentDictionary<string, GroupInfo>();
-
-        /// <summary>
-        /// Initializes a new instance of the GroupMemberManager class.
-        /// </summary>
-        /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-        public GroupMemberManager(ICryptoProvider cryptoProvider)
-        {
-            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-        }
+        private readonly ConcurrentDictionary<string, GroupInfo> _groups = new();
 
         /// <summary>
         /// Creates a new group with the specified creator.

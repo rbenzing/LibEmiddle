@@ -12,7 +12,7 @@ namespace LibEmiddle.Messaging.Group
     /// </summary>
     public class GroupSession : IGroupSession, ISession, IDisposable
     {
-        private readonly SemaphoreSlim _sessionLock = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim _sessionLock = new(1, 1);
         private readonly string _groupId;
         private readonly KeyPair _identityKeyPair;
         private readonly GroupKeyManager _keyManager;

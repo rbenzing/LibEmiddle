@@ -9,29 +9,23 @@ namespace LibEmiddle.Messaging.Group
     /// Manages cryptographic keys and ratchet chains for group messaging sessions,
     /// supporting key generation, rotation, and secure distribution in group contexts.
     /// </summary>
-    public class GroupKeyManager
+    /// <remarks>
+    /// Initializes a new instance of the GroupKeyManager class.
+    /// </remarks>
+    /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
+    public class GroupKeyManager(ICryptoProvider cryptoProvider)
     {
-        private readonly ICryptoProvider _cryptoProvider;
-        private readonly SemaphoreSlim _operationLock = new SemaphoreSlim(1, 1);
+        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
+        private readonly SemaphoreSlim _operationLock = new(1, 1);
 
         // In-memory storage for sender chain states
-        private readonly ConcurrentDictionary<string, GroupSenderState> _senderStates = new ConcurrentDictionary<string, GroupSenderState>();
+        private readonly ConcurrentDictionary<string, GroupSenderState> _senderStates = new();
 
         // In-memory storage for receiver chain states
-        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte[]>> _receiverStates =
-            new ConcurrentDictionary<string, ConcurrentDictionary<string, byte[]>>();
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte[]>> _receiverStates = new();
 
         // Timestamps of last key rotations
-        private readonly ConcurrentDictionary<string, long> _lastRotationTimestamps = new ConcurrentDictionary<string, long>();
-
-        /// <summary>
-        /// Initializes a new instance of the GroupKeyManager class.
-        /// </summary>
-        /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-        public GroupKeyManager(ICryptoProvider cryptoProvider)
-        {
-            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-        }
+        private readonly ConcurrentDictionary<string, long> _lastRotationTimestamps = new();
 
         /// <summary>
         /// Generates an initial chain key for a new group.

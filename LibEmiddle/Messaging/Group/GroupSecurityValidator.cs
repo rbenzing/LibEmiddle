@@ -8,24 +8,18 @@ namespace LibEmiddle.Messaging.Group
     /// Validates the security properties of group messaging operations,
     /// ensuring integrity, authenticity, and proper permissions.
     /// </summary>
-    public class GroupSecurityValidator
+    /// <remarks>
+    /// Initializes a new instance of the GroupSecurityValidator class.
+    /// </remarks>
+    /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
+    /// <param name="memberManager">The group member manager.</param>
+    public class GroupSecurityValidator(ICryptoProvider cryptoProvider, GroupMemberManager memberManager)
     {
-        private readonly ICryptoProvider _cryptoProvider;
-        private readonly GroupMemberManager _memberManager;
+        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
+        private readonly GroupMemberManager _memberManager = memberManager ?? throw new ArgumentNullException(nameof(memberManager));
 
         // Cache of known public keys for validation
         private readonly Dictionary<string, byte[]> _knownPublicKeys = [];
-
-        /// <summary>
-        /// Initializes a new instance of the GroupSecurityValidator class.
-        /// </summary>
-        /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-        /// <param name="memberManager">The group member manager.</param>
-        public GroupSecurityValidator(ICryptoProvider cryptoProvider, GroupMemberManager memberManager)
-        {
-            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-            _memberManager = memberManager ?? throw new ArgumentNullException(nameof(memberManager));
-        }
 
         /// <summary>
         /// Validates a group operation based on the actor's permissions.

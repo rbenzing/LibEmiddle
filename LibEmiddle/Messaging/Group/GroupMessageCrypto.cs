@@ -10,22 +10,16 @@ namespace LibEmiddle.Messaging.Group
     /// Handles cryptographic operations for group messages, including encryption,
     /// decryption, and authentication for group communication.
     /// </summary>
-    public class GroupMessageCrypto
+    /// <remarks>
+    /// Initializes a new instance of the GroupMessageCrypto class.
+    /// </remarks>
+    /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
+    public class GroupMessageCrypto(ICryptoProvider cryptoProvider)
     {
-        private readonly ICryptoProvider _cryptoProvider;
+        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
 
         // Records of when users joined groups, used for replay protection
-        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _groupJoinTimestamps =
-            new ConcurrentDictionary<string, ConcurrentDictionary<string, long>>();
-
-        /// <summary>
-        /// Initializes a new instance of the GroupMessageCrypto class.
-        /// </summary>
-        /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-        public GroupMessageCrypto(ICryptoProvider cryptoProvider)
-        {
-            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-        }
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _groupJoinTimestamps = new();
 
         /// <summary>
         /// Encrypts a message for a group using a message key.

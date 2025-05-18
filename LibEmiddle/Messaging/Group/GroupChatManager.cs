@@ -21,7 +21,7 @@ namespace LibEmiddle.Messaging.Group
         private bool _disposed;
 
         // Active sessions
-        private readonly ConcurrentDictionary<string, GroupSession> _activeGroups = new ConcurrentDictionary<string, GroupSession>();
+        private readonly ConcurrentDictionary<string, GroupSession> _activeGroups = new();
 
         /// <summary>
         /// Initializes a new instance of the GroupChatManager class.
