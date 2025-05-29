@@ -40,7 +40,7 @@ namespace LibEmiddle.Messaging.Transport
 
             try
             {
-                LoggingManager.LogDebug("BaseMailboxTransport", 
+                LoggingManager.LogDebug(nameof(BaseMailboxTransport), 
                     $"Sending message: {message.Id} to recipient: {Convert.ToBase64String(message.RecipientKey).Substring(0, Math.Min(8, message.RecipientKey.Length))}");
 
                 // Implementation-specific send logic
@@ -48,7 +48,7 @@ namespace LibEmiddle.Messaging.Transport
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("BaseMailboxTransport", $"Error sending message {message.Id}", ex);
+                LoggingManager.LogError(nameof(BaseMailboxTransport), $"Error sending message {message.Id}", ex);
                 return false;
             }
         }
@@ -76,7 +76,7 @@ namespace LibEmiddle.Messaging.Transport
 
             try
             {
-                LoggingManager.LogDebug("BaseMailboxTransport", 
+                LoggingManager.LogDebug(nameof(BaseMailboxTransport), 
                     $"Fetching messages for recipient: {Convert.ToBase64String(recipientKey).Substring(0, Math.Min(8, recipientKey.Length))}");
 
                 var messages = await FetchMessagesInternalAsync(recipientKey, cancellationToken);
@@ -91,7 +91,7 @@ namespace LibEmiddle.Messaging.Transport
                     }
                     else
                     {
-                        LoggingManager.LogWarning("BaseMailboxTransport", $"Discarded invalid message: {message.Id}");
+                        LoggingManager.LogWarning(nameof(BaseMailboxTransport), $"Discarded invalid message: {message.Id}");
                     }
                 }
 
@@ -99,7 +99,7 @@ namespace LibEmiddle.Messaging.Transport
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("BaseMailboxTransport", 
+                LoggingManager.LogError(nameof(BaseMailboxTransport), 
                     $"Error fetching messages for recipient: {Convert.ToBase64String(recipientKey).Substring(0, Math.Min(8, recipientKey.Length))}",
                     ex);
                 return [];
@@ -129,12 +129,12 @@ namespace LibEmiddle.Messaging.Transport
 
             try
             {
-                LoggingManager.LogDebug("BaseMailboxTransport", $"Deleting message: {messageId}");
+                LoggingManager.LogDebug(nameof(BaseMailboxTransport), $"Deleting message: {messageId}");
                 return await DeleteMessageInternalAsync(messageId);
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("BaseMailboxTransport", $"Error deleting message {messageId}", ex);
+                LoggingManager.LogError(nameof(BaseMailboxTransport), $"Error deleting message {messageId}", ex);
                 return false;
             }
         }
@@ -161,19 +161,19 @@ namespace LibEmiddle.Messaging.Transport
 
             try
             {
-                LoggingManager.LogDebug("BaseMailboxTransport", $"Marking message as read: {messageId}");
+                LoggingManager.LogDebug(nameof(BaseMailboxTransport), $"Marking message as read: {messageId}");
                 bool result = await MarkMessageAsReadInternalAsync(messageId);
 
                 if (result)
                 {
-                    LoggingManager.LogDebug("BaseMailboxTransport", $"Message marked as read: {messageId}");
+                    LoggingManager.LogDebug(nameof(BaseMailboxTransport), $"Message marked as read: {messageId}");
                 }
 
                 return result;
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("BaseMailboxTransport", $"Error marking message as read {messageId}", ex);
+                LoggingManager.LogError(nameof(BaseMailboxTransport), $"Error marking message as read {messageId}", ex);
                 return false;
             }
         }
@@ -196,11 +196,11 @@ namespace LibEmiddle.Messaging.Transport
         {
             if (pollingInterval < 1000)
             {
-                LoggingManager.LogWarning("BaseMailboxTransport", $"Polling interval is set to {pollingInterval}ms which may cause excessive resource usage. " +
+                LoggingManager.LogWarning(nameof(BaseMailboxTransport), $"Polling interval is set to {pollingInterval}ms which may cause excessive resource usage. " +
                                   "Recommended minimum is 1000ms.");
             }
 
-            LoggingManager.LogInformation("BaseMailboxTransport", $"Starting mailbox polling with interval: {pollingInterval}ms");
+            LoggingManager.LogInformation(nameof(BaseMailboxTransport), $"Starting mailbox polling with interval: {pollingInterval}ms");
 
             await StartListeningInternalAsync(localIdentityKey, pollingInterval, cancellationToken);
         }
@@ -220,7 +220,7 @@ namespace LibEmiddle.Messaging.Transport
         /// <returns>A task representing the asynchronous operation.</returns>
         public virtual Task StopListeningAsync()
         {
-            LoggingManager.LogInformation("BaseMailboxTransport", "Stopping mailbox polling");
+            LoggingManager.LogInformation(nameof(BaseMailboxTransport), "Stopping mailbox polling");
             return StopListeningInternalAsync();
         }
 
@@ -251,26 +251,26 @@ namespace LibEmiddle.Messaging.Transport
 
             if (message.SenderKey == null || message.SenderKey.Length == 0)
             {
-                LoggingManager.LogWarning("BaseMailboxTransport", $"Message {message.Id} has no sender key");
+                LoggingManager.LogWarning(nameof(BaseMailboxTransport), $"Message {message.Id} has no sender key");
                 return Task.FromResult(false);
             }
 
             if (message.RecipientKey == null || message.RecipientKey.Length == 0)
             {
-                LoggingManager.LogWarning("BaseMailboxTransport", $"Message {message.Id} has no recipient key");
+                LoggingManager.LogWarning(nameof(BaseMailboxTransport), $"Message {message.Id} has no recipient key");
                 return Task.FromResult(false);
             }
 
             if (message.EncryptedPayload == null || !message.EncryptedPayload.IsValid())
             {
-                LoggingManager.LogWarning("BaseMailboxTransport", $"Message {message.Id} has invalid encrypted payload");
+                LoggingManager.LogWarning(nameof(BaseMailboxTransport), $"Message {message.Id} has invalid encrypted payload");
                 return Task.FromResult(false);
             }
 
             // Check expiration
             if (message.IsExpired())
             {
-                LoggingManager.LogInformation("BaseMailboxTransport", $"Message {message.Id} has expired");
+                LoggingManager.LogInformation(nameof(BaseMailboxTransport), $"Message {message.Id} has expired");
                 return Task.FromResult(false);
             }
 
@@ -291,7 +291,7 @@ namespace LibEmiddle.Messaging.Transport
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("BaseMailboxTransport", $"Error in message received event handler for {message.Id}", ex);
+                LoggingManager.LogError(nameof(BaseMailboxTransport), $"Error in message received event handler for {message.Id}", ex);
             }
         }
 
@@ -310,13 +310,13 @@ namespace LibEmiddle.Messaging.Transport
 
             try
             {
-                LoggingManager.LogDebug("BaseMailboxTransport", $"Updating delivery status for message {messageId} to {isDelivered}");
+                LoggingManager.LogDebug(nameof(BaseMailboxTransport), $"Updating delivery status for message {messageId} to {isDelivered}");
 
                 return await UpdateDeliveryStatusInternalAsync(messageId, isDelivered);
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("BaseMailboxTransport", $"Error updating delivery status for message {messageId}", ex);
+                LoggingManager.LogError(nameof(BaseMailboxTransport), $"Error updating delivery status for message {messageId}", ex);
                 return false;
             }
         }

@@ -58,7 +58,7 @@ namespace LibEmiddle.Messaging.Transport
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    LoggingManager.LogError("HttpMailboxTransport", $"Failed to send message {message.Id}. Status: {response.StatusCode}, Error: {errorContent}");
+                    LoggingManager.LogError(nameof(HttpMailboxTransport), $"Failed to send message {message.Id}. Status: {response.StatusCode}, Error: {errorContent}");
                     return false;
                 }
 
@@ -66,7 +66,7 @@ namespace LibEmiddle.Messaging.Transport
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("HttpMailboxTransport", $"HTTP exception while sending message {message.Id}", ex);
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while sending message {message.Id}", ex);
                 return false;
             }
         }
@@ -89,7 +89,7 @@ namespace LibEmiddle.Messaging.Transport
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                    LoggingManager.LogError("HttpMailboxTransport", $"Failed to fetch messages. Status: {response.StatusCode}, Error: {errorContent}");
+                    LoggingManager.LogError(nameof(HttpMailboxTransport), $"Failed to fetch messages. Status: {response.StatusCode}, Error: {errorContent}");
                     return [];
                 }
 
@@ -106,7 +106,7 @@ namespace LibEmiddle.Messaging.Transport
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("HttpMailboxTransport", "HTTP exception while fetching messages", ex);
+                LoggingManager.LogError(nameof(HttpMailboxTransport), "HTTP exception while fetching messages", ex);
                 return [];
             }
         }
@@ -121,7 +121,7 @@ namespace LibEmiddle.Messaging.Transport
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    LoggingManager.LogError("HttpMailboxTransport", 
+                    LoggingManager.LogError(nameof(HttpMailboxTransport), 
                         $"Failed to delete message {messageId}. Status: {response.StatusCode}, Error: {errorContent}");
                     return false;
                 }
@@ -130,7 +130,7 @@ namespace LibEmiddle.Messaging.Transport
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("HttpMailboxTransport", $"HTTP exception while deleting message {messageId}", ex);
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while deleting message {messageId}", ex);
                 return false;
             }
         }
@@ -146,7 +146,7 @@ namespace LibEmiddle.Messaging.Transport
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    LoggingManager.LogError("HttpMailboxTransport", 
+                    LoggingManager.LogError(nameof(HttpMailboxTransport), 
                         $"Failed to mark message {messageId} as read. Status: {response.StatusCode}, Error: {errorContent}");
                     return false;
                 }
@@ -155,7 +155,7 @@ namespace LibEmiddle.Messaging.Transport
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("HttpMailboxTransport", $"HTTP exception while marking message {messageId} as read", ex);
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while marking message {messageId} as read", ex);
                 return false;
             }
         }
@@ -198,7 +198,7 @@ namespace LibEmiddle.Messaging.Transport
                         }
                         catch (Exception ex)
                         {
-                            LoggingManager.LogError("HttpMailboxTransport", "Error during message polling", ex);
+                            LoggingManager.LogError(nameof(HttpMailboxTransport), "Error during message polling", ex);
 
                             // Continue polling even after errors
                             try
@@ -215,13 +215,13 @@ namespace LibEmiddle.Messaging.Transport
                 }
                 catch (Exception ex)
                 {
-                    LoggingManager.LogError("HttpMailboxTransport", "Fatal error in polling loop", ex);
+                    LoggingManager.LogError(nameof(HttpMailboxTransport), "Fatal error in polling loop", ex);
                 }
 
-                LoggingManager.LogInformation("HttpMailboxTransport", "Message polling stopped");
+                LoggingManager.LogInformation(nameof(HttpMailboxTransport), "Message polling stopped");
             }, linkedToken);
 
-            LoggingManager.LogInformation("HttpMailboxTransport", "Started HTTP mailbox polling");
+            LoggingManager.LogInformation(nameof(HttpMailboxTransport), "Started HTTP mailbox polling");
         }
 
         /// <inheritdoc/>
@@ -237,7 +237,7 @@ namespace LibEmiddle.Messaging.Transport
                 _pollingCts.Dispose();
                 _pollingCts = null;
 
-                LoggingManager.LogInformation("HttpMailboxTransport", "Stopped HTTP mailbox polling");
+                LoggingManager.LogInformation(nameof(HttpMailboxTransport), "Stopped HTTP mailbox polling");
             }
 
             return Task.CompletedTask;
@@ -261,7 +261,7 @@ namespace LibEmiddle.Messaging.Transport
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    LoggingManager.LogError("HttpMailboxTransport", 
+                    LoggingManager.LogError(nameof(HttpMailboxTransport), 
                         $"Failed to update delivery status for message {messageId}. Status: {response.StatusCode}, Error: {errorContent}");
                     return false;
                 }
@@ -270,7 +270,7 @@ namespace LibEmiddle.Messaging.Transport
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError("HttpMailboxTransport", $"HTTP exception while updating delivery status for message {messageId}", ex);
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while updating delivery status for message {messageId}", ex);
                 return false;
             }
         }

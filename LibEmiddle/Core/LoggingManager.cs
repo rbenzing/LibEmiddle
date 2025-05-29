@@ -29,16 +29,18 @@ namespace LibEmiddle.Core
         /// <param name="exception">Optional exception</param>
         public static void LogError(string category, string message, Exception? exception = null)
         {
+            ILogger currentLogger = _defaultLogger; // Read once
+
             // Log to default logger if available
-            if (_defaultLogger != NullLogger.Instance)
+            if (currentLogger != NullLogger.Instance)
             {
                 if (exception != null)
                 {
-                    _defaultLogger.LogError(exception, message);
+                    currentLogger.LogError(exception, message);
                 }
                 else
                 {
-                    _defaultLogger.LogError(message);
+                    currentLogger.LogError(message);
                 }
             }
 

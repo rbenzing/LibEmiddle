@@ -20,7 +20,6 @@ namespace LibEmiddle.API
         private readonly GroupChatManager _groupChatManager;
         private readonly IGroupMemberManager _groupMemberManager;
         private readonly DeviceManager _deviceManager;
-        private readonly MailboxManager _mailboxManager;
         private readonly IMailboxTransport _mailboxTransport;
         private readonly ICryptoProvider _cryptoProvider;
         private readonly X3DHProtocol _x3DHProtocol;
@@ -47,7 +46,6 @@ namespace LibEmiddle.API
             _groupMemberManager = new GroupMemberManager();
             _deviceManager = new DeviceManager(_identityKeyPair);
             _mailboxTransport = new InMemoryMailboxTransport(_cryptoProvider);
-            _mailboxManager = new MailboxManager(_identityKeyPair, _mailboxTransport, _doubleRatchetProtocol, _cryptoProvider);
         }
 
         #region Key Management

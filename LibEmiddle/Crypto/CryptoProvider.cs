@@ -122,6 +122,10 @@ namespace LibEmiddle.Crypto
             {
                 LoggingManager.LogError(nameof(CryptoProvider), $"Error signing data: {ex.Message}");
                 throw;
+            } finally
+            {
+                // secure clear private key
+                SecureMemory.SecureClear(privateKey);
             }
         }
 
