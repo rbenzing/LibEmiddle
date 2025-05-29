@@ -54,9 +54,11 @@ LibEmiddle/
 │   │   ├── IDoubleRatchetProtocol.cs
 │   │   ├── IGroupKeyManager.cs
 │   │   ├── IGroupMemberManager.cs
+│   │   ├── IGroupMessageCrypto.cs
 │   │   ├── IGroupSession.cs
 │   │   ├── IKeyManager.cs
 │   │   ├── IMailboxTransport.cs
+│   │   ├── ISenderKeyDistribution.cs
 │   │   ├── ISesion.cs
 │   │   ├── ISessionManager.cs
 │   │   ├── IStorageProvider.cs
@@ -70,6 +72,7 @@ LibEmiddle/
 │   │   │   └── ProtocolVersion.cs 
 │   │   ├── DTO/
 │   │   │   ├── DoubleRatchetSessionDto.cs
+│   │   │   ├── GroupSenderStateDto.cs
 │   │   │   ├── GroupSessionDto.cs
 │   │   │   ├── KeyPairDto.cs
 │   │   │   ├── MailboxMessageDto.cs
