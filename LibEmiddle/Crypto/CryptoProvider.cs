@@ -145,7 +145,7 @@ namespace LibEmiddle.Crypto
 
             try
             {
-                return Sodium.SignVerifyDetached(data, signature, publicKey);
+                return Sodium.SignVerifyDetached(signature, data, publicKey);
             }
             catch (Exception ex)
             {
