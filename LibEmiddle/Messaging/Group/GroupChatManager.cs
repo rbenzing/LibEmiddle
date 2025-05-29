@@ -12,10 +12,9 @@ namespace LibEmiddle.Messaging.Group
     /// </summary>
     public class GroupChatManager : IDisposable
     {
-        private readonly ICryptoProvider _cryptoProvider;
-        private readonly GroupKeyManager _keyManager;
-        private readonly GroupMemberManager _memberManager;
-        private readonly GroupMessageCrypto _messageCrypto;
+        private readonly IGroupKeyManager _keyManager;
+        private readonly IGroupMemberManager _memberManager;
+        private readonly IGroupMessageCrypto _messageCrypto;
         private readonly SenderKeyDistribution _distributionManager;
         private readonly KeyPair _identityKeyPair;
         private bool _disposed;
@@ -30,12 +29,11 @@ namespace LibEmiddle.Messaging.Group
         /// <param name="identityKeyPair">The user's identity key pair.</param>
         public GroupChatManager(ICryptoProvider cryptoProvider, KeyPair identityKeyPair)
         {
-            _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
             _identityKeyPair = identityKeyPair;
 
             // Create dependent components
             _keyManager = new GroupKeyManager(cryptoProvider);
-            _memberManager = new GroupMemberManager(cryptoProvider);
+            _memberManager = new GroupMemberManager();
             _messageCrypto = new GroupMessageCrypto(cryptoProvider);
             _distributionManager = new SenderKeyDistribution(cryptoProvider, _keyManager);
         }

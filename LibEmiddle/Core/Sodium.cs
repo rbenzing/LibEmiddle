@@ -150,12 +150,13 @@ namespace LibEmiddle.Core
             }
             catch (Exception ex)
             {
-                LoggingManager.LogWarning(nameof(Sodium), $"Warning: Could not explicitly load the library: {ex.Message}");
-                // Continue to default loading mechanism
+                LoggingManager.LogError(nameof(Sodium), $"Failed to load native library: {ex.Message}");
+                // Re-throw to ensure proper error handling upstream
+                throw new DllNotFoundException($"Could not load libsodium native library: {ex.Message}", ex);
             }
 
-            // Fall back to default loading mechanism - we've marked the load as attempted,
-            // so the DllImport attributes will try to load the library by name
+            // Fall back to default loading mechanism
+            LoggingManager.LogWarning(nameof(Sodium), "No platform-specific library found, attempting default load mechanism");
             return true;
         }
 
@@ -766,24 +767,22 @@ namespace LibEmiddle.Core
         /// <summary>
         /// Computes the public key from a private key using X25519.
         /// </summary>
-        /// <param name="secretKey">The 32-byte X25519 private key.</param>
+        /// <param name="privateKey">The 32-byte X25519 private key.</param>
         /// <returns>The 32-byte X25519 public key.</returns>
         /// <exception cref="ArgumentException">If the key is invalid size.</exception>
         /// <exception cref="InvalidOperationException">If calculation fails.</exception>
-        public static Span<byte> ScalarMultBase(ReadOnlySpan<byte> secretKey)
+        public static byte[] ScalarMultBase(ReadOnlySpan<byte> privateKey)
         {
-            if (secretKey.Length != Constants.X25519_KEY_SIZE)
-                throw new ArgumentException($"Secret key must be {Constants.X25519_KEY_SIZE} bytes.", nameof(secretKey));
+            if (privateKey.Length != Constants.X25519_KEY_SIZE)
+                throw new ArgumentException($"Secret key must be {Constants.X25519_KEY_SIZE} bytes.", nameof(privateKey));
 
             Initialize();
 
-            Span<byte> publicKey = null;
-            int result = crypto_scalarmult_curve25519_base(publicKey, secretKey);
+            byte[] publicKey = new byte[Constants.X25519_KEY_SIZE];
+            int result = crypto_scalarmult_curve25519_base(publicKey, privateKey);
 
-            if (result != 0 || publicKey == null)
-                // Use CryptographicException
+            if (result != 0)
                 throw new CryptographicException("Libsodium X25519 public key generation failed.");
-
 
             return publicKey;
         }
@@ -886,17 +885,17 @@ namespace LibEmiddle.Core
         /// </summary>
         /// <param name="ed25519PublicKey">The Ed25519 public key (32 bytes).</param>
         /// <returns>The converted X25519 public key (32 bytes).</returns>
-        public static Span<byte> ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey)
+        public static byte[] ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey)
         {
             if (ed25519PublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
                 throw new ArgumentException($"Ed25519 public key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(ed25519PublicKey));
 
             Initialize();
 
-            Span<byte> x25519PublicKey = [];
+            byte[] x25519PublicKey = new byte[Constants.X25519_KEY_SIZE];
             int result = crypto_sign_ed25519_pk_to_curve25519(x25519PublicKey, ed25519PublicKey);
 
-            if (result != 0 || x25519PublicKey.IsEmpty)
+            if (result != 0)
                 throw new CryptographicException("Failed to convert Ed25519 public key to X25519.");
 
             return x25519PublicKey;
@@ -918,14 +917,24 @@ namespace LibEmiddle.Core
 
             Initialize();
 
-            Span<byte> ed25519PublicKey = SecureMemory.CreateSecureBuffer(Constants.ED25519_PUBLIC_KEY_SIZE);
-
+            // First extract the Ed25519 public key from the private key
+            Span<byte> ed25519PublicKey = new byte[Constants.ED25519_PUBLIC_KEY_SIZE];
             int result = crypto_sign_ed25519_sk_to_pk(ed25519PublicKey, signedKey);
 
             if (result != 0)
-                throw new CryptographicException("Failed to convert Ed25519 private key to X25519.");
+                throw new CryptographicException("Failed to extract Ed25519 public key from private key.");
 
-            return ed25519PublicKey;
+            // Then convert the Ed25519 public key to X25519 public key
+            Span<byte> x25519PublicKey = new byte[Constants.X25519_KEY_SIZE];
+            result = crypto_sign_ed25519_pk_to_curve25519(x25519PublicKey, ed25519PublicKey);
+
+            if (result != 0)
+                throw new CryptographicException("Failed to convert Ed25519 public key to X25519.");
+
+            // Clear the intermediate Ed25519 public key
+            SecureMemory.SecureClear(ed25519PublicKey);
+
+            return x25519PublicKey;
         }
 
         /// <summary>
@@ -942,14 +951,14 @@ namespace LibEmiddle.Core
         /// </summary>
         /// <param name="ed25519PrivateKey">The Ed25519 private key (64 bytes).</param>
         /// <returns>The converted X25519 private key (32 bytes).</returns>
-        public static Span<byte> ConvertEd25519PrivateKeyToX25519(ReadOnlySpan<byte> ed25519PrivateKey)
+        public static byte[] ConvertEd25519PrivateKeyToX25519(ReadOnlySpan<byte> ed25519PrivateKey)
         {
             if (ed25519PrivateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
                 throw new ArgumentException($"Ed25519 private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(ed25519PrivateKey));
 
             Initialize();
 
-            Span<byte> x25519PrivateKey = new byte[Constants.X25519_KEY_SIZE];
+            byte[] x25519PrivateKey = new byte[Constants.X25519_KEY_SIZE];
             int result = crypto_sign_ed25519_sk_to_curve25519(x25519PrivateKey, ed25519PrivateKey);
 
             if (result != 0)

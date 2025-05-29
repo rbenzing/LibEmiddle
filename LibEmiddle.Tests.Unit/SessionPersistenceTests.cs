@@ -57,7 +57,10 @@ namespace LibEmiddle.Tests.Unit
             _persistenceManager.Dispose();
         }
 
-        // Helper to create a test session
+        /// <summary>
+        /// Creates a test Double Ratchet session for testing purposes.
+        /// </summary>
+        /// <returns>A configured DoubleRatchetSession instance.</returns>
         private async Task<DoubleRatchetSession> CreateTestSessionAsync()
         {
             // Generate key pairs for Alice and Bob
@@ -123,7 +126,7 @@ namespace LibEmiddle.Tests.Unit
             var originalSession = await CreateTestSessionAsync();
 
             // Act - Save the session
-            var serializableData = new LibEmiddle.Domain.DTO.SerializedSessionData
+            var serializableData = new SerializedSessionData
             {
                 SessionId = originalSession.SessionId,
                 SessionType = SessionType.Individual,
@@ -146,7 +149,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Deserialize manually
             string loadedJson = await File.ReadAllTextAsync(filePath);
-            var loadedData = JsonSerialization.Deserialize<LibEmiddle.Domain.DTO.SerializedSessionData>(loadedJson);
+            var loadedData = JsonSerialization.Deserialize<SerializedSessionData>(loadedJson);
 
             // Assert
             Assert.IsNotNull(loadedData, "Loaded data should not be null");
@@ -240,6 +243,11 @@ namespace LibEmiddle.Tests.Unit
 
         #region Helper Methods
 
+        /// <summary>
+        /// Serializes and saves a DoubleRatchetSession using the persistence manager.
+        /// </summary>
+        /// <param name="session">The session to save.</param>
+        /// <returns>True if successful, false otherwise.</returns>
         private async Task<bool> SerializeAndSaveSessionAsync(DoubleRatchetSession session)
         {
             try
@@ -255,12 +263,22 @@ namespace LibEmiddle.Tests.Unit
             }
         }
 
+        /// <summary>
+        /// Loads and deserializes a DoubleRatchetSession from storage.
+        /// </summary>
+        /// <param name="sessionId">The session ID to load.</param>
+        /// <returns>The deserialized DoubleRatchetSession.</returns>
         private async Task<DoubleRatchetSession> LoadAndDeserializeSessionAsync(string sessionId)
         {
             var chatSession = await _persistenceManager.LoadChatSessionAsync(sessionId, _doubleRatchetProtocol);
             return chatSession.GetCryptoSessionState();
         }
 
+        /// <summary>
+        /// Creates a ChatSession wrapper around a DoubleRatchetSession for testing.
+        /// </summary>
+        /// <param name="session">The DoubleRatchetSession to wrap.</param>
+        /// <returns>A ChatSession instance.</returns>
         private LibEmiddle.Messaging.Chat.ChatSession CreateChatSessionWrapper(DoubleRatchetSession session)
         {
             // Create dummy keys for the wrapper
@@ -277,50 +295,55 @@ namespace LibEmiddle.Tests.Unit
                 _doubleRatchetProtocol);
         }
 
+        /// <summary>
+        /// Serializes a DoubleRatchetSession to JSON using the domain serialization objects.
+        /// </summary>
+        /// <param name="session">The session to serialize.</param>
+        /// <returns>JSON representation of the session.</returns>
         private string SerializeDoubleRatchetSession(DoubleRatchetSession session)
         {
-            // Convert sensitive byte arrays to Base64 for serialization
-            var dto = new LibEmiddle.Domain.DTO.DoubleRatchetSessionDto
+            // Create the serializable data structure using domain objects
+            var serializableData = new SerializableSessionData
             {
                 SessionId = session.SessionId,
-                RootKey = Convert.ToBase64String(session.RootKey),
-                SenderChainKey = session.SenderChainKey != null ? Convert.ToBase64String(session.SenderChainKey) : null,
-                ReceiverChainKey = session.ReceiverChainKey != null ? Convert.ToBase64String(session.ReceiverChainKey) : null,
-                SenderRatchetKeyPair = new LibEmiddle.Domain.DTO.KeyPairDto
-                {
-                    PublicKey = Convert.ToBase64String(session.SenderRatchetKeyPair.PublicKey),
-                    PrivateKey = Convert.ToBase64String(session.SenderRatchetKeyPair.PrivateKey)
-                },
-                ReceiverRatchetPublicKey = session.ReceiverRatchetPublicKey != null ?
+                DHRatchetPublicKey = session.SenderRatchetKeyPair.PublicKey != null ?
+                    Convert.ToBase64String(session.SenderRatchetKeyPair.PublicKey) : null,
+                DHRatchetPrivateKey = session.SenderRatchetKeyPair.PrivateKey != null ?
+                    Convert.ToBase64String(session.SenderRatchetKeyPair.PrivateKey) : null,
+                RemoteDHRatchetKey = session.ReceiverRatchetPublicKey != null ?
                     Convert.ToBase64String(session.ReceiverRatchetPublicKey) : null,
-                PreviousReceiverRatchetPublicKey = session.PreviousReceiverRatchetPublicKey != null ?
-                    Convert.ToBase64String(session.PreviousReceiverRatchetPublicKey) : null,
-                SendMessageNumber = session.SendMessageNumber,
-                ReceiveMessageNumber = session.ReceiveMessageNumber,
-                SentMessages = new Dictionary<uint, string>(),
-                SkippedMessageKeys = new Dictionary<LibEmiddle.Domain.DTO.SkippedMessageKeyDto, string>(),
-                IsInitialized = session.IsInitialized,
-                CreationTimestamp = session.CreationTimestamp
+                RootKey = session.RootKey != null ?
+                    Convert.ToBase64String(session.RootKey) : null,
+                SendingChainKey = session.SenderChainKey != null ?
+                    Convert.ToBase64String(session.SenderChainKey) : null,
+                ReceivingChainKey = session.ReceiverChainKey != null ?
+                    Convert.ToBase64String(session.ReceiverChainKey) : null,
+                MessageNumberSending = (int)session.SendMessageNumber,
+                MessageNumberReceiving = (int)session.ReceiveMessageNumber,
+                RecentlyProcessedIds = new List<Guid>(),
+                ProcessedMessageNumbersReceiving = new List<int>(),
+                SkippedMessageKeys = new List<SerializableSkippedKeyEntry>()
             };
 
-            // Convert sent messages
-            foreach (var kvp in session.SentMessages)
+            // Convert skipped message keys to serializable format
+            if (session.SkippedMessageKeys != null)
             {
-                dto.SentMessages[kvp.Key] = Convert.ToBase64String(kvp.Value);
-            }
-
-            // Convert skipped message keys
-            foreach (var kvp in session.SkippedMessageKeys)
-            {
-                var keyDto = new LibEmiddle.Domain.DTO.SkippedMessageKeyDto
+                foreach (var kvp in session.SkippedMessageKeys)
                 {
-                    DhPublicKey = Convert.ToBase64String(kvp.Key.DhPublicKey),
-                    MessageNumber = kvp.Key.MessageNumber
-                };
-                dto.SkippedMessageKeys[keyDto] = Convert.ToBase64String(kvp.Value);
+                    var skippedKeyEntry = new SerializableSkippedKeyEntry
+                    {
+                        RemoteDhKeyBase64 = Convert.ToBase64String(kvp.Key.DhPublicKey),
+                        MessageNumber = (int)kvp.Key.MessageNumber,
+                        MessageKeyBase64 = Convert.ToBase64String(kvp.Value)
+                    };
+                    serializableData.SkippedMessageKeys.Add(skippedKeyEntry);
+                }
             }
 
-            return JsonSerialization.Serialize(dto);
+            // Add any recently processed message IDs if available
+            // Note: This would need to be populated from session state if available
+
+            return JsonSerialization.Serialize(serializableData);
         }
 
         #endregion

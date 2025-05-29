@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Security.Cryptography;
 using System.Linq;
 using System.Diagnostics;
 using LibEmiddle.Core;
@@ -17,7 +16,6 @@ using LibEmiddle.Messaging.Transport;
 using LibEmiddle.Messaging.Group;
 using LibEmiddle.Crypto;
 using LibEmiddle.Protocol;
-using LibEmiddle.Domain.DTO;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -335,7 +333,7 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var identityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var keyManager = new GroupKeyManager(_cryptoProvider);
-            var memberManager = new GroupMemberManager(_cryptoProvider);
+            var memberManager = new GroupMemberManager();
             var messageCrypto = new GroupMessageCrypto(_cryptoProvider);
             var distributionManager = new SenderKeyDistribution(_cryptoProvider, keyManager);
             var securityValidator = new GroupSecurityValidator(_cryptoProvider, memberManager);

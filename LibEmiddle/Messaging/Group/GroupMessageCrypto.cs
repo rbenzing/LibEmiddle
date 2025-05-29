@@ -14,7 +14,7 @@ namespace LibEmiddle.Messaging.Group
     /// Initializes a new instance of the GroupMessageCrypto class.
     /// </remarks>
     /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-    public class GroupMessageCrypto(ICryptoProvider cryptoProvider)
+    public class GroupMessageCrypto(ICryptoProvider cryptoProvider) : IGroupMessageCrypto
     {
         private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
 

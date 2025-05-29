@@ -18,7 +18,7 @@ namespace LibEmiddle.API
     public class LibEmiddleClient : IDisposable
     {
         private readonly GroupChatManager _groupChatManager;
-        private readonly GroupMemberManager _groupMemberManager;
+        private readonly IGroupMemberManager _groupMemberManager;
         private readonly DeviceManager _deviceManager;
         private readonly MailboxManager _mailboxManager;
         private readonly IMailboxTransport _mailboxTransport;
@@ -28,6 +28,7 @@ namespace LibEmiddle.API
         private readonly SessionManager _sessionManager;
 
         private readonly KeyPair _identityKeyPair;
+        private ChatSession? _chatSession = null;
         private bool _disposed;
 
         /// <summary>
@@ -43,7 +44,7 @@ namespace LibEmiddle.API
             _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
             _sessionManager = new SessionManager(_cryptoProvider, _x3DHProtocol, _doubleRatchetProtocol, _identityKeyPair);
             _groupChatManager = new GroupChatManager(_cryptoProvider, _identityKeyPair);
-            _groupMemberManager = new GroupMemberManager(_cryptoProvider);
+            _groupMemberManager = new GroupMemberManager();
             _deviceManager = new DeviceManager(_identityKeyPair);
             _mailboxTransport = new InMemoryMailboxTransport(_cryptoProvider);
             _mailboxManager = new MailboxManager(_identityKeyPair, _mailboxTransport, _doubleRatchetProtocol, _cryptoProvider);
@@ -184,7 +185,6 @@ namespace LibEmiddle.API
         /// Gets or creates a chat session with a recipient
         /// </summary>
         /// <param name="recipientPublicKey">Recipient's public key</param>
-        /// <param name="recipientBundle">Optional recipient's key bundle, required for new sessions</param>
         /// <returns>Chat session</returns>
         /// <exception cref="ArgumentNullException">Thrown when recipientPublicKey is null</exception>
         public ChatSession GetOrCreateChatSession(byte[] recipientPublicKey)
@@ -199,22 +199,29 @@ namespace LibEmiddle.API
             if (session == null)
                 throw new ArgumentNullException(nameof(session));
 
+            _chatSession = session;
+
             return session;
         }
 
         /// <summary>
         /// Closes a chat session with a recipient
         /// </summary>
-        /// <param name="recipientPublicKey">Recipient's public key</param>
+        /// <param name="sessionId">Recipient's public key</param>
         /// <exception cref="ArgumentNullException">Thrown when recipientPublicKey is null</exception>
-        public void CloseChatSession(byte[] recipientPublicKey)
+        public void CloseChatSession(string sessionId)
         {
             ThrowIfDisposed();
 
-            if (recipientPublicKey == null)
-                throw new ArgumentNullException(nameof(recipientPublicKey));
+            if (sessionId == null)
+                throw new ArgumentNullException(nameof(sessionId));
 
-            _sessionManager.DeleteSessionAsync(recipientPublicKey);
+            bool isDeleted = _sessionManager.DeleteSessionAsync(sessionId).GetAwaiter().GetResult();
+
+            if (!isDeleted)
+            {
+                throw new ArgumentException($"Error SessionID {sessionId} was not deleted.", nameof(sessionId));
+            }
         }
 
         /// <summary>
@@ -236,6 +243,9 @@ namespace LibEmiddle.API
         public void ConfigureChatSessionStorage(string sessionStoragePath, byte[]? sessionEncryptionKey = null, bool enableLogging = false)
         {
             ThrowIfDisposed();
+
+            if (_chatSession == null)
+                throw new ArgumentNullException(nameof(_chatSession));
 
             _chatSession.ConfigureStorage(sessionStoragePath, sessionEncryptionKey, enableLogging);
         }

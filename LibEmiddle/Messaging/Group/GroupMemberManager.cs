@@ -12,11 +12,8 @@ namespace LibEmiddle.Messaging.Group
     /// <remarks>
     /// Initializes a new instance of the GroupMemberManager class.
     /// </remarks>
-    /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-    public class GroupMemberManager(ICryptoProvider cryptoProvider)
+    public class GroupMemberManager() : IGroupMemberManager
     {
-        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-
         // Group information
         private readonly ConcurrentDictionary<string, GroupInfo> _groups = new();
 
@@ -575,114 +572,6 @@ namespace LibEmiddle.Messaging.Group
             // In a real implementation, this would use a proper deserialization format
             // such as JSON or Protocol Buffers
             return JsonSerialization.Deserialize<GroupInfo>(serialized);
-        }
-    }
-
-    /// <summary>
-    /// Represents information about a group.
-    /// </summary>
-    public class GroupInfo
-    {
-        /// <summary>
-        /// Gets or sets the group identifier.
-        /// </summary>
-        public string GroupId { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Gets or sets the group name.
-        /// </summary>
-        public string GroupName { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Gets or sets when the group was created (milliseconds since Unix epoch).
-        /// </summary>
-        public long CreatedAt { get; set; }
-
-        /// <summary>
-        /// Gets or sets the creator's public key.
-        /// </summary>
-        public byte[]? CreatorPublicKey { get; set; }
-
-        /// <summary>
-        /// Gets or sets the dictionary of current members.
-        /// Key is the member ID, value is the member information.
-        /// </summary>
-        public ConcurrentDictionary<string, GroupMember> Members { get; set; } = new ConcurrentDictionary<string, GroupMember>();
-
-        /// <summary>
-        /// Gets or sets the dictionary of removed members.
-        /// Key is the member ID, value is the removal timestamp.
-        /// </summary>
-        public ConcurrentDictionary<string, long> RemovedMembers { get; set; } = new ConcurrentDictionary<string, long>();
-
-        /// <summary>
-        /// Creates a deep clone of this group info.
-        /// </summary>
-        /// <returns>A cloned copy of this group info.</returns>
-        public GroupInfo Clone()
-        {
-            var clone = new GroupInfo
-            {
-                GroupId = GroupId,
-                GroupName = GroupName,
-                CreatedAt = CreatedAt,
-                CreatorPublicKey = CreatorPublicKey?.ToArray()
-            };
-
-            // Clone members
-            foreach (var kvp in Members)
-            {
-                clone.Members[kvp.Key] = kvp.Value.Clone();
-            }
-
-            // Clone removed members
-            foreach (var kvp in RemovedMembers)
-            {
-                clone.RemovedMembers[kvp.Key] = kvp.Value;
-            }
-
-            return clone;
-        }
-    }
-
-    /// <summary>
-    /// Represents a member of a group.
-    /// </summary>
-    public class GroupMember
-    {
-        /// <summary>
-        /// Gets or sets the member's public key.
-        /// </summary>
-        public byte[] PublicKey { get; set; } = Array.Empty<byte>();
-
-        /// <summary>
-        /// Gets or sets when the member joined the group (milliseconds since Unix epoch).
-        /// </summary>
-        public long JoinedAt { get; set; }
-
-        /// <summary>
-        /// Gets or sets whether the member is an admin.
-        /// </summary>
-        public bool IsAdmin { get; set; }
-
-        /// <summary>
-        /// Gets or sets whether the member is the owner (creator).
-        /// </summary>
-        public bool IsOwner { get; set; }
-
-        /// <summary>
-        /// Creates a deep clone of this group member.
-        /// </summary>
-        /// <returns>A cloned copy of this group member.</returns>
-        public GroupMember Clone()
-        {
-            return new GroupMember
-            {
-                PublicKey = PublicKey.ToArray(),
-                JoinedAt = JoinedAt,
-                IsAdmin = IsAdmin,
-                IsOwner = IsOwner
-            };
         }
     }
 }

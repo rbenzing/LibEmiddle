@@ -19,7 +19,7 @@ namespace LibEmiddle.KeyManagement
         private const string DATA_FILE_EXTENSION = ".data";
 
         // In-memory cache of loaded keys to reduce disk access
-        private readonly Dictionary<string, byte[]> _keyCache = new Dictionary<string, byte[]>();
+        private readonly Dictionary<string, byte[]> _keyCache = [];
 
         /// <summary>
         /// Initializes a new instance of the KeyStorage class.

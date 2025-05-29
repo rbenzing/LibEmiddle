@@ -42,7 +42,7 @@ namespace LibEmiddle.Tests.Unit
             var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
             var keyManager = new GroupKeyManager(_cryptoProvider);
-            var memberManager = new GroupMemberManager(_cryptoProvider);
+            var memberManager = new GroupMemberManager();
             var messageCrypto = new GroupMessageCrypto(_cryptoProvider);
             var distributionManager = new SenderKeyDistribution(_cryptoProvider, keyManager);
 
@@ -289,7 +289,7 @@ namespace LibEmiddle.Tests.Unit
             var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
             var keyManager = new GroupKeyManager(_cryptoProvider);
-            var memberManager = new GroupMemberManager(_cryptoProvider);
+            var memberManager = new GroupMemberManager();
             var messageCrypto = new GroupMessageCrypto(_cryptoProvider);
             var distributionManager = new SenderKeyDistribution(_cryptoProvider, keyManager);
 

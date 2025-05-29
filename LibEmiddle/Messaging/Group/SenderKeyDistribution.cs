@@ -13,10 +13,12 @@ namespace LibEmiddle.Messaging.Group
     /// <remarks>
     /// Initializes a new instance of the SenderKeyDistribution class.
     /// </remarks>
-    public class SenderKeyDistribution(ICryptoProvider cryptoProvider, GroupKeyManager groupKeyManager)
+    /// <param name="cryptoProvider">The crypto provider interface to use</param>
+    /// <param name="groupKeyManager">The group key manager interface to use</param>
+    public class SenderKeyDistribution(ICryptoProvider cryptoProvider, IGroupKeyManager groupKeyManager) : ISenderKeyDistribution
     {
         private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-        private readonly GroupKeyManager _keyManager = groupKeyManager ?? throw new ArgumentNullException(nameof(groupKeyManager));
+        private readonly IGroupKeyManager _keyManager = groupKeyManager ?? throw new ArgumentNullException(nameof(groupKeyManager));
 
         // Cache of distribution messages by group ID
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, SenderKeyDistributionMessage>> _distributionMessages =

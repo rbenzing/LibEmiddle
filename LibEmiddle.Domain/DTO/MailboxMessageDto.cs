@@ -1,6 +1,8 @@
 ﻿using LibEmiddle.Domain.Enums;
 
-namespace LibEmiddle.Domain.DTO
+#pragma warning disable IDE0130 // Namespace does not match folder structure
+namespace LibEmiddle.Domain
+#pragma warning restore IDE0130 // Namespace does not match folder structure
 {
     /// <summary>
     /// DTO for serializing and deserializing mailbox messages for transport.

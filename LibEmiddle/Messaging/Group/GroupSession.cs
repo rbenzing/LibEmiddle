@@ -15,10 +15,10 @@ namespace LibEmiddle.Messaging.Group
         private readonly SemaphoreSlim _sessionLock = new(1, 1);
         private readonly string _groupId;
         private readonly KeyPair _identityKeyPair;
-        private readonly GroupKeyManager _keyManager;
-        private readonly GroupMemberManager _memberManager;
-        private readonly GroupMessageCrypto _messageCrypto;
-        private readonly SenderKeyDistribution _distributionManager;
+        private readonly IGroupKeyManager _keyManager;
+        private readonly IGroupMemberManager _memberManager;
+        private readonly IGroupMessageCrypto _messageCrypto;
+        private readonly ISenderKeyDistribution _distributionManager;
         private readonly GroupSecurityValidator _securityValidator;
         private bool _disposed;
 
@@ -56,10 +56,10 @@ namespace LibEmiddle.Messaging.Group
         public GroupSession(
             string groupId,
             KeyPair identityKeyPair,
-            GroupKeyManager keyManager,
-            GroupMemberManager memberManager,
-            GroupMessageCrypto messageCrypto,
-            SenderKeyDistribution distributionManager,
+            IGroupKeyManager keyManager,
+            IGroupMemberManager memberManager,
+            IGroupMessageCrypto messageCrypto,
+            ISenderKeyDistribution distributionManager,
             KeyRotationStrategy rotationStrategy = KeyRotationStrategy.Standard)
         {
             _groupId = groupId ?? throw new ArgumentNullException(nameof(groupId));

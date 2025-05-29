@@ -11,12 +11,12 @@ namespace LibEmiddle.Messaging.Group
     /// <remarks>
     /// Initializes a new instance of the GroupSecurityValidator class.
     /// </remarks>
-    /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-    /// <param name="memberManager">The group member manager.</param>
-    public class GroupSecurityValidator(ICryptoProvider cryptoProvider, GroupMemberManager memberManager)
+    /// <param name="cryptoProvider">The crypto provider interface to use.</param>
+    /// <param name="memberManager">The group member manager interface to use.</param>
+    public class GroupSecurityValidator(ICryptoProvider cryptoProvider, IGroupMemberManager memberManager)
     {
         private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-        private readonly GroupMemberManager _memberManager = memberManager ?? throw new ArgumentNullException(nameof(memberManager));
+        private readonly IGroupMemberManager _memberManager = memberManager ?? throw new ArgumentNullException(nameof(memberManager));
 
         // Cache of known public keys for validation
         private readonly Dictionary<string, byte[]> _knownPublicKeys = [];

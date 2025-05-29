@@ -6,7 +6,6 @@ using LibEmiddle.Domain.Enums;
 using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Chat;
 using LibEmiddle.Messaging.Group;
-using LibEmiddle.Domain.DTO;
 using LibEmiddle.KeyManagement;
 
 namespace LibEmiddle.Sessions
@@ -162,10 +161,10 @@ namespace LibEmiddle.Sessions
         public async Task<IGroupSession?> LoadGroupSessionAsync(
             string sessionId,
             KeyPair identityKeyPair,
-            GroupKeyManager keyManager,
-            GroupMemberManager memberManager,
-            GroupMessageCrypto messageCrypto,
-            SenderKeyDistribution distributionManager)
+            IGroupKeyManager keyManager,
+            IGroupMemberManager memberManager,
+            IGroupMessageCrypto messageCrypto,
+            ISenderKeyDistribution distributionManager)
         {
             ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
             

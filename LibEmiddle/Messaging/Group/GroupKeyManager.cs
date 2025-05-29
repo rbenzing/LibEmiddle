@@ -13,7 +13,7 @@ namespace LibEmiddle.Messaging.Group
     /// Initializes a new instance of the GroupKeyManager class.
     /// </remarks>
     /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-    public class GroupKeyManager(ICryptoProvider cryptoProvider)
+    public class GroupKeyManager(ICryptoProvider cryptoProvider) : IGroupKeyManager
     {
         private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
         private readonly SemaphoreSlim _operationLock = new(1, 1);
@@ -447,72 +447,9 @@ namespace LibEmiddle.Messaging.Group
         }
     }
 
-    /// <summary>
-    /// Represents the sender state for a group.
-    /// </summary>
-    public class GroupSenderState
-    {
-        /// <summary>
-        /// Gets or sets the current chain key.
-        /// </summary>
-        public byte[] ChainKey { get; set; } = Array.Empty<byte>();
 
-        /// <summary>
-        /// Gets or sets the current iteration (message number).
-        /// </summary>
-        public uint Iteration { get; set; }
 
-        /// <summary>
-        /// Gets or sets the creation timestamp (milliseconds since Unix epoch).
-        /// </summary>
-        public long CreationTimestamp { get; set; }
-    }
+    
 
-    /// <summary>
-    /// Represents the serializable state of group keys for persistence.
-    /// </summary>
-    public class GroupKeyState
-    {
-        /// <summary>
-        /// Gets or sets the group identifier.
-        /// </summary>
-        public string GroupId { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Gets or sets the sender state.
-        /// </summary>
-        public GroupSenderStateDto? SenderState { get; set; }
-
-        /// <summary>
-        /// Gets or sets the receiver states.
-        /// Key is the Base64-encoded sender identity key, value is the Base64-encoded sender key.
-        /// </summary>
-        public Dictionary<string, string> ReceiverStates { get; set; } = new Dictionary<string, string>();
-
-        /// <summary>
-        /// Gets or sets the timestamp of the last key rotation.
-        /// </summary>
-        public long LastRotationTimestamp { get; set; }
-    }
-
-    /// <summary>
-    /// DTO for serializing and deserializing group sender state.
-    /// </summary>
-    public class GroupSenderStateDto
-    {
-        /// <summary>
-        /// Gets or sets the Base64-encoded chain key.
-        /// </summary>
-        public string ChainKey { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Gets or sets the current iteration (message number).
-        /// </summary>
-        public uint Iteration { get; set; }
-
-        /// <summary>
-        /// Gets or sets the creation timestamp (milliseconds since Unix epoch).
-        /// </summary>
-        public long CreationTimestamp { get; set; }
-    }
+    
 }

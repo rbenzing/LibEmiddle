@@ -2,7 +2,6 @@
 using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
-using LibEmiddle.Domain.DTO;
 using LibEmiddle.Domain.Enums;
 
 namespace LibEmiddle.Messaging.Transport

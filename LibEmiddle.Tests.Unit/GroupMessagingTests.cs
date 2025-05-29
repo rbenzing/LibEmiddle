@@ -423,7 +423,7 @@ namespace LibEmiddle.Tests.Unit
                 "non-existent-group",
                 keyPair,
                 new GroupKeyManager(_cryptoProvider),
-                new GroupMemberManager(_cryptoProvider),
+                new GroupMemberManager(),
                 new GroupMessageCrypto(_cryptoProvider),
                 new SenderKeyDistribution(_cryptoProvider, new GroupKeyManager(_cryptoProvider))
             }) as GroupSession;

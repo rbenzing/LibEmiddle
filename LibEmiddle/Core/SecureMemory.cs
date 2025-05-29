@@ -33,14 +33,24 @@ namespace LibEmiddle.Core
             GC.KeepAlive(data);
         }
 
-        public static unsafe void SecureClear(Span<byte> data)
+        /// <summary>
+        /// Securely clears a span of sensitive data.
+        /// </summary>
+        /// <param name="data">The span to clear.</param>
+        public static void SecureClear(Span<byte> data)
         {
-            if (data.Length == 0)
+            if (data.IsEmpty)
                 return;
 
-            fixed (byte* ptr = data)
+            unsafe
             {
-                Sodium.sodium_memzero((IntPtr)ptr, (UIntPtr)data.Length);
+                fixed (byte* ptr = data)
+                {
+                    if (ptr != null)
+                    {
+                        Sodium.sodium_memzero((IntPtr)ptr, (UIntPtr)data.Length);
+                    }
+                }
             }
         }
 
@@ -52,22 +62,39 @@ namespace LibEmiddle.Core
         /// <returns>True if the contents are equal and the lengths match; false otherwise.</returns>
         public static bool SecureCompare(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
         {
-            if (a.Length != b.Length)
-            {
-                // Compare up to the shortest length anyway to resist timing attacks
-                // Use a dummy buffer of equal size if needed
-                Span<byte> dummy = stackalloc byte[Math.Min(a.Length, b.Length)];
-                a.Slice(0, dummy.Length).CopyTo(dummy);
-                return false;
-            }
+            // For constant-time comparison, we need to compare equal-length buffers
+            // If lengths differ, we still need to do work proportional to the longer buffer
+            int maxLength = Math.Max(a.Length, b.Length);
+
+            if (maxLength == 0)
+                return a.Length == b.Length;
+
+            // Allocate buffers of equal size
+            Span<byte> paddedA = stackalloc byte[maxLength];
+            Span<byte> paddedB = stackalloc byte[maxLength];
+
+            // Clear the buffers first
+            paddedA.Clear();
+            paddedB.Clear();
+
+            // Copy the actual data
+            if (a.Length > 0)
+                a.CopyTo(paddedA);
+            if (b.Length > 0)
+                b.CopyTo(paddedB);
 
             unsafe
             {
-                fixed (byte* ptrA = a)
-                fixed (byte* ptrB = b)
+                fixed (byte* ptrA = paddedA)
+                fixed (byte* ptrB = paddedB)
                 {
-                    int result = Sodium.sodium_memcmp((IntPtr)ptrA, (IntPtr)ptrB, (UIntPtr)a.Length);
-                    return result == 0;
+                    int cmpResult = Sodium.sodium_memcmp((IntPtr)ptrA, (IntPtr)ptrB, (nuint)maxLength);
+
+                    // Also need to constant-time compare the lengths
+                    int lengthDiff = a.Length - b.Length;
+
+                    // Return true only if both comparison and lengths match
+                    return (cmpResult | lengthDiff) == 0;
                 }
             }
         }
@@ -86,7 +113,7 @@ namespace LibEmiddle.Core
             byte[] copy = CreateSecureBuffer((uint)source.Length);
             source.CopyTo(copy);
             return copy;
-        }      
+        }
 
         /// <summary>
         /// Creates a secure buffer using libsodium's protected memory allocation.
@@ -98,7 +125,27 @@ namespace LibEmiddle.Core
             if (size == 0)
                 throw new ArgumentException("Buffer size must be positive", nameof(size));
 
-            return Sodium.GenerateRandomBytes(size);
+            // Allocate secure memory using libsodium
+            IntPtr securePtr = Sodium.SecureAlloc(size);
+            if (securePtr == IntPtr.Zero)
+                throw new OutOfMemoryException("Failed to allocate secure memory");
+
+            try
+            {
+                // Create managed array and copy from secure memory
+                byte[] buffer = new byte[size];
+                Marshal.Copy(securePtr, buffer, 0, (int)size);
+
+                // Fill with random data
+                Sodium.RandomFill(buffer);
+
+                return buffer;
+            }
+            finally
+            {
+                // Always free the secure memory
+                Sodium.SecureFree(securePtr);
+            }
         }
 
         /// <summary>

@@ -52,6 +52,8 @@ LibEmiddle/
 │   │   ├── IDeviceLinkingService.cs
 │   │   ├── IDeviceManager.cs
 │   │   ├── IDoubleRatchetProtocol.cs
+│   │   ├── IGroupKeyManager.cs
+│   │   ├── IGroupMemberManager.cs
 │   │   ├── IGroupSession.cs
 │   │   ├── IKeyManager.cs
 │   │   ├── IMailboxTransport.cs
@@ -92,10 +94,15 @@ LibEmiddle/
 │   │   ├── EncyptedGroupMessage.cs
 │   │   ├── EncryptedMessage.cs
 │   │   ├── EncryptedSenderKeyDistribution.cs
+│   │   ├── GroupInfo.cs
+│   │   ├── GroupKeyState.cs
+│   │   ├── GroupMember.cs
+│   │   ├── GroupSenderState.cs
 │   │   ├── GroupSessionOptions.cs
 │   │   ├── InitialMessageData.cs
 │   │   ├── KeyFileMetadata.cs
 │   │   ├── KeyPair.cs
+│   │   ├── LinkedDeviceInfo.cs
 │   │   ├── MailboxMessage.cs
 │   │   ├── MessageRecord.cs
 │   │   ├── SenderKeyDistributionMessage.cs
