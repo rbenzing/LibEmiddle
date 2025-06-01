@@ -19,7 +19,7 @@ namespace LibEmiddle.MultiDevice
     /// Implements RFC-compliant procedures for the Signal protocol's multi-device specification.
     /// </para>
     /// </summary>
-    public class DeviceManager : IDisposable
+    public class DeviceManager : IDeviceManager, IDisposable
     {
         private readonly KeyPair _deviceKeyPair;
         private readonly IDeviceLinkingService _deviceLinkingService;
@@ -71,30 +71,14 @@ namespace LibEmiddle.MultiDevice
             _deviceLinkingService = deviceLinkingService ?? new DeviceLinkingService(_cryptoProvider);
         }
 
-        /// <summary>
-        /// Gets the number of linked devices registered with this device manager.
-        /// </summary>
-        /// <returns>The count of unique linked devices</returns>
+        /// <inheritdoc/>
         public int GetLinkedDeviceCount()
         {
             ThrowIfDisposed();
             return _linkedDevices.Count;
         }
 
-        /// <summary>
-        /// Creates a device link message for establishing multi-device sync with a new device.
-        /// 
-        /// <para>
-        /// This method creates a secure message that can be transmitted to a new device to establish
-        /// a trusted relationship between the current device and the new device. The message includes
-        /// the necessary cryptographic material to verify identity and establish a secure channel.
-        /// </para>
-        /// </summary>
-        /// <param name="newDevicePublicKey">The public key of the new device to link</param>
-        /// <returns>An encrypted message containing linking information</returns>
-        /// <exception cref="ArgumentNullException">Thrown if newDevicePublicKey is null</exception>
-        /// <exception cref="ArgumentException">Thrown if newDevicePublicKey is invalid</exception>
-        /// <exception cref="SecurityException">Thrown if trying to link a revoked device</exception>
+        /// <inheritdoc/>
         public EncryptedMessage CreateDeviceLinkMessage(byte[] newDevicePublicKey)
         {
             ThrowIfDisposed();
@@ -117,20 +101,7 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
-        /// <summary>
-        /// Processes a device link message received from another device.
-        /// 
-        /// <para>
-        /// Verifies and processes a device link message received from another device (typically the main
-        /// device sending a link to this device). If the message is valid and properly signed, it establishes
-        /// a trusted link with the sending device.
-        /// </para>
-        /// </summary>
-        /// <param name="encryptedMessage">The device link message to process</param>
-        /// <param name="expectedMainDevicePublicKey">The expected public key of the main device</param>
-        /// <returns>True if the linking was successful, false otherwise</returns>
-        /// <exception cref="ArgumentNullException">Thrown if parameters are null</exception>
-        /// <exception cref="SecurityException">Thrown if trying to link a revoked device</exception>
+        /// <inheritdoc/>
         public bool ProcessDeviceLinkMessage(
             EncryptedMessage encryptedMessage,
             byte[] expectedMainDevicePublicKey)
@@ -174,18 +145,7 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
-        /// <summary>
-        /// Adds a linked device to the device manager.
-        /// 
-        /// <para>
-        /// Records a new device as being linked to this device for synchronization purposes.
-        /// The device key is normalized to ensure consistent lookup regardless of the key format.
-        /// </para>
-        /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to link</param>
-        /// <exception cref="ArgumentNullException">Thrown if devicePublicKey is null</exception>
-        /// <exception cref="ArgumentException">Thrown if devicePublicKey has invalid format</exception>
-        /// <exception cref="SecurityException">Thrown if trying to add a revoked device</exception>
+        /// <inheritdoc/>
         public void AddLinkedDevice(byte[] devicePublicKey)
         {
             ThrowIfDisposed();
@@ -256,17 +216,7 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
-        /// <summary>
-        /// Removes a linked device from the device manager.
-        /// 
-        /// <para>
-        /// Removes a device from the list of linked devices. This does not revoke the device,
-        /// it simply removes it from the local list of linked devices.
-        /// </para>
-        /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to remove</param>
-        /// <returns>True if the device was found and removed, false otherwise</returns>
-        /// <exception cref="ArgumentNullException">Thrown if devicePublicKey is null</exception>
+        /// <inheritdoc/>
         public bool RemoveLinkedDevice(byte[] devicePublicKey)
         {
             ThrowIfDisposed();
@@ -322,11 +272,7 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
-        /// <summary>
-        /// Checks if a device is already linked to this device.
-        /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to check</param>
-        /// <returns>True if the device is linked, false otherwise</returns>
+        /// <inheritdoc/>
         public bool IsDeviceLinked(ReadOnlySpan<byte> devicePublicKey)
         {
             ThrowIfDisposed();
@@ -370,17 +316,7 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
-        /// <summary>
-        /// Creates encrypted sync messages for all linked devices.
-        /// 
-        /// <para>
-        /// Encrypts the provided data uniquely for each linked device, enabling secure
-        /// synchronization of data across all devices linked to this user's identity.
-        /// </para>
-        /// </summary>
-        /// <param name="syncData">Data to synchronize with other devices</param>
-        /// <returns>Dictionary mapping device identifiers to encrypted messages</returns>
-        /// <exception cref="ArgumentNullException">Thrown if syncData is null</exception>
+        /// <inheritdoc/>
         public Dictionary<string, EncryptedMessage> CreateSyncMessages(byte[] syncData)
         {
             ThrowIfDisposed();
@@ -443,15 +379,7 @@ namespace LibEmiddle.MultiDevice
             return result;
         }
 
-        /// <summary>
-        /// Creates a revocation message for a device.
-        /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to revoke</param>
-        /// <param name="reason">Optional reason for revocation</param>
-        /// <returns>A signed revocation message</returns>
-        /// <exception cref="ArgumentNullException">If devicePublicKey is null</exception>
-        /// <exception cref="InvalidOperationException">If attempting to revoke self</exception>
-        /// <exception cref="ArgumentException">If devicePublicKey has invalid format</exception>
+        /// <inheritdoc/>
         public DeviceRevocationMessage CreateDeviceRevocationMessage(byte[] devicePublicKey, string? reason = null)
         {
             ThrowIfDisposed();
@@ -484,12 +412,7 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
-        /// <summary>
-        /// Processes a device revocation message, marking the device as revoked if validated.
-        /// </summary>
-        /// <param name="revocationMessage">The revocation message to process</param>
-        /// <returns>True if the revocation message was valid and processed</returns>
-        /// <exception cref="ArgumentNullException">Thrown if revocationMessage is null</exception>
+        /// <inheritdoc/>
         public bool ProcessDeviceRevocationMessage(DeviceRevocationMessage revocationMessage)
         {
             ThrowIfDisposed();
@@ -543,11 +466,7 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
-        /// <summary>
-        /// Checks if a device has been revoked.
-        /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to check</param>
-        /// <returns>True if the device was revoked</returns>
+        /// <inheritdoc/>
         public bool IsDeviceRevoked(byte[] devicePublicKey)
         {
             if (devicePublicKey == null)
@@ -590,10 +509,7 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
-        /// <summary>
-        /// Gets a list of all revoked device public keys.
-        /// </summary>
-        /// <returns>A list of revoked device public keys (in normalized X25519 format)</returns>
+        /// <inheritdoc/>
         public List<byte[]> GetRevokedDeviceKeys()
         {
             ThrowIfDisposed();
@@ -612,10 +528,7 @@ namespace LibEmiddle.MultiDevice
             return revokedKeys;
         }
 
-        /// <summary>
-        /// Exports the device revocations for persistence.
-        /// </summary>
-        /// <returns>Serialized representation of all processed revocations</returns>
+        /// <inheritdoc/>
         public string ExportRevocations()
         {
             ThrowIfDisposed();
@@ -624,11 +537,7 @@ namespace LibEmiddle.MultiDevice
             return JsonSerialization.Serialize(revocations);
         }
 
-        /// <summary>
-        /// Imports device revocations from a serialized representation.
-        /// </summary>
-        /// <param name="serializedRevocations">The serialized revocations</param>
-        /// <returns>The number of imported revocations</returns>
+        /// <inheritdoc/>
         public int ImportRevocations(string serializedRevocations)
         {
             ThrowIfDisposed();
@@ -663,73 +572,13 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
-        /// <summary>
-        /// Creates a sync message for a specific device.
-        /// </summary>
-        private EncryptedMessage CreateSyncMessageForDevice(byte[] syncData, byte[] deviceKey, byte[] senderX25519Private)
+        /// <inheritdoc/>
+        public Task<byte[]?> ProcessSyncMessageAsync(EncryptedMessage encryptedMessage, byte[]? senderHint = null)
         {
-            // Perform key exchange
-            byte[] sharedSecret = _cryptoProvider.ScalarMult(senderX25519Private, deviceKey);
-
-            try
-            {
-                // Sign the sync data
-                byte[] signature = _cryptoProvider.Sign(syncData, _deviceKeyPair.PrivateKey);
-
-                // Create sync message with timestamp for replay protection
-                var syncMessage = new DeviceSyncMessage
-                {
-                    SenderPublicKey = _deviceKeyPair.PublicKey,
-                    Data = syncData,
-                    Signature = signature,
-                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    // Add protocol version information
-                    Version = ProtocolVersion.FULL_VERSION
-                };
-
-                // Serialize with protocol version
-                string json = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    senderPublicKey = Convert.ToBase64String(syncMessage.SenderPublicKey ?? Array.Empty<byte>()),
-                    data = Convert.ToBase64String(syncMessage.Data ?? Array.Empty<byte>()),
-                    signature = Convert.ToBase64String(syncMessage.Signature ?? Array.Empty<byte>()),
-                    timestamp = syncMessage.Timestamp,
-                    protocolVersion = syncMessage.Version
-                });
-
-                // Encrypt
-                byte[] plaintext = Encoding.Default.GetBytes(json);
-                byte[] nonce = Nonce.GenerateNonce();
-                byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
-
-                // Create encrypted message
-                return new EncryptedMessage
-                {
-                    Ciphertext = ciphertext,
-                    Nonce = nonce,
-                    Timestamp = syncMessage.Timestamp,
-                    MessageId = Guid.NewGuid().ToString()
-                };
-            }
-            finally
-            {
-                // Securely clear shared secret after use
-                SecureMemory.SecureClear(sharedSecret);
-            }
+            return Task.Run(() => ProcessSyncMessage(encryptedMessage, senderHint));
         }
 
-        /// <summary>
-        /// Processes a sync message received from another device.
-        /// 
-        /// <para>
-        /// Attempts to decrypt and validate a sync message, extracting the synchronized data
-        /// if the message is valid and from a trusted linked device.
-        /// </para>
-        /// </summary>
-        /// <param name="encryptedMessage">Encrypted sync message to process</param>
-        /// <param name="senderHint">Optional hint about which device sent the message</param>
-        /// <returns>The synchronized data if successful, null otherwise</returns>
-        /// <exception cref="ArgumentNullException">Thrown if encryptedMessage is null</exception>
+        /// <inheritdoc/>
         public byte[]? ProcessSyncMessage(EncryptedMessage encryptedMessage, byte[]? senderHint = null)
         {
             ThrowIfDisposed();
@@ -798,6 +647,151 @@ namespace LibEmiddle.MultiDevice
             LoggingManager.LogInformation(nameof(DeviceManager),
                 "Could not process sync message with any linked device key");
             return null;
+        }
+
+        /// <inheritdoc/>
+        public string ExportLinkedDevices()
+        {
+            ThrowIfDisposed();
+
+            var linkedDevicesList = new List<LinkedDeviceInfo>();
+
+            foreach (var kvp in _linkedDevices)
+            {
+                // Create a serializable representation
+                var deviceInfo = new LinkedDeviceInfo
+                {
+                    Id = kvp.Key,
+                    PublicKey = Convert.ToBase64String(kvp.Value.PublicKey),
+                    LinkedAt = kvp.Value.LinkedAt
+                };
+
+                linkedDevicesList.Add(deviceInfo);
+            }
+
+            return JsonSerialization.Serialize(linkedDevicesList);
+        }
+
+        /// <inheritdoc/>
+        public int ImportLinkedDevices(string serializedDevices)
+        {
+            ThrowIfDisposed();
+
+            if (string.IsNullOrEmpty(serializedDevices))
+                return 0;
+
+            try
+            {
+                var devicesList = JsonSerialization.Deserialize<List<LinkedDeviceInfo>>(serializedDevices);
+                if (devicesList == null)
+                    return 0;
+
+                int importedCount = 0;
+
+                foreach (var deviceInfo in devicesList)
+                {
+                    // Skip if already exists
+                    if (_linkedDevices.ContainsKey(deviceInfo.Id))
+                        continue;
+
+                    // Check if device has been revoked
+                    try
+                    {
+                        byte[] publicKey = Convert.FromBase64String(deviceInfo.PublicKey);
+
+                        if (IsDeviceRevoked(publicKey))
+                        {
+                            LoggingManager.LogWarning(nameof(DeviceManager),
+                                $"Skipping import of revoked device: {deviceInfo.Id}");
+                            continue;
+                        }
+
+                        // Recreate the device info
+                        var newDeviceInfo = new DeviceInfo
+                        {
+                            PublicKey = publicKey,
+                            LinkedAt = deviceInfo.LinkedAt
+                        };
+
+                        // Add to linked devices
+                        if (_linkedDevices.TryAdd(deviceInfo.Id, newDeviceInfo))
+                        {
+                            importedCount++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggingManager.LogWarning(nameof(DeviceManager),
+                            $"Error importing device {deviceInfo.Id}: {ex.Message}");
+                        // Continue with next device
+                    }
+                }
+
+                return importedCount;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(DeviceManager),
+                    $"Error importing linked devices: {ex.Message}");
+                return 0;
+            }
+        }
+
+        #region Private methods
+
+        /// <summary>
+        /// Creates a sync message for a specific device.
+        /// </summary>
+        private EncryptedMessage CreateSyncMessageForDevice(byte[] syncData, byte[] deviceKey, byte[] senderX25519Private)
+        {
+            // Perform key exchange
+            byte[] sharedSecret = _cryptoProvider.ScalarMult(senderX25519Private, deviceKey);
+
+            try
+            {
+                // Sign the sync data
+                byte[] signature = _cryptoProvider.Sign(syncData, _deviceKeyPair.PrivateKey);
+
+                // Create sync message with timestamp for replay protection
+                var syncMessage = new DeviceSyncMessage
+                {
+                    SenderPublicKey = _deviceKeyPair.PublicKey,
+                    Data = syncData,
+                    Signature = signature,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    // Add protocol version information
+                    Version = ProtocolVersion.FULL_VERSION
+                };
+
+                // Serialize with protocol version
+                string json = JsonSerializer.Serialize(new
+                {
+                    senderPublicKey = Convert.ToBase64String(syncMessage.SenderPublicKey ?? Array.Empty<byte>()),
+                    data = Convert.ToBase64String(syncMessage.Data ?? Array.Empty<byte>()),
+                    signature = Convert.ToBase64String(syncMessage.Signature ?? Array.Empty<byte>()),
+                    timestamp = syncMessage.Timestamp,
+                    protocolVersion = syncMessage.Version
+                });
+
+                // Encrypt
+                byte[] plaintext = Encoding.Default.GetBytes(json);
+                byte[] nonce = Nonce.GenerateNonce();
+                byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
+
+                // Create encrypted message
+                return new EncryptedMessage
+                {
+                    Ciphertext = ciphertext,
+                    Nonce = nonce,
+                    Timestamp = syncMessage.Timestamp,
+                    MessageId = Guid.NewGuid().ToString()
+                };
+            }
+            finally
+            {
+                // Securely clear shared secret after use
+                SecureMemory.SecureClear(sharedSecret);
+            }
         }
 
         /// <summary>
@@ -905,101 +899,6 @@ namespace LibEmiddle.MultiDevice
         }
 
         /// <summary>
-        /// Exports linked devices to a serialized representation for persistence.
-        /// </summary>
-        /// <returns>A JSON serialized representation of linked devices.</returns>
-        public string ExportLinkedDevices()
-        {
-            ThrowIfDisposed();
-
-            var linkedDevicesList = new List<LinkedDeviceInfo>();
-
-            foreach (var kvp in _linkedDevices)
-            {
-                // Create a serializable representation
-                var deviceInfo = new LinkedDeviceInfo
-                {
-                    Id = kvp.Key,
-                    PublicKey = Convert.ToBase64String(kvp.Value.PublicKey),
-                    LinkedAt = kvp.Value.LinkedAt
-                };
-
-                linkedDevicesList.Add(deviceInfo);
-            }
-
-            return JsonSerialization.Serialize(linkedDevicesList);
-        }
-
-        /// <summary>
-        /// Imports linked devices from a serialized representation.
-        /// </summary>
-        /// <param name="serializedDevices">The serialized devices data.</param>
-        /// <returns>The number of imported devices.</returns>
-        public int ImportLinkedDevices(string serializedDevices)
-        {
-            ThrowIfDisposed();
-
-            if (string.IsNullOrEmpty(serializedDevices))
-                return 0;
-
-            try
-            {
-                var devicesList = JsonSerialization.Deserialize<List<LinkedDeviceInfo>>(serializedDevices);
-                if (devicesList == null)
-                    return 0;
-
-                int importedCount = 0;
-
-                foreach (var deviceInfo in devicesList)
-                {
-                    // Skip if already exists
-                    if (_linkedDevices.ContainsKey(deviceInfo.Id))
-                        continue;
-
-                    // Check if device has been revoked
-                    try
-                    {
-                        byte[] publicKey = Convert.FromBase64String(deviceInfo.PublicKey);
-
-                        if (IsDeviceRevoked(publicKey))
-                        {
-                            LoggingManager.LogWarning(nameof(DeviceManager),
-                                $"Skipping import of revoked device: {deviceInfo.Id}");
-                            continue;
-                        }
-
-                        // Recreate the device info
-                        var newDeviceInfo = new DeviceInfo
-                        {
-                            PublicKey = publicKey,
-                            LinkedAt = deviceInfo.LinkedAt
-                        };
-
-                        // Add to linked devices
-                        if (_linkedDevices.TryAdd(deviceInfo.Id, newDeviceInfo))
-                        {
-                            importedCount++;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        LoggingManager.LogWarning(nameof(DeviceManager),
-                            $"Error importing device {deviceInfo.Id}: {ex.Message}");
-                        // Continue with next device
-                    }
-                }
-
-                return importedCount;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(DeviceManager),
-                    $"Error importing linked devices: {ex.Message}");
-                return 0;
-            }
-        }
-
-        /// <summary>
         /// Checks if two device keys represent the same device.
         /// </summary>
         private bool IsSameDeviceKey(byte[] key1, byte[] key2)
@@ -1057,6 +956,10 @@ namespace LibEmiddle.MultiDevice
             }
         }
 
+        #endregion
+
+        #region Dispose
+
         /// <summary>
         /// Throws an ObjectDisposedException if this object has been disposed.
         /// </summary>
@@ -1100,21 +1003,7 @@ namespace LibEmiddle.MultiDevice
 
             _disposed = true;
         }
-    }
 
-    /// <summary>
-    /// Stores information about a linked device.
-    /// </summary>
-    internal class DeviceInfo
-    {
-        /// <summary>
-        /// The device's public key (X25519 format).
-        /// </summary>
-        public byte[] PublicKey { get; set; } = Array.Empty<byte>();
-
-        /// <summary>
-        /// When the device was linked (milliseconds since epoch).
-        /// </summary>
-        public long LinkedAt { get; set; }
+        #endregion
     }
 }

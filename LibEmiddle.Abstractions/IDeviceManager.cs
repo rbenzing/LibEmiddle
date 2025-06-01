@@ -10,19 +10,30 @@ namespace LibEmiddle.Abstractions
     public interface IDeviceManager : IDisposable
     {
         /// <summary>
-        /// Adds a linked device using its public key.
+        /// Adds a linked device to the device manager.
+        /// 
+        /// <para>
+        /// Records a new device as being linked to this device for synchronization purposes.
+        /// The device key is normalized to ensure consistent lookup regardless of the key format.
+        /// </para>
         /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to link.</param>
-        /// <exception cref="ArgumentNullException">Thrown when devicePublicKey is null.</exception>
-        /// <exception cref="SecurityException">Thrown when trying to add a previously revoked device.</exception>
+        /// <param name="devicePublicKey">Public key of the device to link</param>
+        /// <exception cref="ArgumentNullException">Thrown if devicePublicKey is null</exception>
+        /// <exception cref="ArgumentException">Thrown if devicePublicKey has invalid format</exception>
+        /// <exception cref="SecurityException">Thrown if trying to add a revoked device</exception>
         void AddLinkedDevice(byte[] devicePublicKey);
 
         /// <summary>
-        /// Removes a linked device.
+        /// Removes a linked device from the device manager.
+        /// 
+        /// <para>
+        /// Removes a device from the list of linked devices. This does not revoke the device,
+        /// it simply removes it from the local list of linked devices.
+        /// </para>
         /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to remove.</param>
-        /// <returns>True if the device was found and removed, false otherwise.</returns>
-        /// <exception cref="ArgumentNullException">Thrown when devicePublicKey is null.</exception>
+        /// <param name="devicePublicKey">Public key of the device to remove</param>
+        /// <returns>True if the device was found and removed, false otherwise</returns>
+        /// <exception cref="ArgumentNullException">Thrown if devicePublicKey is null</exception>
         bool RemoveLinkedDevice(byte[] devicePublicKey);
 
         /// <summary>
@@ -69,48 +80,98 @@ namespace LibEmiddle.Abstractions
         /// <summary>
         /// Creates a revocation message for a device.
         /// </summary>
-        /// <param name="deviceKeyToRevoke">The public key of the device to revoke.</param>
+        /// <param name="devicePublicKey">The public key of the device to revoke.</param>
+        /// <param name="reason">Optional reason for the revocation.</param>
         /// <returns>A signed revocation message that can be distributed to other devices.</returns>
         /// <exception cref="ArgumentException">Thrown when deviceKeyToRevoke is null or empty.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if the manager has been disposed.</exception>
-        DeviceRevocationMessage CreateRevocationMessage(byte[] deviceKeyToRevoke);
-
-        /// <summary>
-        /// Revokes a linked device and creates a revocation message.
-        /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to revoke.</param>
-        /// <returns>A revocation message that should be distributed to other devices.</returns>
-        /// <exception cref="ArgumentNullException">Thrown when devicePublicKey is null.</exception>
-        /// <exception cref="KeyNotFoundException">Thrown when the device is not found in linked devices.</exception>
-        /// <exception cref="ObjectDisposedException">Thrown if the manager has been disposed.</exception>
-        DeviceRevocationMessage RevokeLinkedDevice(byte[] devicePublicKey);
+        DeviceRevocationMessage CreateDeviceRevocationMessage(byte[] devicePublicKey, string? reason = null);
 
         /// <summary>
         /// Processes a revocation message received from another device.
         /// </summary>
         /// <param name="revocationMessage">The received revocation message.</param>
-        /// <param name="trustedPublicKey">The trusted public key for verification.</param>
         /// <returns>True if the message was valid and the device was removed.</returns>
         /// <exception cref="ArgumentNullException">Thrown when revocationMessage or trustedPublicKey is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if the manager has been disposed.</exception>
-        bool ProcessRevocationMessage(DeviceRevocationMessage revocationMessage, byte[] trustedPublicKey);
+        bool ProcessDeviceRevocationMessage(DeviceRevocationMessage revocationMessage);
 
         /// <summary>
-        /// Exports all linked devices to a serialized format for backup.
+        /// Imports device revocations from a serialized representation.
         /// </summary>
-        /// <param name="password">Optional password to encrypt the export.</param>
-        /// <returns>Serialized linked devices data.</returns>
-        /// <exception cref="ObjectDisposedException">Thrown if the manager has been disposed.</exception>
-        byte[] ExportLinkedDevices(string? password = null);
+        /// <param name="serializedRevocations">The serialized revocations</param>
+        /// <returns>The number of imported revocations</returns>
+        int ImportRevocations(string serializedRevocations);
 
         /// <summary>
-        /// Imports linked devices from a serialized format.
+        /// Exports the device revocations for persistence.
         /// </summary>
-        /// <param name="data">Serialized linked devices data.</param>
-        /// <param name="password">Optional password if the data is encrypted.</param>
-        /// <returns>Number of devices imported.</returns>
-        /// <exception cref="ArgumentException">Thrown when data is null or empty.</exception>
-        /// <exception cref="ObjectDisposedException">Thrown if the manager has been disposed.</exception>
-        int ImportLinkedDevices(byte[] data, string? password = null);
+        /// <returns>Serialized representation of all processed revocations</returns>
+        string ExportRevocations();
+
+        /// <summary>
+        /// Gets a list of all revoked device public keys.
+        /// </summary>
+        /// <returns>A list of revoked device public keys (in normalized X25519 format)</returns>
+        public List<byte[]> GetRevokedDeviceKeys();
+
+        /// <summary>
+        /// Exports linked devices to a serialized representation for persistence.
+        /// </summary>
+        /// <returns>A JSON serialized representation of linked devices.</returns>
+        string ExportLinkedDevices();
+
+        /// <summary>
+        /// Imports linked devices from a serialized representation.
+        /// </summary>
+        /// <param name="serializedDevices">The serialized devices data.</param>
+        /// <returns>The number of imported devices.</returns>
+        int ImportLinkedDevices(string serializedDevices);
+
+        /// <summary>
+        /// Processes a sync message received from another device.
+        /// 
+        /// <para>
+        /// Attempts to decrypt and validate a sync message, extracting the synchronized data
+        /// if the message is valid and from a trusted linked device.
+        /// </para>
+        /// </summary>
+        /// <param name="encryptedMessage">Encrypted sync message to process</param>
+        /// <param name="senderHint">Optional hint about which device sent the message</param>
+        /// <returns>The synchronized data if successful, null otherwise</returns>
+        /// <exception cref="ArgumentNullException">Thrown if encryptedMessage is null</exception>
+        byte[]? ProcessSyncMessage(EncryptedMessage encryptedMessage, byte[]? senderHint = null);
+
+        /// <summary>
+        /// Processes a device link message received from another device.
+        /// 
+        /// <para>
+        /// Verifies and processes a device link message received from another device (typically the main
+        /// device sending a link to this device). If the message is valid and properly signed, it establishes
+        /// a trusted link with the sending device.
+        /// </para>
+        /// </summary>
+        /// <param name="encryptedMessage">The device link message to process</param>
+        /// <param name="expectedMainDevicePublicKey">The expected public key of the main device</param>
+        /// <returns>True if the linking was successful, false otherwise</returns>
+        /// <exception cref="ArgumentNullException">Thrown if parameters are null</exception>
+        /// <exception cref="SecurityException">Thrown if trying to link a revoked device</exception>
+        bool ProcessDeviceLinkMessage(EncryptedMessage encryptedMessage, byte[] expectedMainDevicePublicKey);
+
+        /// <summary>
+        /// Creates a device link message for establishing multi-device sync with a new device.
+        /// 
+        /// <para>
+        /// This method creates a secure message that can be transmitted to a new device to establish
+        /// a trusted relationship between the current device and the new device. The message includes
+        /// the necessary cryptographic material to verify identity and establish a secure channel.
+        /// </para>
+        /// </summary>
+        /// <param name="newDevicePublicKey">The public key of the new device to link</param>
+        /// <returns>An encrypted message containing linking information</returns>
+        /// <exception cref="ArgumentNullException">Thrown if newDevicePublicKey is null</exception>
+        /// <exception cref="ArgumentException">Thrown if newDevicePublicKey is invalid</exception>
+        /// <exception cref="SecurityException">Thrown if trying to link a revoked device</exception>
+        EncryptedMessage CreateDeviceLinkMessage(byte[] newDevicePublicKey);
     }
 }

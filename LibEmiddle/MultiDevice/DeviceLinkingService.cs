@@ -17,7 +17,7 @@ namespace LibEmiddle.MultiDevice
     /// shared keys between devices.
     /// </para>
     /// </summary>
-    public class DeviceLinkingService : IDeviceLinkingService
+    public class DeviceLinkingService : IDeviceLinkingService, IDisposable
     {
         private readonly ICryptoProvider _cryptoProvider;
         private bool _disposed;
@@ -36,74 +36,38 @@ namespace LibEmiddle.MultiDevice
 
         /// <summary>
         /// Derives a shared key for a new device.
-        /// Accepts either Ed25519 or X25519 public keys, performing conversion if needed.
+        /// Accepts X25519 public keys
         /// 
         /// <para>
         /// This method follows the Signal Protocol specification for deriving shared keys
-        /// between devices. It supports both Ed25519 and X25519 key formats and includes
-        /// information about the key format in the derivation info to ensure different results
-        /// for different key types.
+        /// between devices. It supports X25519 key formats and includes
+        /// information about the key format.
         /// </para>
         /// </summary>
         /// <param name="existingSharedKey">Existing device's shared key</param>
-        /// <param name="newDevicePublicKey">New device's public key (Ed25519 or X25519)</param>
+        /// <param name="newDevicePublicKey">New device's public key (X25519)</param>
         /// <returns>Shared key for the new device</returns>
         /// <exception cref="ArgumentNullException">Thrown if inputs are null</exception>
         /// <exception cref="ArgumentException">Thrown if key has invalid length</exception>
-        /// <exception cref="CryptographicException">Thrown if key is invalid</exception>
+        /// <exception cref="CryptographicException">Thrown if key is invalid or conversion fails</exception>
         public byte[] DeriveSharedKeyForNewDevice(byte[] existingSharedKey, byte[] newDevicePublicKey)
         {
             ArgumentNullException.ThrowIfNull(existingSharedKey, nameof(existingSharedKey));
             ArgumentNullException.ThrowIfNull(newDevicePublicKey, nameof(newDevicePublicKey));
 
-            byte[]? normalizedPublicKey = null;
-            string keyFormat;
-
-            try
+            if (newDevicePublicKey.Length != Constants.X25519_KEY_SIZE)
             {
-                // Normalize the key to X25519 format, tracking the original format
-                if (newDevicePublicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
-                {
-                    // Convert Ed25519 to X25519
-                    normalizedPublicKey = _cryptoProvider.ConvertEd25519PublicKeyToX25519(newDevicePublicKey);
-                    keyFormat = "Ed25519";
-                }
-                else if (newDevicePublicKey.Length == Constants.X25519_KEY_SIZE)
-                {
-                    // Validate the X25519 key
-                    if (!_cryptoProvider.ValidateX25519PublicKey(newDevicePublicKey))
-                    {
-                        throw new CryptographicException("Public key is invalid.");
-                    }
-                    normalizedPublicKey = (byte[])newDevicePublicKey.Clone();
-                    keyFormat = "X25519";
-                }
-                else
-                {
-                    throw new ArgumentException($"Invalid public key length: {newDevicePublicKey.Length}. " +
-                        $"Expected {Constants.ED25519_PUBLIC_KEY_SIZE} or {Constants.X25519_KEY_SIZE} bytes.",
-                        nameof(newDevicePublicKey));
-                }
-
-                // Include the original key format in the derivation info to ensure different results
-                // for Ed25519 vs X25519 inputs
-                byte[] keyDerivationInfo = System.Text.Encoding.Default.GetBytes($"DeviceLinkKeyDerivation-{keyFormat}");
-
-                // Use HKDF to derive the key
-                return _cryptoProvider.DeriveKey(
-                    normalizedPublicKey,
-                    existingSharedKey,  // Use existing key as salt
-                    keyDerivationInfo
-                );
+                throw new ArgumentException($"Invalid public key length: {newDevicePublicKey.Length}. " +
+                    $"Expected {Constants.X25519_KEY_SIZE} bytes.",
+                    nameof(newDevicePublicKey));
             }
-            finally
-            {
-                // Clear sensitive data
-                if (normalizedPublicKey != null)
-                {
-                    SecureMemory.SecureClear(normalizedPublicKey);
-                }
-            }
+
+            // Use HKDF to derive the key
+            return _cryptoProvider.DeriveKey(
+                newDevicePublicKey,
+                existingSharedKey,  // Use existing key as salt
+                Encoding.Default.GetBytes($"DeviceLinkKeyDerivation-X25519")
+            );   
         }
 
         /// <summary>

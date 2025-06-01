@@ -963,7 +963,7 @@ public sealed partial class Sodium
     /// </summary>
     /// <param name="ed25519PublicKey">The Ed25519 public key (32 bytes).</param>
     /// <returns>The converted X25519 public key (32 bytes).</returns>
-    public static byte[] ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey)
+    public static byte[] ConvertEd25519PublicKeyToX25519(byte[] ed25519PublicKey)
     {
         if (ed25519PublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
             throw new ArgumentException($"Ed25519 public key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(ed25519PublicKey));
@@ -979,7 +979,7 @@ public sealed partial class Sodium
             if (result != 0)
                 throw new CryptographicException("Failed to convert Ed25519 public key to X25519.");
 
-            return x25519PublicKey;
+            return x25519PublicKey.ToArray();
         }
         catch
         {
@@ -997,7 +997,7 @@ public sealed partial class Sodium
         Span<byte> ed25519PublicKey,
         ReadOnlySpan<byte> signedKey);
 
-    public static Span<byte> ConvertEd25519PrivateKeyToX25519PublicKey(ReadOnlySpan<byte> signedKey)
+    public static byte[] ConvertEd25519PrivateKeyToX25519PublicKey(ReadOnlySpan<byte> signedKey)
     {
         if (signedKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
             throw new ArgumentException($"Ed25519 private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(signedKey));
@@ -1005,8 +1005,8 @@ public sealed partial class Sodium
         Initialize();
 
         // First extract the Ed25519 public key from the private key
-        Span<byte> ed25519PublicKey = stackalloc byte[Constants.ED25519_PUBLIC_KEY_SIZE];
-        Span<byte> x25519PublicKey = stackalloc byte[Constants.X25519_KEY_SIZE];
+        byte[] ed25519PublicKey = new byte[Constants.ED25519_PUBLIC_KEY_SIZE];
+        byte[] x25519PublicKey = new byte[Constants.X25519_KEY_SIZE];
 
         try
         {
@@ -1025,13 +1025,16 @@ public sealed partial class Sodium
             SecureMemory.SecureClear(ed25519PublicKey);
 
             // Return a heap-allocated copy since we can't return stack memory
-            return x25519PublicKey.ToArray();
+            return x25519PublicKey;
         }
         catch
         {
+            throw;
+        }
+        finally
+        {
             SecureMemory.SecureClear(ed25519PublicKey);
             SecureMemory.SecureClear(x25519PublicKey);
-            throw;
         }
     }
 
@@ -1068,9 +1071,12 @@ public sealed partial class Sodium
             return x25519PrivateKey;
         }
         catch
+        {            
+            throw;
+        } 
+        finally 
         {
             SecureMemory.SecureClear(x25519PrivateKey);
-            throw;
         }
     }
 

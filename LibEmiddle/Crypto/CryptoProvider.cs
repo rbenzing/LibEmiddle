@@ -288,7 +288,7 @@ namespace LibEmiddle.Crypto
 
             try
             {
-                return Sodium.ConvertEd25519PrivateKeyToX25519(ed25519PrivateKey).ToArray();
+                return Sodium.ConvertEd25519PrivateKeyToX25519(ed25519PrivateKey);
             }
             catch (Exception ex)
             {
