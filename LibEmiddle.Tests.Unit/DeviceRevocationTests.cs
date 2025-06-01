@@ -137,7 +137,7 @@ namespace LibEmiddle.Tests.Unit
             var deviceToRemoveKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create a device manager and link a device
-            var deviceManager = new DeviceManager(mainDeviceKeyPair);
+            var deviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingSvc, _cryptoProvider);
             deviceManager.AddLinkedDevice(deviceToRemoveKeyPair.PublicKey);
 
             // Verify device is linked
@@ -166,8 +166,8 @@ namespace LibEmiddle.Tests.Unit
             var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create two device managers with the same identity for this test
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
-            var otherDeviceManager = new DeviceManager(mainDeviceKeyPair); // Same identity
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingSvc, _cryptoProvider);
+            var otherDeviceManager = new DeviceManager(otherDeviceKeyPair, _deviceLinkingSvc, _cryptoProvider);
 
             // Link the device to both managers
             mainDeviceManager.AddLinkedDevice(deviceToRevokeKeyPair.PublicKey);
@@ -194,8 +194,8 @@ namespace LibEmiddle.Tests.Unit
             var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create two device managers
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair);
-            var otherDeviceManager = new DeviceManager(mainDeviceKeyPair); // Same identity for valid processing
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingSvc, _cryptoProvider);
+            var otherDeviceManager = new DeviceManager(otherDeviceKeyPair, _deviceLinkingSvc, _cryptoProvider); // Same identity for valid processing
 
             // Link the device to the other manager
             otherDeviceManager.AddLinkedDevice(deviceToRevokeKeyPair.PublicKey);
@@ -232,7 +232,7 @@ namespace LibEmiddle.Tests.Unit
             var deviceToRemoveKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create a device manager without linking the device
-            var deviceManager = new DeviceManager(mainDeviceKeyPair);
+            var deviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingSvc, _cryptoProvider);
 
             // Act - Try to remove a device that was never linked
             bool result = deviceManager.RemoveLinkedDevice(deviceToRemoveKeyPair.PublicKey);
@@ -308,7 +308,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var identityKeyPair = Sodium.GenerateEd25519KeyPair();
-            var deviceManager = new DeviceManager(identityKeyPair);
+            var deviceManager = new DeviceManager(identityKeyPair, _deviceLinkingSvc, _cryptoProvider);
             var deviceKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Act
@@ -342,7 +342,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var identityKeyPair = Sodium.GenerateEd25519KeyPair();
-            var deviceManager = new DeviceManager(identityKeyPair);
+            var deviceManager = new DeviceManager(identityKeyPair, _deviceLinkingSvc, _cryptoProvider);
             var device1 = Sodium.GenerateEd25519KeyPair().PublicKey;
             var device2 = Sodium.GenerateEd25519KeyPair().PublicKey;
 
@@ -359,7 +359,7 @@ namespace LibEmiddle.Tests.Unit
             string exportedRevocations = deviceManager.ExportRevocations();
 
             // Create a new device manager (simulate restart)
-            var newDeviceManager = new DeviceManager(identityKeyPair);
+            var newDeviceManager = new DeviceManager(identityKeyPair, _deviceLinkingSvc, _cryptoProvider);
 
             // Import both linked devices and revocations
             newDeviceManager.ImportLinkedDevices(exportedDevices);

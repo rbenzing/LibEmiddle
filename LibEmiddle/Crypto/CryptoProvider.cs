@@ -260,15 +260,14 @@ namespace LibEmiddle.Crypto
         /// <inheritdoc/>
         public byte[] ConvertEd25519PublicKeyToX25519(byte[] ed25519PublicKey)
         {
-            if (ed25519PublicKey == null)
-                throw new ArgumentNullException(nameof(ed25519PublicKey));
+            ArgumentNullException.ThrowIfNull(ed25519PublicKey);
 
             if (ed25519PublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
                 throw new ArgumentException($"Ed25519 public key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(ed25519PublicKey));
 
             try
             {
-                return Sodium.ConvertEd25519PublicKeyToX25519(ed25519PublicKey).ToArray();
+                return Sodium.ConvertEd25519PublicKeyToX25519(ed25519PublicKey);
             }
             catch (Exception ex)
             {

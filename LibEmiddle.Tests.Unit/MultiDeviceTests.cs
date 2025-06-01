@@ -163,7 +163,7 @@ namespace LibEmiddle.Tests.Unit
             var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519).GetAwaiter().GetResult();
 
             // Create manager
-            using var manager = new DeviceManager(mainDeviceKeyPair, _cryptoProvider, _deviceLinkingService);
+            using var manager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
 
             // Add the second device
             manager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);
@@ -193,7 +193,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var mainDeviceKeyPair = _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519).GetAwaiter().GetResult();
-            var manager = new DeviceManager(mainDeviceKeyPair, _cryptoProvider, _deviceLinkingService);
+            var manager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
 
             // Act & Assert - Should throw ArgumentNullException
             manager.AddLinkedDevice(null);
@@ -215,8 +215,8 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning($"Created test sync data, length: {originalSyncData.Length}");
 
             // 3. Set up device managers
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _cryptoProvider, _deviceLinkingService);
-            var secondDeviceManager = new DeviceManager(secondDeviceKeyPair, _cryptoProvider, _deviceLinkingService);
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
+            var secondDeviceManager = new DeviceManager(secondDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
 
             // Link devices to each other
             mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);
@@ -254,8 +254,8 @@ namespace LibEmiddle.Tests.Unit
             var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519).GetAwaiter().GetResult();
 
             // Create managers
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _cryptoProvider, _deviceLinkingService);
-            var secondDeviceManager = new DeviceManager(secondDeviceKeyPair, _cryptoProvider, _deviceLinkingService);
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
+            var secondDeviceManager = new DeviceManager(secondDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
 
             // Link devices
             mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);
@@ -314,7 +314,7 @@ namespace LibEmiddle.Tests.Unit
             var fourthDeviceKeyPair = _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519).GetAwaiter().GetResult();
 
             // Create device manager for main device
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _cryptoProvider, _deviceLinkingService);
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
 
             // Link multiple devices
             mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);
@@ -357,7 +357,7 @@ namespace LibEmiddle.Tests.Unit
             var thirdDeviceKeyPair = _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519).GetAwaiter().GetResult();
 
             // Create device manager for main device
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _cryptoProvider, _deviceLinkingService);
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
 
             // Link devices
             mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);
@@ -396,7 +396,7 @@ namespace LibEmiddle.Tests.Unit
             var secondDeviceKeyPair = _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519).GetAwaiter().GetResult();
 
             // Create device manager
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _cryptoProvider, _deviceLinkingService);
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
 
             // Add the same device multiple times
             mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);
@@ -468,7 +468,7 @@ namespace LibEmiddle.Tests.Unit
             var deviceToRevokeKeyPair = _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519).GetAwaiter().GetResult();
 
             // Create a device manager
-            var deviceManager = new DeviceManager(identityKeyPair, _cryptoProvider, _deviceLinkingService);
+            var deviceManager = new DeviceManager(identityKeyPair, _deviceLinkingService, _cryptoProvider);
 
             // Create a revocation message
             var revocationMessage = deviceManager.CreateDeviceRevocationMessage(
@@ -483,7 +483,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsFalse(string.IsNullOrEmpty(exportedData), "Exported data should not be empty");
 
             // Create a new manager and import
-            var newManager = new DeviceManager(identityKeyPair, _cryptoProvider, _deviceLinkingService);
+            var newManager = new DeviceManager(identityKeyPair, _deviceLinkingService, _cryptoProvider);
             int importedCount = newManager.ImportRevocations(exportedData);
 
             // Assert

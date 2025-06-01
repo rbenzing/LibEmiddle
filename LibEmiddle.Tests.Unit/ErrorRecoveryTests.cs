@@ -479,8 +479,8 @@ namespace LibEmiddle.Tests.Unit
 
             // Create device managers
             var deviceLinkingService = new DeviceLinkingService(_cryptoProvider);
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _cryptoProvider, deviceLinkingService);
-            var secondDeviceManager = new DeviceManager(secondDeviceKeyPair, _cryptoProvider, deviceLinkingService);
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, deviceLinkingService, _cryptoProvider);
+            var secondDeviceManager = new DeviceManager(secondDeviceKeyPair, deviceLinkingService, _cryptoProvider);
 
             // Convert to X25519 keys for direct testing
             byte[] mainDeviceX25519Public = _cryptoProvider.ConvertEd25519PublicKeyToX25519(mainDeviceKeyPair.PublicKey);

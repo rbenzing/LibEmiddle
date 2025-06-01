@@ -906,7 +906,7 @@ public sealed partial class Sodium
     [LibraryImport(LibraryName, EntryPoint = "crypto_pwhash_str_verify",
                StringMarshalling = StringMarshalling.Utf8)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    internal static partial int crypto_pwhash_str_verify(
+    private static partial int crypto_pwhash_str_verify(
         ReadOnlySpan<byte> hashed,      // zero-terminated
         string password,
         nuint passwordLen);
@@ -949,43 +949,37 @@ public sealed partial class Sodium
 
         return rc == 0;
     }
+
     /// <summary>
     /// Converts an Ed25519 public key to an X25519 public key.
     /// </summary>
     [LibraryImport(LibraryName, EntryPoint = "crypto_sign_ed25519_pk_to_curve25519")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    internal static partial int crypto_sign_ed25519_pk_to_curve25519(
-        Span<byte> x25519PublicKey,
-        ReadOnlySpan<byte> ed25519PublicKey);
+    private static partial int crypto_sign_ed25519_pk_to_curve25519(
+        Span<byte> x25519_pk,
+        ReadOnlySpan<byte> ed25519_pk);
 
     /// <summary>
     /// Converts an Ed25519 public key to an X25519 public key.
     /// </summary>
     /// <param name="ed25519PublicKey">The Ed25519 public key (32 bytes).</param>
     /// <returns>The converted X25519 public key (32 bytes).</returns>
-    public static byte[] ConvertEd25519PublicKeyToX25519(byte[] ed25519PublicKey)
+    public static byte[] ConvertEd25519PublicKeyToX25519(ReadOnlySpan<byte> ed25519PublicKey)
     {
         if (ed25519PublicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
-            throw new ArgumentException($"Ed25519 public key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(ed25519PublicKey));
+            throw new ArgumentException("Ed25519 public key must be 32 bytes.", nameof(ed25519PublicKey));
 
-        Initialize();
+        Span<byte> x25519PublicKey = new byte[Constants.X25519_KEY_SIZE];
 
-        byte[] x25519PublicKey = new byte[Constants.X25519_KEY_SIZE];
+        int result = crypto_sign_ed25519_pk_to_curve25519(x25519PublicKey, ed25519PublicKey);
 
-        try
-        {
-            int result = crypto_sign_ed25519_pk_to_curve25519(x25519PublicKey, ed25519PublicKey);
-
-            if (result != 0)
-                throw new CryptographicException("Failed to convert Ed25519 public key to X25519.");
-
-            return x25519PublicKey.ToArray();
-        }
-        catch
+        if (result != 0)
         {
             SecureMemory.SecureClear(x25519PublicKey);
-            throw;
+            throw new CryptographicException("Failed to convert Ed25519 public key to X25519.");
         }
+
+        return x25519PublicKey.ToArray();
     }
 
     /// <summary>
@@ -993,7 +987,7 @@ public sealed partial class Sodium
     /// </summary>
     [LibraryImport(LibraryName, EntryPoint = "crypto_sign_ed25519_sk_to_pk")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    internal static partial int crypto_sign_ed25519_sk_to_pk(
+    private static partial int crypto_sign_ed25519_sk_to_pk(
         Span<byte> ed25519PublicKey,
         ReadOnlySpan<byte> signedKey);
 
@@ -1029,12 +1023,9 @@ public sealed partial class Sodium
         }
         catch
         {
-            throw;
-        }
-        finally
-        {
             SecureMemory.SecureClear(ed25519PublicKey);
             SecureMemory.SecureClear(x25519PublicKey);
+            throw;
         }
     }
 
@@ -1071,12 +1062,9 @@ public sealed partial class Sodium
             return x25519PrivateKey;
         }
         catch
-        {            
-            throw;
-        } 
-        finally 
         {
             SecureMemory.SecureClear(x25519PrivateKey);
+            throw;
         }
     }
 

@@ -107,6 +107,7 @@ LibEmiddle/
 │   │   ├── KeyPair.cs
 │   │   ├── LinkedDeviceInfo.cs
 │   │   ├── MailboxMessage.cs
+│   │   ├── MessageReceivedEventArgs.cs
 │   │   ├── MessageRecord.cs
 │   │   ├── SenderKeyDistributionMessage.cs
 │   │   ├── SenderSessionResult.cs

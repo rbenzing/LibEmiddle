@@ -88,39 +88,11 @@ namespace LibEmiddle.Abstractions
         /// </summary>
         /// <returns>The current crypto session state.</returns>
         DoubleRatchetSession GetCryptoSessionState();
-    }
-
-    /// <summary>
-    /// Event arguments for the MessageReceived event.
-    /// </summary>
-    public class MessageReceivedEventArgs : EventArgs
-    {
-        /// <summary>
-        /// The sender's public key.
-        /// </summary>
-        public byte[] SenderKey { get; }
 
         /// <summary>
-        /// The message content.
+        /// Checks if the session is valid and not terminated or disposed.
+        /// Performs basic checks on the crypto session state.
         /// </summary>
-        public string Message { get; }
-
-        /// <summary>
-        /// The timestamp of the message.
-        /// </summary>
-        public long Timestamp { get; }
-
-        /// <summary>
-        /// Initializes a new instance of the MessageReceivedEventArgs class.
-        /// </summary>
-        /// <param name="senderKey">The sender's public key.</param>
-        /// <param name="message">The message content.</param>
-        /// <param name="timestamp">The timestamp of the message.</param>
-        public MessageReceivedEventArgs(byte[] senderKey, string message, long timestamp)
-        {
-            SenderKey = senderKey ?? throw new ArgumentNullException(nameof(senderKey));
-            Message = message ?? throw new ArgumentNullException(nameof(message));
-            Timestamp = timestamp;
-        }
+        bool IsValid();
     }
 }

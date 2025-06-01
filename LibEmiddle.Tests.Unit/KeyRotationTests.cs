@@ -351,8 +351,9 @@ namespace LibEmiddle.Tests.Unit
             var secondDeviceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
             // Create device manager instances
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _cryptoProvider);
-            var secondDeviceManager = new DeviceManager(secondDeviceKeyPair, _cryptoProvider);
+            var deviceLinkingService = new DeviceLinkingService(_cryptoProvider);
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, deviceLinkingService, _cryptoProvider);
+            var secondDeviceManager = new DeviceManager(secondDeviceKeyPair, deviceLinkingService, _cryptoProvider);
 
             // Link devices bidirectionally
             mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);

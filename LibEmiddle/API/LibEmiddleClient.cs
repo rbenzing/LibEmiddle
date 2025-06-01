@@ -20,11 +20,11 @@ namespace LibEmiddle.API
         private readonly GroupChatManager _groupChatManager;
         private readonly IGroupMemberManager _groupMemberManager;
         private readonly DeviceManager _deviceManager;
-        private readonly IMailboxTransport _mailboxTransport;
         private readonly ICryptoProvider _cryptoProvider;
         private readonly X3DHProtocol _x3DHProtocol;
         private readonly DoubleRatchetProtocol _doubleRatchetProtocol;
         private readonly SessionManager _sessionManager;
+        private readonly DeviceLinkingService _deviceLinkingSvc;
 
         private readonly KeyPair _identityKeyPair;
         private ChatSession? _chatSession = null;
@@ -44,8 +44,9 @@ namespace LibEmiddle.API
             _sessionManager = new SessionManager(_cryptoProvider, _x3DHProtocol, _doubleRatchetProtocol, _identityKeyPair);
             _groupChatManager = new GroupChatManager(_cryptoProvider, _identityKeyPair);
             _groupMemberManager = new GroupMemberManager();
-            _deviceManager = new DeviceManager(_identityKeyPair);
-            _mailboxTransport = new InMemoryMailboxTransport(_cryptoProvider);
+
+            _deviceLinkingSvc = new DeviceLinkingService(_cryptoProvider);
+            _deviceManager = new DeviceManager(_identityKeyPair, _deviceLinkingSvc, _cryptoProvider);
         }
 
         #region Key Management
