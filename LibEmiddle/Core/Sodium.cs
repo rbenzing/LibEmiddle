@@ -566,8 +566,8 @@ public sealed partial class Sodium
         ReadOnlySpan<byte> info = default,
         int outputLength = 32)
     {
-        if (outputLength <= 0)
-            throw new ArgumentOutOfRangeException(nameof(outputLength), "Output length must be positive.");
+        if (outputLength <= 0 || outputLength > 64)
+            throw new ArgumentOutOfRangeException(nameof(outputLength), "Output length must be greater than 0 and less than or equal to 64.");
 
         // Allocate heap buffer for PRK (SHA-256 output = 32 bytes)
         byte[] prk = new byte[Constants.AES_KEY_SIZE];
@@ -1225,51 +1225,27 @@ public sealed partial class Sodium
     /// </summary>
     /// <param name="x25519PublicKey">X25519 public key to validate</param>
     /// <returns>True if the key is valid.</returns>
-    public static bool ValidateX25519PublicKey(byte[] x25519PublicKey)
+    public static bool ValidateX25519PublicKey(ReadOnlySpan<byte> x25519PublicKey)
     {
-        if (x25519PublicKey == null || x25519PublicKey.Length != Constants.X25519_KEY_SIZE)
-        {
-            return false;
-        }
+        if (x25519PublicKey.Length != Constants.X25519_KEY_SIZE) return false;
 
-        // Check for all-zero key, which is invalid for X25519
-        bool allZeros = true;
-        for (int i = 0; i < x25519PublicKey.Length; i++)
+        // Check against known small-order points
+        foreach (var smallOrder in SMALL_ORDER_POINTS)
         {
-            if (x25519PublicKey[i] != 0)
-            {
-                allZeros = false;
-                break;
-            }
-        }
-
-        if (allZeros)
-        {
-            return false;
-        }
-
-        // Check for other known weak keys
-        // Low order points that should be rejected
-        byte[][] lowOrderPoints =
-        [
-            // Point at infinity
-            new byte[32] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-            // y = 1 (order 4)
-            new byte[32] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-            // Low order point (order 8)
-            new byte[32] { 224, 235, 122, 124, 59, 65, 184, 174, 22, 86, 227, 250, 241, 159, 196, 106, 218, 9, 141, 235, 156, 50, 177, 253, 134, 98, 5, 22, 95, 73, 184, 0 },
-        ];
-
-        foreach (var lowOrderPoint in lowOrderPoints)
-        {
-            if (x25519PublicKey.SequenceEqual(lowOrderPoint))
-            {
+            if (x25519PublicKey.SequenceEqual(smallOrder))
                 return false;
-            }
         }
 
-        return true;
+        // Additional validation: ensure high bit is clear for Montgomery form
+        return (x25519PublicKey[31] & 0x80) == 0;
     }
+
+    private static readonly byte[][] SMALL_ORDER_POINTS = {
+        new byte[32], // All zeros
+        Convert.FromBase64String("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE="), // Order 2
+        Convert.FromBase64String("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffec"), // Order 8
+        // Add other small order points
+    };
 
     /// <summary>
     /// Signs a message using Ed25519.

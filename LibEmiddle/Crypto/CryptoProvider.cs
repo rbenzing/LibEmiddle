@@ -11,7 +11,7 @@ namespace LibEmiddle.Crypto
     /// Implementation of the ICryptoProvider interface that provides cryptographic
     /// operations using modern cryptographic algorithms for secure messaging.
     /// </summary>
-    public class CryptoProvider : ICryptoProvider, IDisposable
+    public sealed class CryptoProvider : ICryptoProvider, IDisposable
     {
         private readonly KeyStorage _keyStorage;
         private bool _disposed;
@@ -82,27 +82,9 @@ namespace LibEmiddle.Crypto
         }
 
         /// <inheritdoc/>
-        public byte[] GenerateRandomBytes(int count)
+        public byte[] GenerateRandomBytes(uint count)
         {
-            if (count <= 0)
-                throw new ArgumentOutOfRangeException(nameof(count), "Count must be greater than zero.");
-
-            byte[] randomBuffer = new byte[count];
-
-            try
-            {
-                Sodium.RandomFill(randomBuffer);
-                return randomBuffer;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(CryptoProvider), $"GenerateRandomBytes: Error generating random bytes: {ex.Message}");
-                throw;
-            }
-            finally
-            {
-                SecureMemory.SecureClear(randomBuffer);
-            }
+            return Sodium.GenerateRandomBytes(count);
         }
 
         /// <inheritdoc/>
@@ -136,26 +118,18 @@ namespace LibEmiddle.Crypto
         }
 
         /// <inheritdoc/>
-        public bool VerifySignature(byte[] data, byte[] signature, byte[] publicKey)
+        public bool VerifySignature(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey)
         {
-            if (data == null)
-                throw new ArgumentNullException(nameof(data));
+            bool validKey = Sodium.ValidateEd25519PublicKey(publicKey);
+            bool validSig = false;
 
-            if (signature == null)
-                throw new ArgumentNullException(nameof(signature));
-
-            if (publicKey == null)
-                throw new ArgumentNullException(nameof(publicKey));
-
-            try
+            if (validKey) // Only verify if key is valid, but in constant time
             {
-                return Sodium.SignVerifyDetached(signature, data, publicKey);
+                validSig = Sodium.SignVerifyDetached(signature, message, publicKey);
             }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(CryptoProvider), $"Error verifying signature: {ex.Message}");
-                return false;
-            }
+
+            // Constant-time return
+            return validKey & validSig;
         }
 
         /// <inheritdoc/>
@@ -553,17 +527,17 @@ namespace LibEmiddle.Crypto
         /// Disposes of resources used by the CryptoProvider.
         /// </summary>
         /// <param name="disposing">True if disposing, false if finalizing.</param>
-        protected virtual void Dispose(bool disposing)
-        {
-            if (_disposed)
-                return;
-
-            if (disposing)
+        private void Dispose(bool disposing)
+        { 
+            if (!_disposed)
             {
-                _keyStorage.Dispose();
+                if (disposing)
+                {
+                    _keyStorage.Dispose();
+                    // Clear any other sensitive state
+                }
+                _disposed = true;
             }
-
-            _disposed = true;
         }
     }
 }

@@ -1,5 +1,6 @@
 ﻿using LibEmiddle.Core;
 using LibEmiddle.Domain;
+using static LibEmiddle.Core.SecureMemory;
 
 namespace LibEmiddle.Crypto
 {
@@ -69,6 +70,29 @@ namespace LibEmiddle.Crypto
             }
 
             return nonce;
+        }
+
+        public static byte[] GenerateNonce(ReadOnlySpan<byte> sessionContext, uint sequenceNumber)
+        {
+            using var buffer = new SecureBuffer(Constants.NONCE_SIZE);
+            var span = buffer.AsSpan();
+
+            // Pure random for base
+            Sodium.RandomFill(span);
+
+            // Session-specific derivation
+            var derived = Sodium.HkdfDerive(
+                sessionContext,
+                span[..16], // Use part of random as salt
+                "LibEmiddle-Nonce"u8,
+                Constants.NONCE_SIZE);
+
+            // Mix in sequence number for uniqueness
+            var seqBytes = BitConverter.GetBytes(sequenceNumber);
+            for (int i = 0; i < seqBytes.Length; i++)
+                derived[i] ^= seqBytes[i];
+
+            return derived;
         }
 
         /// <summary>

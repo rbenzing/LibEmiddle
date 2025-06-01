@@ -1,4 +1,5 @@
-﻿using System.Buffers;
+﻿using LibEmiddle.Messaging.Chat;
+using System.Buffers;
 using System.Runtime.InteropServices;
 
 namespace LibEmiddle.Core
@@ -262,6 +263,48 @@ namespace LibEmiddle.Core
                         Array.Clear(_array, 0, _array.Length);
                     }
                     _disposed = true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Custom secure buffer wrapper
+        /// </summary>
+        public sealed class SecureBuffer : IDisposable
+        {
+            private readonly IntPtr _ptr;
+            private readonly int _length;
+            private bool _disposed;
+
+            public SecureBuffer(int length)
+            {
+                _length = length;
+                _ptr = Sodium.SecureAlloc((uint)length);
+                if (_ptr == IntPtr.Zero)
+                    throw new OutOfMemoryException("Failed to allocate secure memory");
+            }
+
+            public unsafe Span<byte> AsSpan()
+            {
+                ThrowIfDisposed();
+                return new Span<byte>(_ptr.ToPointer(), _length);
+            }
+
+            public void Dispose()
+            {
+                if (!_disposed)
+                {
+                    Sodium.SecureFree(_ptr);
+                    _disposed = true;
+                }
+            }
+
+            /// <summary> Checks if disposed and throws. </summary>
+            private void ThrowIfDisposed()
+            {
+                if (_disposed)
+                {
+                    throw new ObjectDisposedException(nameof(SecureBuffer));
                 }
             }
         }

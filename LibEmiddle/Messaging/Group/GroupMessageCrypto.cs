@@ -21,6 +21,10 @@ namespace LibEmiddle.Messaging.Group
         // Records of when users joined groups, used for replay protection
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _groupJoinTimestamps = new();
 
+        // Records of the last seen sequence in the chain
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _lastSeenSequence = new();
+
+
         /// <summary>
         /// Encrypts a message for a group using a message key.
         /// </summary>
@@ -114,7 +118,7 @@ namespace LibEmiddle.Messaging.Group
                 }
 
                 // Check for replay attack
-                if (!ValidateMessageTimestamp(groupId, encryptedMessage.SenderIdentityKey, encryptedMessage.Timestamp))
+                if (!ValidateMessageSequence(groupId, encryptedMessage.SenderIdentityKey, encryptedMessage.RotationEpoch, encryptedMessage.Timestamp))
                 {
                     LoggingManager.LogWarning(nameof(GroupMessageCrypto), $"Possible replay attack detected in group {groupId}");
                     return null;
@@ -205,6 +209,33 @@ namespace LibEmiddle.Messaging.Group
             writer.Write(Encoding.Default.GetBytes(message.MessageId));
 
             return ms.ToArray();
+        }
+
+        /// <summary>
+        /// Validates forward secrecy
+        /// </summary>
+        /// <param name="groupId"></param>
+        /// <param name="senderKey"></param>
+        /// <param name="sequence"></param>
+        /// <param name="timestamp"></param>
+        /// <returns></returns>
+        private bool ValidateMessageSequence(string groupId, byte[] senderKey, long sequence, long timestamp)
+        {
+            string senderId = Convert.ToBase64String(senderKey);
+            var groupSequences = _lastSeenSequence.GetOrAdd(groupId, _ => new ConcurrentDictionary<string, long>());
+
+            long lastSeen = groupSequences.GetOrAdd(senderId, 0);
+
+            // Sequence must be strictly increasing
+            if (sequence <= lastSeen)
+            {
+                LoggingManager.LogSecurityEvent(nameof(GroupMessageCrypto), "Sequence replay detected", isAlert: true);
+                return false;
+            }
+
+            // Update last seen
+            groupSequences[senderId] = sequence;
+            return ValidateMessageTimestamp(groupId, senderKey, timestamp);
         }
 
         /// <summary>

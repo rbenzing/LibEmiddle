@@ -404,11 +404,15 @@ namespace LibEmiddle.Protocol
 
                 // Check SPK ID match
                 if (receiverBundle.SignedPreKeyId != initialMessage.RecipientSignedPreKeyId)
-                    throw new KeyNotFoundException($"Received initial message using Signed PreKey ID {initialMessage.RecipientSignedPreKeyId}, but the receiver's bundle has ID {receiverBundle.SignedPreKeyId}.");
+                {
+                    LoggingManager.LogSecurityEvent(nameof(X3DHProtocol), "SPK ID mismatch", isAlert: true);
+                    throw new CryptographicException("Key agreement failed");
+                }
 
                 receiverSPK_X25519_Private = receiverBundle.GetSignedPreKeyPrivate();
-                if (receiverSPK_X25519_Private == null)
-                    throw new InvalidOperationException($"Receiver's Signed PreKey private part missing for ID {initialMessage.RecipientSignedPreKeyId}.");
+                if (receiverSPK_X25519_Private == null) { 
+                    throw new InvalidOperationException($"Receiver's Signed PreKey private part missing.");
+                }
 
                 // Get OPK private key if needed
                 if (initialMessage.RecipientOneTimePreKeyId.HasValue)
@@ -416,7 +420,7 @@ namespace LibEmiddle.Protocol
                     uint opkId = initialMessage.RecipientOneTimePreKeyId.Value;
                     receiverOPK_X25519_Private = receiverBundle.GetOneTimePreKeyPrivate(opkId);
                     if (receiverOPK_X25519_Private == null)
-                        throw new KeyNotFoundException($"Receiver's one-time pre-key private part for ID {opkId} not found.");
+                        throw new KeyNotFoundException($"Receiver's one-time pre-key private part not found.");
                 }
 
                 // 2. Convert Keys
@@ -497,7 +501,7 @@ namespace LibEmiddle.Protocol
                 return await Task.Run(() => {
                     return _cryptoProvider.DeriveKey(
                         ikm,
-                        salt: new byte[32], // 32 zero bytes for salt
+                        salt: null,
                         info: Encoding.Default.GetBytes("WhisperText"),
                         length: 32);
                 });

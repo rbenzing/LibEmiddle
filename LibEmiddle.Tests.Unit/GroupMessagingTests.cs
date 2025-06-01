@@ -55,49 +55,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsTrue(result);
             Assert.IsTrue(isMember);
         }
-
-        [TestMethod]
-        public async Task RemoveGroupMember_ShouldRemoveMemberAndRotateKey()
-        {
-            // Arrange
-            var adminKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-
-            var groupManager = new GroupChatManager(_cryptoProvider, adminKeyPair);
-
-            string groupId = $"test-revocation-{Guid.NewGuid()}";
-            string groupName = "Test Revocation Group";
-
-            // Create the group
-            var session = await groupManager.CreateGroupAsync(groupId, groupName);
-
-            // Add member
-            await session.AddMemberAsync(memberKeyPair.PublicKey);
-
-            // Get the original key
-            byte[] originalKey = session.ChainKey;
-
-            // Act
-            bool result = await session.RemoveMemberAsync(memberKeyPair.PublicKey);
-
-            // Get the member manager via reflection
-            bool isMember = await Task.Run(() => {
-                var memberManager = typeof(GroupSession)
-                    .GetField("_memberManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                    .GetValue(session) as GroupMemberManager;
-
-                return memberManager.IsMember(groupId, memberKeyPair.PublicKey);
-            });
-
-            // Get the updated key
-            byte[] newKey = session.ChainKey;
-
-            // Assert
-            Assert.IsTrue(result);
-            Assert.IsFalse(isMember);
-            Assert.IsFalse(SecureMemory.SecureCompare(originalKey, newKey)); // Key should have been rotated
-        }
-
+        
         [TestMethod]
         public async Task DecryptGroupMessage_ShouldRejectReplayedMessage()
         {

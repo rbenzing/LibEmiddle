@@ -29,7 +29,7 @@ namespace LibEmiddle.Abstractions
         /// </summary>
         /// <param name="count">The number of random bytes to generate.</param>
         /// <returns>An array of random bytes.</returns>
-        public byte[] GenerateRandomBytes(int count);
+        public byte[] GenerateRandomBytes(uint count);
 
         /// <summary>
         /// Signs data using a private key.
@@ -42,11 +42,11 @@ namespace LibEmiddle.Abstractions
         /// <summary>
         /// Verifies a signature against data using a public key.
         /// </summary>
-        /// <param name="data">The data that was signed.</param>
+        /// <param name="message">The data that was signed.</param>
         /// <param name="signature">The signature to verify.</param>
         /// <param name="publicKey">The public key to verify with.</param>
         /// <returns>True if the signature is valid, false otherwise.</returns>
-        public bool VerifySignature(byte[] data, byte[] signature, byte[] publicKey);
+        public bool VerifySignature(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey);
 
         /// <summary>
         /// Encrypts data using a key and nonce.

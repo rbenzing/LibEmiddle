@@ -140,25 +140,81 @@ namespace LibEmiddle.Protocol
                 info: rootKeyInfo,
                 length: 32);
 
-            // Initialize session state
-            var session = new DoubleRatchetSession
-            {
-                SessionId = sessionId,
-                RootKey = rootKey,
-                SenderChainKey = null, // Will be established when sending first message
-                ReceiverChainKey = null, // Will be established when receiving first message
-                SenderRatchetKeyPair = receiverInitialKeyPair,
-                ReceiverRatchetPublicKey = null, // Not yet known, will be set upon receiving first message
-                PreviousReceiverRatchetPublicKey = null,
-                SendMessageNumber = 0,
-                ReceiveMessageNumber = 0,
-                SentMessages = new Dictionary<uint, byte[]>(),
-                SkippedMessageKeys = new Dictionary<SkippedMessageKey, byte[]>(),
-                IsInitialized = true,
-                CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            };
+            // FIXED: Initialize the receiver chain key properly
+            // The receiver needs to be able to decrypt messages from the start
+            // We derive an initial receiver chain key from the shared secret and sender's ephemeral key
+            byte[] dhResult = _cryptoProvider.ScalarMult(
+                receiverInitialKeyPair.PrivateKey,
+                senderEphemeralKeyPublic);
 
-            return session;
+            try
+            {
+                // Derive initial receiver chain key using the DH result
+                var rootKeyChainKey = await CalculateRootKeyAndChainKeyAsync(rootKey, dhResult);
+                byte[] initialReceiverChainKey = rootKeyChainKey.ChainKey;
+                byte[] updatedRootKey = rootKeyChainKey.RootKey;
+
+                // Initialize session state with proper receiver chain
+                var session = new DoubleRatchetSession
+                {
+                    SessionId = sessionId,
+                    RootKey = updatedRootKey,
+                    SenderChainKey = null, // Will be established when sending first message
+                    ReceiverChainKey = initialReceiverChainKey, // FIXED: Now properly initialized
+                    SenderRatchetKeyPair = receiverInitialKeyPair,
+                    ReceiverRatchetPublicKey = senderEphemeralKeyPublic, // FIXED: Set the sender's key as receiver ratchet key
+                    PreviousReceiverRatchetPublicKey = null,
+                    SendMessageNumber = 0,
+                    ReceiveMessageNumber = 0,
+                    SentMessages = new Dictionary<uint, byte[]>(),
+                    SkippedMessageKeys = new Dictionary<SkippedMessageKey, byte[]>(),
+                    IsInitialized = true,
+                    CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+
+                return session;
+            }
+            finally
+            {
+                // Securely clear the DH result
+                SecureMemory.SecureClear(dhResult);
+            }
+        }
+
+        /// <summary>
+        /// Alternative 3-parameter overload for receiver initialization when sender ephemeral key
+        /// is derived from the session context.
+        /// </summary>
+        /// <param name="sharedKeyFromX3DH">The 32-byte shared key derived from X3DH key exchange</param>
+        /// <param name="senderRatchetPublicKey">The sender's ratchet public key</param>
+        /// <param name="sessionId">Unique identifier for this session</param>
+        /// <returns>The initialized DoubleRatchetSession object</returns>
+        public async Task<DoubleRatchetSession> InitializeSessionAsReceiverAsync(
+            byte[] sharedKeyFromX3DH,
+            byte[] senderRatchetPublicKey,
+            string sessionId)
+        {
+            ArgumentNullException.ThrowIfNull(sharedKeyFromX3DH, nameof(sharedKeyFromX3DH));
+            ArgumentNullException.ThrowIfNull(senderRatchetPublicKey, nameof(senderRatchetPublicKey));
+            ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
+
+            if (sharedKeyFromX3DH.Length != 32)
+                throw new ArgumentException("Shared key must be 32 bytes", nameof(sharedKeyFromX3DH));
+
+            if (senderRatchetPublicKey.Length != Constants.X25519_KEY_SIZE)
+                throw new ArgumentException("Sender's ratchet public key has invalid size", nameof(senderRatchetPublicKey));
+
+            // Generate receiver's initial ratchet key pair
+            var receiverInitialKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
+            if (receiverInitialKeyPair.PrivateKey == null || receiverInitialKeyPair.PublicKey == null)
+                throw new CryptographicException("Failed to generate receiver's initial ratchet key pair");
+
+            // Call the main initialization method
+            return await InitializeSessionAsReceiverAsync(
+                sharedKeyFromX3DH,
+                receiverInitialKeyPair,
+                senderRatchetPublicKey,
+                sessionId);
         }
 
         /// <summary>
@@ -283,9 +339,6 @@ namespace LibEmiddle.Protocol
             if (encryptedMessage.SessionId != session.SessionId)
                 throw new ArgumentException("Message session ID does not match current session", nameof(encryptedMessage));
 
-            if (session.ReceiverChainKey == null)
-                throw new ArgumentNullException(nameof(session), "Receiver chain key is invalid.");
-
             // Create a deep clone of the session to avoid modifying the original during processing
             var updatedSession = DeepCloneSession(session);
 
@@ -352,6 +405,15 @@ namespace LibEmiddle.Protocol
                     isNewRatchetKey = true;
                 }
 
+                // FIXED: Handle case where receiver chain key is still null (shouldn't happen with fixed initialization)
+                if (updatedSession.ReceiverChainKey == null)
+                {
+                    LoggingManager.LogError(nameof(DoubleRatchetProtocol),
+                        "Receiver chain key is null - this indicates an initialization problem");
+                    throw new InvalidOperationException(
+                        "Receiver chain key is not initialized. This indicates a problem with session initialization.");
+                }
+
                 // Skip message keys if needed
                 if (encryptedMessage.SenderMessageNumber > updatedSession.ReceiveMessageNumber)
                 {
@@ -361,7 +423,7 @@ namespace LibEmiddle.Protocol
                 }
 
                 // Generate the message key for decryption
-                var messageKeyAndNextChain = await GenerateMessageKeyAndAdvanceChainAsync(updatedSession.ReceiverChainKey!);
+                var messageKeyAndNextChain = await GenerateMessageKeyAndAdvanceChainAsync(updatedSession.ReceiverChainKey);
                 byte[] messageKey = messageKeyAndNextChain.MessageKey;
                 updatedSession.ReceiverChainKey = messageKeyAndNextChain.NextChainKey;
 

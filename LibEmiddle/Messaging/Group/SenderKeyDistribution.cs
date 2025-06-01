@@ -85,6 +85,9 @@ namespace LibEmiddle.Messaging.Group
             if (distribution.ChainKey == null)
                 throw new ArgumentNullException(nameof(distribution.ChainKey));
 
+            if (distribution.ChainKey.Length == 0 || distribution.ChainKey.Length != Constants.CHAIN_KEY_SIZE)
+                throw new ArgumentException("ChainKey is invalid length.", nameof(distribution.ChainKey));
+
             // Validate the distribution message
             if (!_keyManager.ValidateDistributionMessage(distribution))
                 return false;

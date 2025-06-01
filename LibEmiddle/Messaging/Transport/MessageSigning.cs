@@ -38,17 +38,16 @@ namespace LibEmiddle.Messaging.Transport
         /// <returns>True if signature is valid</returns>
         public static bool VerifySignature(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey)
         {
-            ArgumentNullException.ThrowIfNull(message.ToArray(), nameof(message));
-            ArgumentNullException.ThrowIfNull(signature.ToArray(), nameof(signature));
-            ArgumentNullException.ThrowIfNull(publicKey.ToArray(), nameof(publicKey));
+            bool validKey = Sodium.ValidateEd25519PublicKey(publicKey);
+            bool validSig = false;
 
-            // Use Ed25519 validation here.
-            if (!Sodium.ValidateEd25519PublicKey(publicKey))
+            if (validKey) // Only verify if key is valid, but in constant time
             {
-                throw new ArgumentException("Invalid public key.", nameof(publicKey));
+                validSig = Sodium.SignVerifyDetached(signature, message, publicKey);
             }
 
-            return Sodium.SignVerifyDetached(signature, message, publicKey);
+            // Constant-time return
+            return validKey & validSig;
         }
 
         /// <summary>

@@ -16,8 +16,10 @@ namespace LibEmiddle.Messaging.Chat
     {
         private readonly SemaphoreSlim _sessionLock = new(1, 1);
         private DoubleRatchetSession _cryptoSession;
-        private bool _disposed;
         private InitialMessageData? _initialMessageData;
+
+        // Disposed flag
+        private int _disposedFlag = 0;
 
         // Required properties from interface
         public string SessionId { get; }
@@ -375,7 +377,7 @@ namespace LibEmiddle.Messaging.Chat
         /// </summary>
         public bool IsValid()
         {
-            if (_disposed) return false;
+            if (_disposedFlag == 1) return false;
 
             // No lock needed for reading volatile references and immutable state parts
             var currentCryptoSession = _cryptoSession; // Read reference
@@ -452,48 +454,86 @@ namespace LibEmiddle.Messaging.Chat
         /// <summary> Checks if disposed and throws. </summary>
         private void ThrowIfDisposed()
         {
-            if (_disposed) throw new ObjectDisposedException(nameof(ChatSession));
-        }
-
-        /// <summary> Cleans up resources. </summary>
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
+            if (_disposedFlag == 1)
+                throw new ObjectDisposedException(nameof(ChatSession));
         }
 
         /// <summary> Cleans up resources. </summary>
         protected virtual void Dispose(bool disposing)
         {
-            if (_disposed) return;
+            // Use Interlocked to ensure thread-safe disposal check
+            if (Interlocked.Exchange(ref _disposedFlag, 1) == 1)
+                return; // Already disposed
 
             if (disposing)
             {
-                _sessionLock.Wait();
+                SemaphoreSlim? lockToDispose = null;
+
                 try
                 {
-                    if (_disposed) return;
-
-                    _cryptoSession = null!;
-                    ClearMessageHistoryInternal();
-                    _sessionLock.Dispose();
-
-                    var previousState = State;
-                    State = SessionState.Terminated;
-                    if (previousState != SessionState.Terminated)
+                    // Try to acquire the lock with a timeout
+                    bool lockAcquired = false;
+                    try
                     {
-                        // Don't raise event from Dispose if possible
+                        lockAcquired = _sessionLock.Wait(TimeSpan.FromSeconds(2));
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Lock is already disposed, skip cleanup that requires the lock
+                        return;
                     }
 
-                    _disposed = true;
+                    try
+                    {
+                        if (lockAcquired)
+                        {
+                            // Clear the crypto session
+                            _cryptoSession = null!;
+
+                            // Clear message history
+                            ClearMessageHistoryInternal();
+
+                            // Update state
+                            State = SessionState.Terminated;
+
+                            // Store reference to dispose later (outside the lock)
+                            lockToDispose = _sessionLock;
+                        }
+                    }
+                    finally
+                    {
+                        if (lockAcquired)
+                        {
+                            try
+                            {
+                                _sessionLock.Release();
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                                // Already disposed by another thread
+                            }
+                        }
+                    }
                 }
                 finally
                 {
-                    _sessionLock.Release();
+                    // Dispose the semaphore outside of any lock usage
+                    try
+                    {
+                        lockToDispose?.Dispose();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Already disposed
+                    }
                 }
             }
+        }
 
-            _disposed = true;
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
     }
 }

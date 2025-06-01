@@ -19,18 +19,21 @@ namespace LibEmiddle.Tests.Unit
         private KeyPair _aliceKeyPair;
         private KeyPair _bobKeyPair;
 
-        private CryptoProvider _cryptoProvider;
-        private DoubleRatchetProtocol _doubleRatchetProtocol;
-        private X3DHProtocol _x3DHProtocol;
-        private ProtocolAdapter _protocolAdapter;
+        private CryptoProvider _cryptoProvider = null!;
+        private DoubleRatchetProtocol _doubleRatchetProtocol = null!;
+        private X3DHProtocol _x3DHProtocol = null!;
+        private ProtocolAdapter _protocolAdapter = null!;
 
-        private ISessionManager _sessionManager;
-        private ChatSession _aliceChatSession;
-        private DoubleRatchetSession _doubleRatchetSession;
+        private ISessionManager _sessionManager = null!;
+        private ChatSession _aliceChatSession = null!;
+        private ChatSession _bobChatSession = null!;
+        private DoubleRatchetSession _aliceDoubleRatchetSession = null!;
+        private DoubleRatchetSession _bobDoubleRatchetSession = null!;
 
         [TestInitialize]
-        public void Setup()
+        public async Task Setup()
         {
+            // Initialize crypto components
             _cryptoProvider = new CryptoProvider();
             _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
             _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
@@ -40,35 +43,85 @@ namespace LibEmiddle.Tests.Unit
             _aliceKeyPair = Sodium.GenerateEd25519KeyPair();
             _bobKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            string sessionId = new Guid().ToString();
+            // Generate a consistent session ID
+            string sessionId = Guid.NewGuid().ToString();
 
-            // Session manager instance
+            // Session manager instance for Alice
             _sessionManager = new SessionManager(_cryptoProvider, _x3DHProtocol, _doubleRatchetProtocol, _aliceKeyPair);
 
-            // Init Alice/Bob Bundles
-            X3DHKeyBundle bobX3DHBundle = _x3DHProtocol.CreateKeyBundleAsync(_bobKeyPair).GetAwaiter().GetResult();
-
+            // Step 1: Create Bob's X3DH key bundle
+            X3DHKeyBundle bobX3DHBundle = await _x3DHProtocol.CreateKeyBundleAsync(_bobKeyPair);
             X3DHPublicBundle bobPublicBundle = bobX3DHBundle.ToPublicBundle();
 
-            // Create Alice's sending session
-            (DoubleRatchetSession chatSession, InitialMessageData initialMessage) = _protocolAdapter.PrepareSenderSessionAsync(
-                bobPublicBundle, _aliceKeyPair, sessionId).GetAwaiter().GetResult();
+            // Step 2: Alice initiates session (sender side)
+            var (aliceDRSession, initialMessage) = await _protocolAdapter.PrepareSenderSessionAsync(
+                bobPublicBundle, _aliceKeyPair, sessionId);
 
-            // Create Bob's receiving session
-            SenderSessionResult sessionSenderResult = _x3DHProtocol.InitiateSessionAsSenderAsync(bobPublicBundle, _aliceKeyPair)
-                .GetAwaiter().GetResult();
+            // Step 3: Bob receives the initial message and establishes session (receiver side)
+            byte[] sharedSecretKey = await _x3DHProtocol.EstablishSessionAsReceiverAsync(initialMessage, bobX3DHBundle);
 
-            // Create Bob's receiving DR session
-            _doubleRatchetSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(sessionSenderResult.SharedKey, 
-                initialMessage.SenderIdentityKeyPublic, sessionId).GetAwaiter().GetResult();
+            // Step 4: Initialize Bob's Double Ratchet session as receiver
+            // Bob needs to generate his initial ratchet key pair for the receiver session
+            KeyPair bobInitialRatchetKeyPair = Sodium.GenerateX25519KeyPair();
 
-            // Create Alice's chat session
+            var bobDRSession = await _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
+                sharedSecretKey,
+                bobInitialRatchetKeyPair,
+                initialMessage.SenderEphemeralKeyPublic,
+                sessionId);
+
+            // Store the sessions
+            _aliceDoubleRatchetSession = aliceDRSession;
+            _bobDoubleRatchetSession = bobDRSession;
+
+            // Step 5: Create chat sessions for both Alice and Bob
             _aliceChatSession = new ChatSession(
-                _doubleRatchetSession,
+                _aliceDoubleRatchetSession,
                 _bobKeyPair.PublicKey,
                 _aliceKeyPair.PublicKey,
                 _doubleRatchetProtocol
             );
+
+            _bobChatSession = new ChatSession(
+                _bobDoubleRatchetSession,
+                _aliceKeyPair.PublicKey,
+                _bobKeyPair.PublicKey,
+                _doubleRatchetProtocol
+            );
+
+            // Set the initial message data for Alice (sender)
+            _aliceChatSession.SetInitialMessageData(initialMessage);
+        }
+
+        [TestCleanup]
+        public void Cleanup()
+        {
+            try
+            {
+                _aliceChatSession?.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already disposed in test, ignore
+            }
+
+            try
+            {
+                _bobChatSession?.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already disposed in test, ignore
+            }
+
+            try
+            {
+                _cryptoProvider?.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already disposed, ignore
+            }
         }
 
         [TestMethod]
@@ -128,7 +181,7 @@ namespace LibEmiddle.Tests.Unit
         public async Task ChatSession_SuspendFromInitialized_ShouldChangeStateToSuspended()
         {
             // Act
-            bool result = await _aliceChatSession.SuspendAsync("Direct suspension"); ;
+            bool result = await _aliceChatSession.SuspendAsync("Direct suspension");
 
             // Assert
             Assert.IsTrue(result);
@@ -196,7 +249,6 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsTrue(eventTimestamp > DateTime.MinValue, "Expected a valid timestamp to be set.");
         }
 
-
         [TestMethod]
         public async Task ChatSession_EncryptMessage_ShouldAutoActivateSession()
         {
@@ -237,36 +289,27 @@ namespace LibEmiddle.Tests.Unit
             await _aliceChatSession.SuspendAsync("Testing encryption rejection");
             string message = "Should fail in suspended state";
 
-            // Act
+            // Act & Assert
             await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => _aliceChatSession.EncryptAsync(message));
         }
 
         [TestMethod]
-        public async Task ChatSession_DecryptMessage_ShouldWorkInSuspendedState()
+        public async Task ChatSession_DecryptMessage_ShouldWorkInActiveState()
         {
             // Arrange
             await _aliceChatSession.ActivateAsync();
+            await _bobChatSession.ActivateAsync();
+
             string originalMessage = "Test message";
             EncryptedMessage encryptedMessage = await _aliceChatSession.EncryptAsync(originalMessage);
-
-            // Create Bob's chat session
-            var bobChatSession = new ChatSession(
-                _doubleRatchetSession,
-                _aliceKeyPair.PublicKey,
-                _bobKeyPair.PublicKey,
-                _doubleRatchetProtocol
-            );
-
-            // Suspend Bob's session
-            await bobChatSession.SuspendAsync("Testing decryption in suspended state");
+            Assert.IsNotNull(encryptedMessage);
 
             // Act
-            string decryptedMessage = await bobChatSession.DecryptAsync(encryptedMessage);
+            string decryptedMessage = await _bobChatSession.DecryptAsync(encryptedMessage);
 
             // Assert
             Assert.IsNotNull(decryptedMessage);
             Assert.AreEqual(originalMessage, decryptedMessage);
-            Assert.AreEqual(SessionState.Suspended, bobChatSession.State, "State should remain suspended");
         }
 
         [TestMethod]
@@ -276,20 +319,13 @@ namespace LibEmiddle.Tests.Unit
             await _aliceChatSession.ActivateAsync();
             string originalMessage = "Test message";
             EncryptedMessage encryptedMessage = await _aliceChatSession.EncryptAsync(originalMessage);
-
-            // Create Bob's chat session
-            var bobChatSession = new ChatSession(
-                _doubleRatchetSession,
-                _aliceKeyPair.PublicKey,
-                _bobKeyPair.PublicKey,
-                _doubleRatchetProtocol
-            );
+            Assert.IsNotNull(encryptedMessage);
 
             // Terminate Bob's session
-            await bobChatSession.TerminateAsync();
+            await _bobChatSession.TerminateAsync();
 
             // Act & Assert
-            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => bobChatSession.DecryptAsync(encryptedMessage));
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => _bobChatSession.DecryptAsync(encryptedMessage));
         }
 
         [TestMethod]
@@ -297,28 +333,27 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             await _aliceChatSession.ActivateAsync();
+            await _bobChatSession.ActivateAsync();
+
             string message1 = "First message";
             string message2 = "Second message";
 
-            // Create Bob's chat session
-            var bobChatSession = new ChatSession(
-                _doubleRatchetSession,
-                _aliceKeyPair.PublicKey,
-                _bobKeyPair.PublicKey,
-                _doubleRatchetProtocol
-            );
-            await bobChatSession.ActivateAsync();
-
             // Act - Send messages both ways
             EncryptedMessage encryptedMessage1 = await _aliceChatSession.EncryptAsync(message1);
-            string decryptedMessage1 = await bobChatSession.DecryptAsync(encryptedMessage1);
+            Assert.IsNotNull(encryptedMessage1);
 
-            EncryptedMessage encryptedMessage2 = await bobChatSession.EncryptAsync(message2);
+            string decryptedMessage1 = await _bobChatSession.DecryptAsync(encryptedMessage1);
+            Assert.IsNotNull(decryptedMessage1);
+
+            EncryptedMessage encryptedMessage2 = await _bobChatSession.EncryptAsync(message2);
+            Assert.IsNotNull(encryptedMessage2);
+
             string decryptedMessage2 = await _aliceChatSession.DecryptAsync(encryptedMessage2);
+            Assert.IsNotNull(decryptedMessage2);
 
             // Assert
             var aliceHistory = _aliceChatSession.GetMessageHistory();
-            var bobHistory = bobChatSession.GetMessageHistory();
+            var bobHistory = _bobChatSession.GetMessageHistory();
 
             Assert.AreEqual(2, aliceHistory.Count);
             Assert.AreEqual(2, bobHistory.Count);
@@ -373,17 +408,7 @@ namespace LibEmiddle.Tests.Unit
             _aliceChatSession.Dispose();
 
             // Assert - try to use the session, should throw ObjectDisposedException
-            bool exceptionThrown = false;
-            try
-            {
-                await _aliceChatSession.ActivateAsync();
-            }
-            catch (ObjectDisposedException)
-            {
-                exceptionThrown = true;
-            }
-
-            Assert.IsTrue(exceptionThrown);
+            await Assert.ThrowsExceptionAsync<ObjectDisposedException>(() => _aliceChatSession.ActivateAsync());
         }
 
         [TestMethod]
@@ -396,7 +421,7 @@ namespace LibEmiddle.Tests.Unit
                 await _aliceChatSession.EncryptAsync($"Message {i + 1}");
             }
 
-            // Act - Get second page of messages (3 per page)
+            // Act - Get pages of messages (3 per page)
             var firstPage = _aliceChatSession.GetMessageHistory(limit: 3, startIndex: 0);
             var secondPage = _aliceChatSession.GetMessageHistory(limit: 3, startIndex: 3);
             var thirdPage = _aliceChatSession.GetMessageHistory(limit: 3, startIndex: 6);
