@@ -22,23 +22,23 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class KeyRotationTests
     {
-        private ICryptoProvider _cryptoProvider;
-        private IDoubleRatchetProtocol _doubleRatchetProtocol;
+        private CryptoProvider _cryptoProvider;
+        private DoubleRatchetProtocol _doubleRatchetProtocol;
 
         [TestInitialize]
         public void Setup()
         {
             _cryptoProvider = new CryptoProvider();
-            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol();
         }
 
         [TestMethod]
         public async Task RemoveGroupMember_ShouldRemoveMemberAndRotateKey()
         {
             // Arrange
-            var adminKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var groupManager = new GroupChatManager(_cryptoProvider, adminKeyPair);
+            var adminKeyPair = Sodium.GenerateEd25519KeyPair();
+            var memberKeyPair = Sodium.GenerateEd25519KeyPair();
+            var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = $"test-revocation-{Guid.NewGuid()}";
             string groupName = "Test Revocation Group";
 
@@ -55,7 +55,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Act - Use a simplified approach that tests the core functionality
             // First test if the member manager itself works correctly
-            var keyManager = new GroupKeyManager(_cryptoProvider);
+            var keyManager = new GroupKeyManager();
             var memberManager = new GroupMemberManager();
 
             // Initialize a test group in the member manager
@@ -89,18 +89,18 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task DoubleRatchet_WithStandardRotationStrategy_ShouldRotateAfter20Messages()
+        public void DoubleRatchet_WithStandardRotationStrategy_ShouldRotateAfter20Messages()
         {
             // Arrange
-            var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
-            var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create a shared secret via X25519 DH
-            byte[] sharedSecret = _cryptoProvider.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            byte[] sharedSecret = Sodium.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
 
             // Initialize Double Ratchet session as Alice (sender)
             string sessionId = $"session-{Guid.NewGuid()}";
-            var aliceSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
                 sharedSecret,
                 bobKeyPair.PublicKey,
                 sessionId);
@@ -118,7 +118,7 @@ namespace LibEmiddle.Tests.Unit
                 if (i == 18) keyAt19Messages = currentSession.SenderChainKey?.ToArray();
 
                 // Encrypt message
-                var (updatedSession, _) = await _doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, _) = _doubleRatchetProtocol.EncryptAsync(
                     currentSession,
                     $"Test message {i + 1}",
                     KeyRotationStrategy.Standard);
@@ -152,24 +152,24 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task DoubleRatchet_ShouldProvideForwardSecrecy_AfterKeyRotation()
+        public void DoubleRatchet_ShouldProvideForwardSecrecy_AfterKeyRotation()
         {
             // Arrange
             // Generate key pairs for Alice and Bob
-            var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
-            var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create a shared secret
-            byte[] sharedSecret = _cryptoProvider.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            byte[] sharedSecret = Sodium.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
 
             // Initialize sessions
             string sessionId = $"session-{Guid.NewGuid()}";
-            var aliceSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
                 sharedSecret,
                 bobKeyPair.PublicKey,
                 sessionId);
 
-            var bobSession = await _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
+            var bobSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
                 sharedSecret,
                 bobKeyPair,
                 aliceKeyPair.PublicKey,
@@ -183,7 +183,7 @@ namespace LibEmiddle.Tests.Unit
             var preCompromiseMessages = new List<EncryptedMessage>();
             for (int i = 0; i < 5; i++)
             {
-                var (updatedSession, encrypted) = await _doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(
                     currentAliceSession,
                     $"Pre-compromise message {i + 1}");
 
@@ -197,10 +197,10 @@ namespace LibEmiddle.Tests.Unit
             var compromisedBobSession = DeepCloneSession(currentBobSession);
 
             // Phase 3: Key rotation - generate new keys
-            var aliceNewKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
+            var aliceNewKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Alice creates a new session after generating a new key pair
-            var rotatedAliceSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            var rotatedAliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
                 currentAliceSession.RootKey,
                 bobKeyPair.PublicKey,
                 sessionId);
@@ -211,7 +211,7 @@ namespace LibEmiddle.Tests.Unit
 
             for (int i = 0; i < 5; i++)
             {
-                var (updatedSession, encrypted) = await _doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(
                     postRotationAliceSession,
                     $"Post-rotation message {i + 1}");
 
@@ -226,7 +226,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 try
                 {
-                    var (_, decrypted) = await _doubleRatchetProtocol.DecryptAsync(
+                    var (_, decrypted) = _doubleRatchetProtocol.DecryptAsync(
                         compromisedBobSession,
                         message);
 
@@ -250,7 +250,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 try
                 {
-                    var (updated, decrypted) = await _doubleRatchetProtocol.DecryptAsync(
+                    var (updated, decrypted) = _doubleRatchetProtocol.DecryptAsync(
                         updatedBobSession,
                         message);
 
@@ -287,13 +287,13 @@ namespace LibEmiddle.Tests.Unit
         public async Task GroupSession_ManualKeyRotation_ShouldCreateNewDistributionMessage()
         {
             // Arrange
-            var adminKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var adminKeyPair = Sodium.GenerateEd25519KeyPair();
+            var memberKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            var keyManager = new GroupKeyManager(_cryptoProvider);
+            var keyManager = new GroupKeyManager();
             var memberManager = new GroupMemberManager();
-            var messageCrypto = new GroupMessageCrypto(_cryptoProvider);
-            var distributionManager = new SenderKeyDistribution(_cryptoProvider, keyManager);
+            var messageCrypto = new GroupMessageCrypto();
+            var distributionManager = new SenderKeyDistribution(keyManager);
 
             var groupId = "testGroup" + Guid.NewGuid().ToString("N")[..8];
             var groupName = "Test Group";
@@ -344,11 +344,11 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task DeviceLinking_ShouldSyncMessagesAcrossDevices()
+        public void DeviceLinking_ShouldSyncMessagesAcrossDevices()
         {
             // Arrange
-            var mainDeviceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var secondDeviceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create device manager instances
             var deviceLinkingService = new DeviceLinkingService(_cryptoProvider);
@@ -397,31 +397,31 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task DHRatchetStep_ShouldProduceNewKeys_WhenDHInputChanges()
+        public void DHRatchetStep_ShouldProduceNewKeys_WhenDHInputChanges()
         {
             // Arrange - Generate key pairs
-            var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
-            var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
-            var charlieKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
+            var charlieKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Create a shared secret
-            byte[] sharedSecret1 = _cryptoProvider.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            byte[] sharedSecret1 = Sodium.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
 
             // Initialize initial keys
-            byte[] rootKey = await _cryptoProvider.DeriveKeyAsync(
+            byte[] rootKey = Sodium.HkdfDerive(
                 sharedSecret1,
                 null,
                 Encoding.UTF8.GetBytes("DoubleRatchetRoot"),
                 32);
 
-            byte[] chainKey = await _cryptoProvider.DeriveKeyAsync(
+            byte[] chainKey = Sodium.HkdfDerive(
                 sharedSecret1,
                 null,
                 Encoding.UTF8.GetBytes("DoubleRatchetChain"),
                 32);
 
             // Create new DH output
-            byte[] sharedSecret2 = _cryptoProvider.ScalarMult(aliceKeyPair.PrivateKey, charlieKeyPair.PublicKey);
+            byte[] sharedSecret2 = Sodium.ScalarMult(aliceKeyPair.PrivateKey, charlieKeyPair.PublicKey);
 
             // Act
             // Manually perform key derivation to simulate a DH ratchet step
@@ -433,7 +433,7 @@ namespace LibEmiddle.Tests.Unit
             Buffer.BlockCopy(sharedSecret1, 0, combined1, rootKey.Length, sharedSecret1.Length);
 
             // Derive new keys from first DH step
-            byte[] derived1 = await _cryptoProvider.DeriveKeyAsync(combined1, null, info, 64);
+            byte[] derived1 = Sodium.HkdfDerive(combined1, null, info, 64);
             byte[] newRootKey1 = derived1.Take(32).ToArray();
             byte[] newChainKey1 = derived1.Skip(32).Take(32).ToArray();
 
@@ -443,7 +443,7 @@ namespace LibEmiddle.Tests.Unit
             Buffer.BlockCopy(sharedSecret2, 0, combined2, newRootKey1.Length, sharedSecret2.Length);
 
             // Derive new keys from second DH step
-            byte[] derived2 = await _cryptoProvider.DeriveKeyAsync(combined2, null, info, 64);
+            byte[] derived2 = Sodium.HkdfDerive(combined2, null, info, 64);
             byte[] newRootKey2 = derived2.Take(32).ToArray();
             byte[] newChainKey2 = derived2.Skip(32).Take(32).ToArray();
 

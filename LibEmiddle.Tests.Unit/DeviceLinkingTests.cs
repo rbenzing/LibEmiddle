@@ -159,7 +159,8 @@ namespace LibEmiddle.Tests.Unit
         {
             var mainKey = Sodium.GenerateEd25519KeyPair();
             var newKey = Sodium.GenerateEd25519KeyPair();
-            var validMessage = _deviceLinkingSvc.CreateDeviceLinkMessage(mainKey, newKey.PublicKey);
+            var publicKey = Sodium.ConvertEd25519PrivateKeyToX25519PublicKey(newKey.PrivateKey);
+            var validMessage = _deviceLinkingSvc.CreateDeviceLinkMessage(mainKey, publicKey);
 
             var maliciousVariations = new[]
             {
@@ -206,8 +207,9 @@ namespace LibEmiddle.Tests.Unit
             {
                 var sharedKey = getKey();
                 var newDevice = Sodium.GenerateEd25519KeyPair();
+                var publicKey = Sodium.ConvertEd25519PrivateKeyToX25519PublicKey(newDevice.PrivateKey);
 
-                var derived = _deviceLinkingSvc.DeriveSharedKeyForNewDevice(sharedKey, newDevice.PublicKey);
+                var derived = _deviceLinkingSvc.DeriveSharedKeyForNewDevice(sharedKey, publicKey);
 
                 Assert.IsNotNull(derived, "Key should be derived");
                 Assert.AreEqual(32, derived.Length, "Derived key length mismatch");

@@ -23,15 +23,13 @@ namespace LibEmiddle.Tests.Unit
     public class ErrorRecoveryTests
     {
         private CryptoProvider _cryptoProvider;
-        private IDoubleRatchetProtocol _doubleRatchetProtocol;
-        private IX3DHProtocol _x3dhProtocol;
+        private DoubleRatchetProtocol _doubleRatchetProtocol;
 
         [TestInitialize]
         public void Setup()
         {
+            _doubleRatchetProtocol = new DoubleRatchetProtocol();
             _cryptoProvider = new CryptoProvider();
-            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
-            _x3dhProtocol = new X3DHProtocol(_cryptoProvider);
         }
 
         #region Setup Helper Methods
@@ -39,26 +37,26 @@ namespace LibEmiddle.Tests.Unit
         /// <summary>
         /// Creates a pair of initialized DoubleRatchet sessions for testing
         /// </summary>
-        private async Task<(DoubleRatchetSession aliceSession, DoubleRatchetSession bobSession, string sessionId)> CreateTestSessionsAsync()
+        private (DoubleRatchetSession aliceSession, DoubleRatchetSession bobSession, string sessionId) CreateTestSessions()
         {
             // Generate a unique session ID
             string sessionId = $"session-{Guid.NewGuid()}";
 
             // Generate key pairs for Alice and Bob
-            var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
-            var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
+            var aliceKeyPair = Sodium.GenerateX25519KeyPair();
+            var bobKeyPair = Sodium.GenerateX25519KeyPair();
 
             // Generate a shared secret for testing
-            byte[] sharedSecret = _cryptoProvider.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
+            byte[] sharedSecret = Sodium.ScalarMult(aliceKeyPair.PrivateKey, bobKeyPair.PublicKey);
 
             // Initialize Alice's session as sender
-            var aliceSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
                 sharedKeyFromX3DH: sharedSecret,
                 recipientInitialPublicKey: bobKeyPair.PublicKey,
                 sessionId: sessionId);
 
             // Initialize Bob's session as receiver 
-            var bobSession = await _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
+            var bobSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
                 sharedKeyFromX3DH: sharedSecret,
                 receiverInitialKeyPair: bobKeyPair,
                 senderEphemeralKeyPublic: aliceKeyPair.PublicKey,
@@ -80,10 +78,10 @@ namespace LibEmiddle.Tests.Unit
         #endregion
 
         [TestMethod]
-        public async Task DoubleRatchetExchange_ResumeSession_WithValidSession_ShouldReturn()
+        public void DoubleRatchetExchange_ResumeSession_WithValidSession_ShouldReturn()
         {
             // Arrange
-            var (aliceSession, _, sessionId) = await CreateTestSessionsAsync();
+            var (aliceSession, _, sessionId) = CreateTestSessions();
 
             // Create a deep clone of the session to simulate serialization/deserialization
             var originalSession = DeepCloneSession(aliceSession);
@@ -116,21 +114,21 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task DoubleRatchetExchange_ResumeSession_WithSkippedMessageKeys_ShouldPreserve()
+        public void DoubleRatchetExchange_ResumeSession_WithSkippedMessageKeys_ShouldPreserve()
         {
             // Arrange
-            var (aliceSession, bobSession, sessionId) = await CreateTestSessionsAsync();
+            var (aliceSession, bobSession, sessionId) = CreateTestSessions();
 
             // Simulate some skipped message keys
             string message = "Test message";
-            var (aliceUpdatedSession, encrypted) = await _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+            var (aliceUpdatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
             AddSecurityFields(encrypted, sessionId);
 
             // Arbitrarily increment the message number to simulate an out-of-order message
             encrypted.SenderMessageNumber += 5;
 
             // Process the out-of-order message
-            var (bobUpdatedSession, _) = await _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
+            var (bobUpdatedSession, _) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
 
             // Verify skipped message keys were created
             Assert.IsTrue(bobUpdatedSession.SkippedMessageKeys.Count > 0, "Skipped message keys should be present");
@@ -178,12 +176,12 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task MailboxTransport_HandleNetworkErrors_ShouldRetryWithBackoff()
+        public void MailboxTransport_HandleNetworkErrors_ShouldRetryWithBackoff()
         {
             // Arrange
             var mockTransport = new Mock<IMailboxTransport>();
-            var recipientKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var senderKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
+            var senderKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Use a counter for attempts
             int attemptCount = 0;
@@ -287,14 +285,14 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task DecryptionFailure_ShouldNotAffectSubsequentDecryption()
+        public void DecryptionFailure_ShouldNotAffectSubsequentDecryption()
         {
             // Arrange
-            var (aliceSession, bobSession, sessionId) = await CreateTestSessionsAsync();
+            var (aliceSession, bobSession, sessionId) = CreateTestSessions();
 
             // Alice sends a valid message
             string goodMessage = "This is a valid message";
-            var (aliceUpdatedSession, validEncrypted) = await _doubleRatchetProtocol.EncryptAsync(aliceSession, goodMessage);
+            var (aliceUpdatedSession, validEncrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, goodMessage);
 
             // Add security fields
             AddSecurityFields(validEncrypted, sessionId);
@@ -313,10 +311,10 @@ namespace LibEmiddle.Tests.Unit
 
             // Act
             // First try to decrypt the invalid message
-            var (bobSessionAfterFailure, failedMessage) = await _doubleRatchetProtocol.DecryptAsync(bobSession, invalidEncrypted);
+            var (bobSessionAfterFailure, failedMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession, invalidEncrypted);
 
             // Then decrypt the valid message
-            var (bobSessionAfterSuccess, successMessage) = await _doubleRatchetProtocol.DecryptAsync(bobSession, validEncrypted);
+            var (bobSessionAfterSuccess, successMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession, validEncrypted);
 
             // Assert
             Assert.IsNull(failedMessage, "Invalid message should not decrypt");
@@ -328,15 +326,13 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task GroupChatManager_HandleMissingGroup_ShouldFailGracefully()
+        public void GroupChatManager_HandleMissingGroup_ShouldFailGracefully()
         {
             // Arrange
-            var identityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var keyManager = new GroupKeyManager(_cryptoProvider);
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var keyManager = new GroupKeyManager();
             var memberManager = new GroupMemberManager();
-            var messageCrypto = new GroupMessageCrypto(_cryptoProvider);
-            var distributionManager = new SenderKeyDistribution(_cryptoProvider, keyManager);
-            var securityValidator = new GroupSecurityValidator(_cryptoProvider, memberManager);
+            var securityValidator = new GroupSecurityValidator(memberManager);
 
             string nonExistentGroupId = "test-group-123";
 
@@ -412,11 +408,11 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var mockTransport = new Mock<IMailboxTransport>();
-            var identityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var recipientKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
+            var recipientKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Simulate a new DoubleRatchet session for this test
-            var (aliceSession, _, _) = await CreateTestSessionsAsync();
+            var (aliceSession, _, _) = CreateTestSessions();
 
             // Create a stateful flag that can be accessed from the mock
             bool[] firstAttempt = { true }; // Using array to enable modification from lambda
@@ -464,13 +460,13 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task MultiDeviceSynchronization_ShouldRecoverFromMessageLoss()
+        public void MultiDeviceSynchronization_ShouldRecoverFromMessageLoss()
         {
             Trace.TraceWarning("==== Starting MultiDeviceSynchronization_ShouldRecoverFromMessageLoss ====");
 
             // Arrange
-            var mainDeviceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var secondDeviceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             Trace.TraceWarning($"Main device key pair - Public: {Convert.ToBase64String(mainDeviceKeyPair.PublicKey)}, " +
                              $"Private: {Convert.ToBase64String(mainDeviceKeyPair.PrivateKey).Substring(0, 10)}...");
@@ -483,8 +479,8 @@ namespace LibEmiddle.Tests.Unit
             var secondDeviceManager = new DeviceManager(secondDeviceKeyPair, deviceLinkingService, _cryptoProvider);
 
             // Convert to X25519 keys for direct testing
-            byte[] mainDeviceX25519Public = _cryptoProvider.ConvertEd25519PublicKeyToX25519(mainDeviceKeyPair.PublicKey);
-            byte[] secondDeviceX25519Public = _cryptoProvider.ConvertEd25519PublicKeyToX25519(secondDeviceKeyPair.PublicKey);
+            byte[] mainDeviceX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(mainDeviceKeyPair.PublicKey);
+            byte[] secondDeviceX25519Public = Sodium.ConvertEd25519PublicKeyToX25519(secondDeviceKeyPair.PublicKey);
 
             Trace.TraceWarning($"Main device X25519 public key: {Convert.ToBase64String(mainDeviceX25519Public)}");
             Trace.TraceWarning($"Second device X25519 public key: {Convert.ToBase64String(secondDeviceX25519Public)}");
@@ -557,10 +553,10 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task CrossDeviceSessionRestoration_ShouldWorkCorrectly()
+        public void CrossDeviceSessionRestoration_ShouldWorkCorrectly()
         {
             // Arrange
-            var (aliceSession, _, _) = await CreateTestSessionsAsync();
+            var (aliceSession, _, _) = CreateTestSessions();
 
             // Create a deep clone of the session to simulate serialization/deserialization
             var originalSession = DeepCloneSession(aliceSession);
@@ -629,7 +625,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Verify the restored session can be used for communication
             string testMessage = "Message after session restoration";
-            var (updatedSession, encryptedMessage) = await _doubleRatchetProtocol.EncryptAsync(restoredSession, testMessage);
+            var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(restoredSession, testMessage);
 
             Assert.IsNotNull(updatedSession, "Should get valid updated session after encryption");
             Assert.IsNotNull(encryptedMessage, "Should be able to encrypt new message with restored session");

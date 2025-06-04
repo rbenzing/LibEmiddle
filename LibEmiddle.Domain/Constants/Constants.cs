@@ -54,6 +54,11 @@ namespace LibEmiddle.Domain
         public const int ED25519_PRIVATE_KEY_SIZE = 64;
 
         /// <summary>
+        /// Size of the Ed25519 Signature (64 bytes)
+        /// </summary>
+        public const int ED25519_SIGNATURE_SIZE = 64;
+
+        /// <summary>
         /// Default number of iterations for PBKDF2 key derivation
         /// </summary>
         public const int PBKDF2_ITERATIONS = 600000;

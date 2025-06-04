@@ -45,7 +45,7 @@ namespace LibEmiddle.Messaging.Transport
             _webSocket = webSocket ?? throw new ArgumentNullException(nameof(webSocket));
 
             _cryptoProvider = new CryptoProvider();
-            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol();
         }
 
         /// <summary>
@@ -116,7 +116,7 @@ namespace LibEmiddle.Messaging.Transport
             try
             {
                 // Encrypt the message
-                var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(_session, message).GetAwaiter().GetResult();
+                var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(_session, message);
 
                 // Validate the encryption result
                 if (updatedSession is null)
@@ -306,7 +306,7 @@ namespace LibEmiddle.Messaging.Transport
                     throw new SecurityException("Message validation failed.");
                 }
 
-                var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(_session, encryptedMessage).GetAwaiter().GetResult();
+                var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(_session, encryptedMessage);
 
                 // Only update the session if decryption was successful
                 if (updatedSession != null)

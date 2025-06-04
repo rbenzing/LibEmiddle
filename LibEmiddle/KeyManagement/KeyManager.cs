@@ -33,26 +33,6 @@ namespace LibEmiddle.KeyManagement
         }
 
         /// <inheritdoc/>
-        public async Task<byte[]> DeriveKeyAsync(byte[] inputKey, byte[]? salt = null, byte[]? info = null, int length = 32)
-        {
-            if (inputKey == null)
-                throw new ArgumentNullException(nameof(inputKey));
-
-            if (length <= 0)
-                throw new ArgumentOutOfRangeException(nameof(length), "Length must be greater than zero");
-
-            try
-            {
-                return await _cryptoProvider.DeriveKeyAsync(inputKey, salt, info, length);
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(KeyManager), $"Failed to derive key: {ex.Message}");
-                throw;
-            }
-        }
-
-        /// <inheritdoc/>
         public async Task<bool> StoreKeyAsync(string keyId, byte[] key, string? password = null)
         {
             if (string.IsNullOrEmpty(keyId))

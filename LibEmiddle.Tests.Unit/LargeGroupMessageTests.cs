@@ -9,14 +9,14 @@ using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
 using LibEmiddle.Messaging.Group;
-using LibEmiddle.Abstractions;
+using LibEmiddle.Core;
 
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
     public class LargeGroupMessagingTests : IDisposable
     {
-        private ICryptoProvider _cryptoProvider;
+        private CryptoProvider _cryptoProvider;
 
         [TestInitialize]
         public void Setup()
@@ -34,9 +34,9 @@ namespace LibEmiddle.Tests.Unit
 
             for (int i = 0; i < memberCount; i++)
             {
-                var keyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+                var keyPair = Sodium.GenerateEd25519KeyPair();
                 memberKeyPairs.Add(keyPair);
-                var manager = new GroupChatManager(_cryptoProvider, keyPair);
+                var manager = new GroupChatManager(keyPair);
                 groupManagers.Add(manager);
             }
 
@@ -163,15 +163,15 @@ namespace LibEmiddle.Tests.Unit
         public async Task GroupMember_RemovalSimulation_ShouldNotReceiveNewMessages()
         {
             // Arrange - Create a group with some members
-            var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var charlieKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var daveKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobKeyPair = Sodium.GenerateEd25519KeyPair();
+            var charlieKeyPair = Sodium.GenerateEd25519KeyPair();
+            var daveKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            var aliceManager = new GroupChatManager(_cryptoProvider, aliceKeyPair);
-            var bobManager = new GroupChatManager(_cryptoProvider, bobKeyPair);
-            var charlieManager = new GroupChatManager(_cryptoProvider, charlieKeyPair);
-            var daveManager = new GroupChatManager(_cryptoProvider, daveKeyPair);
+            var aliceManager = new GroupChatManager(aliceKeyPair);
+            var bobManager = new GroupChatManager(bobKeyPair);
+            var charlieManager = new GroupChatManager(charlieKeyPair);
+            var daveManager = new GroupChatManager(daveKeyPair);
 
             string groupId = "member-removal-test";
 
@@ -329,11 +329,11 @@ namespace LibEmiddle.Tests.Unit
         public async Task ConcurrentGroupAccess_ShouldHandleThreadSafely()
         {
             // Arrange - Create a group with multiple members
-            var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var bobKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            var aliceManager = new GroupChatManager(_cryptoProvider, aliceKeyPair);
-            var bobManager = new GroupChatManager(_cryptoProvider, bobKeyPair);
+            var aliceManager = new GroupChatManager(aliceKeyPair);
+            var bobManager = new GroupChatManager(bobKeyPair);
 
             string groupId = "concurrent-access-test";
 

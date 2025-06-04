@@ -25,7 +25,7 @@ namespace LibEmiddle.Tests.Unit
         {
             _cryptoProvider = new CryptoProvider();
             _x3dhProtocol = new X3DHProtocol(_cryptoProvider);
-            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol();
         }
 
         [TestMethod]
@@ -38,14 +38,14 @@ namespace LibEmiddle.Tests.Unit
             // Create messages of different sizes
             string smallMessage = "Small message for testing";
 
-            StringBuilder mediumMessageBuilder = new StringBuilder(10 * 1024);
+            StringBuilder mediumMessageBuilder = new(10 * 1024);
             for (int i = 0; i < 500; i++)
             {
                 mediumMessageBuilder.Append("Medium sized message for performance testing. ");
             }
             string mediumMessage = mediumMessageBuilder.ToString();
 
-            StringBuilder largeMessageBuilder = new StringBuilder(100 * 1024);
+            StringBuilder largeMessageBuilder = new(100 * 1024);
             for (int i = 0; i < 5000; i++)
             {
                 largeMessageBuilder.Append("Large message for comprehensive performance testing across different message sizes. ");
@@ -127,7 +127,7 @@ namespace LibEmiddle.Tests.Unit
             stopwatch.Start();
             for (int i = 0; i < iterations; i++)
             {
-                var keyPair = LibEmiddleClient.GenerateSignatureKeyPair();
+                var keyPair = Sodium.GenerateEd25519KeyPair();
             }
             stopwatch.Stop();
 
@@ -137,7 +137,7 @@ namespace LibEmiddle.Tests.Unit
             stopwatch.Restart();
             for (int i = 0; i < iterations; i++)
             {
-                var keyPair = LibEmiddleClient.GenerateKeyExchangeKeyPair();
+                var keyPair = Sodium.GenerateX25519KeyPair();
             }
             stopwatch.Stop();
 
@@ -152,14 +152,14 @@ namespace LibEmiddle.Tests.Unit
         public void Performance_GroupMessageEncryptionTest()
         {
             // Arrange
-            var aliceKeyPair = LibEmiddleClient.GenerateSignatureKeyPair();
-            var groupChatManager = new GroupChatManager(_cryptoProvider, aliceKeyPair);
+            var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var groupChatManager = new GroupChatManager(aliceKeyPair);
             string groupId = "performance-test-group";
             string groupName = "Performance Test Group";
             groupChatManager.CreateGroupAsync(groupId, groupName).GetAwaiter().GetResult();
 
             // Create a message of moderate size
-            StringBuilder messageBuilder = new StringBuilder(50 * 1024);
+            StringBuilder messageBuilder = new(50 * 1024);
             for (int i = 0; i < 1000; i++)
             {
                 messageBuilder.Append("Group message performance test with moderate sized content. ");
@@ -200,7 +200,7 @@ namespace LibEmiddle.Tests.Unit
             var x3dhResult = await _x3dhProtocol.InitiateSessionAsSenderAsync(bobKeyBundle.ToPublicBundle(), aliceIdentityKeyPair);
 
             // 4. Initialize Alice's Double Ratchet session with the shared key from X3DH
-            var aliceSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
                 x3dhResult.SharedKey,
                 bobKeyBundle.SignedPreKey,
                 sessionId);
@@ -218,7 +218,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // 7. Initialize Bob's Double Ratchet session
-            var bobSession = await _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
+            var bobSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
                 bobSharedKey,
                 bobSignedPreKeyPair,
                 x3dhResult.MessageDataToSend.SenderEphemeralKeyPublic,
@@ -238,11 +238,11 @@ namespace LibEmiddle.Tests.Unit
             {
                 // Alice to Bob
                 (DoubleRatchetSession aliceUpdatedSession, EncryptedMessage encryptedMessage) =
-                    await _doubleRatchetProtocol.EncryptAsync(currentAliceSession, message);
+                    _doubleRatchetProtocol.EncryptAsync(currentAliceSession, message);
 
                 // Bob decrypts Alice's message
                 (DoubleRatchetSession bobUpdatedSession, string decryptedMessage) =
-                    await _doubleRatchetProtocol.DecryptAsync(currentBobSession, encryptedMessage);
+                    _doubleRatchetProtocol.DecryptAsync(currentBobSession, encryptedMessage);
 
                 // Ensure everything worked correctly
                 Assert.IsNotNull(aliceUpdatedSession, $"Alice's updated session should not be null at iteration {i}");

@@ -27,7 +27,7 @@ namespace LibEmiddle.Tests.Unit
         public void Setup()
         {
             _cryptoProvider = new CryptoProvider();
-            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol();
 
             // Create a temporary directory for test session storage
             _testStoragePath = Path.Combine(Path.GetTempPath(), $"LibEmiddle_Tests_{Guid.NewGuid()}");
@@ -74,7 +74,7 @@ namespace LibEmiddle.Tests.Unit
             string sessionId = $"test-session-{Guid.NewGuid()}";
 
             // Initialize a Double Ratchet session as the sender
-            return await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            return _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
                 sharedKeyFromX3DH: sharedSecret,
                 recipientInitialPublicKey: bobKeyPair.PublicKey,
                 sessionId: sessionId);

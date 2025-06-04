@@ -150,7 +150,7 @@ namespace LibEmiddle.Tests.Unit
 
             _mockDoubleRatchetProtocol
                 .Setup(dr => dr.EncryptAsync(It.IsAny<DoubleRatchetSession>(), It.IsAny<string>(), It.IsAny<KeyRotationStrategy>()))
-                .ReturnsAsync((doubleRatchetSession, dummyEncryptedMessage));
+                .Returns((doubleRatchetSession, dummyEncryptedMessage));
 
             // Setup reflection access to _sessions field for the test
             var sessionsField = typeof(MailboxManager).GetField("_sessions",
@@ -376,7 +376,7 @@ namespace LibEmiddle.Tests.Unit
 
                 _mockDoubleRatchetProtocol
                     .Setup(dr => dr.EncryptAsync(It.IsAny<DoubleRatchetSession>(), It.IsAny<string>(), It.IsAny<KeyRotationStrategy>()))
-                    .ReturnsAsync((doubleRatchetSession, dummyEncryptedMessage));
+                    .Returns((doubleRatchetSession, dummyEncryptedMessage));
 
                 // Setup reflection access to _sessions field for the test
                 var sessionsField = typeof(MailboxManager).GetField("_sessions",

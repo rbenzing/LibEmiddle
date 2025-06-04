@@ -387,10 +387,10 @@ namespace LibEmiddle.Sessions
             try
             {
                 // Create required components
-                var keyManager = new GroupKeyManager(_cryptoProvider);
+                var keyManager = new GroupKeyManager();
                 var memberManager = new GroupMemberManager();
-                var messageCrypto = new GroupMessageCrypto(_cryptoProvider);
-                var distributionManager = new SenderKeyDistribution(_cryptoProvider, keyManager);
+                var messageCrypto = new GroupMessageCrypto();
+                var distributionManager = new SenderKeyDistribution(keyManager);
 
                 // Create the group
                 string groupName = options.GroupName ?? $"Group {options.GroupId}";
@@ -468,10 +468,10 @@ namespace LibEmiddle.Sessions
                 string groupId = sessionId.Split('-')[1]; // Assumes format "group-{groupId}-{guid}"
 
                 // Create required components
-                var keyManager = new GroupKeyManager(_cryptoProvider);
+                var keyManager = new GroupKeyManager();
                 var memberManager = new GroupMemberManager();
-                var messageCrypto = new GroupMessageCrypto(_cryptoProvider);
-                var distributionManager = new SenderKeyDistribution(_cryptoProvider, keyManager);
+                var messageCrypto = new GroupMessageCrypto();
+                var distributionManager = new SenderKeyDistribution(keyManager);
 
                 return await _persistenceManager.LoadGroupSessionAsync(
                     sessionId,

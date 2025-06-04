@@ -26,7 +26,7 @@ namespace LibEmiddle.API
         private readonly SessionManager _sessionManager;
         private readonly DeviceLinkingService _deviceLinkingSvc;
 
-        private readonly KeyPair _identityKeyPair;
+        private KeyPair _identityKeyPair;
         private ChatSession? _chatSession = null;
         private bool _disposed;
 
@@ -36,13 +36,14 @@ namespace LibEmiddle.API
         /// <param name="identityKeyPair">Identity key pair to use</param>
         public LibEmiddleClient(KeyPair identityKeyPair)
         {
+            _identityKeyPair = identityKeyPair;
+
             // Generate an X25519 identity key pair for this client
-            _identityKeyPair = identityKeyPair.ToString() == null ? Sodium.GenerateX25519KeyPair() : identityKeyPair;
             _cryptoProvider = new CryptoProvider();
             _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
-            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol();
             _sessionManager = new SessionManager(_cryptoProvider, _x3DHProtocol, _doubleRatchetProtocol, _identityKeyPair);
-            _groupChatManager = new GroupChatManager(_cryptoProvider, _identityKeyPair);
+            _groupChatManager = new GroupChatManager(_identityKeyPair);
             _groupMemberManager = new GroupMemberManager();
 
             _deviceLinkingSvc = new DeviceLinkingService(_cryptoProvider);
@@ -292,7 +293,7 @@ namespace LibEmiddle.API
         public (DoubleRatchetSession? updatedSession, EncryptedMessage? encryptedMessage)
             EncryptWithSession(DoubleRatchetSession session, string message)
         {
-            return _doubleRatchetProtocol.EncryptAsync(session, message).GetAwaiter().GetResult();
+            return _doubleRatchetProtocol.EncryptAsync(session, message);
         }
 
         /// <summary>
@@ -304,7 +305,7 @@ namespace LibEmiddle.API
         public (DoubleRatchetSession? updatedSession, string? decryptedMessage)
             DecryptWithSession(DoubleRatchetSession session, EncryptedMessage encryptedMessage)
         {
-            return _doubleRatchetProtocol.DecryptAsync(session, encryptedMessage).GetAwaiter().GetResult();
+            return _doubleRatchetProtocol.DecryptAsync(session, encryptedMessage);
         }
 
         #endregion

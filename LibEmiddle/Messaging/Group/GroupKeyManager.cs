@@ -12,10 +12,8 @@ namespace LibEmiddle.Messaging.Group
     /// <remarks>
     /// Initializes a new instance of the GroupKeyManager class.
     /// </remarks>
-    /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-    public class GroupKeyManager(ICryptoProvider cryptoProvider) : IGroupKeyManager
+    public class GroupKeyManager() : IGroupKeyManager
     {
-        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
         private readonly SemaphoreSlim _operationLock = new(1, 1);
 
         // In-memory storage for sender chain states
@@ -33,7 +31,7 @@ namespace LibEmiddle.Messaging.Group
         /// <returns>A 32-byte random key suitable for initializing a group chain.</returns>
         public byte[] GenerateInitialChainKey()
         {
-            return _cryptoProvider.GenerateRandomBytes(Constants.CHAIN_KEY_SIZE);
+            return Sodium.GenerateRandomBytes(Constants.CHAIN_KEY_SIZE);
         }
 
         /// <summary>
@@ -151,10 +149,10 @@ namespace LibEmiddle.Messaging.Group
                     throw new KeyNotFoundException($"Group {groupId} does not exist or sender state not initialized.");
 
                 // Generate message key from current chain key
-                byte[] messageKey = DeriveMessageKey(state.ChainKey);
+                byte[] messageKey = Sodium.DeriveMessageKey(state.ChainKey);
 
                 // Advance the chain
-                state.ChainKey = DeriveNextChainKey(state.ChainKey);
+                state.ChainKey = Sodium.AdvanceChainKey(state.ChainKey);
                 state.Iteration++;
 
                 return (messageKey, state.Iteration - 1);
@@ -413,43 +411,5 @@ namespace LibEmiddle.Messaging.Group
                 return Task.FromResult(false);
             }
         }
-
-        /// <summary>
-        /// Derives a message key from a chain key.
-        /// </summary>
-        /// <param name="chainKey">The current chain key.</param>
-        /// <returns>The derived message key.</returns>
-        private byte[] DeriveMessageKey(byte[] chainKey)
-        {
-            // In Signal protocol, message keys are derived using HMAC-SHA256
-            // with a specific info string to differentiate from chain key derivation
-            return _cryptoProvider.DeriveKey(
-                chainKey,
-                null,
-                System.Text.Encoding.Default.GetBytes("GroupMessageKey"),
-                Constants.MESSAGE_KEY_SIZE);
-        }
-
-        /// <summary>
-        /// Derives the next chain key from the current chain key.
-        /// </summary>
-        /// <param name="chainKey">The current chain key.</param>
-        /// <returns>The next chain key in the ratchet sequence.</returns>
-        private byte[] DeriveNextChainKey(byte[] chainKey)
-        {
-            // In Signal protocol, chain keys are derived using HMAC-SHA256
-            // with a specific info string to differentiate from message key derivation
-            return _cryptoProvider.DeriveKey(
-                chainKey,
-                null,
-                System.Text.Encoding.Default.GetBytes("GroupChainKey"),
-                Constants.CHAIN_KEY_SIZE);
-        }
     }
-
-
-
-    
-
-    
 }

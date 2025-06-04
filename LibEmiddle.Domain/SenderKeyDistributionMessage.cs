@@ -22,7 +22,7 @@
         public uint Iteration { get; set; }
 
         /// <summary>
-        /// Sender's identity key
+        /// Sender's identity key (Ed25519 or X25519)
         /// </summary>
         public byte[]? SenderIdentityKey { get; set; }
 

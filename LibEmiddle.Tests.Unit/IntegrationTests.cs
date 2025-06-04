@@ -36,7 +36,7 @@ public class IntegrationTests
         // Initialize the core components
         _cryptoProvider = new CryptoProvider();
         _x3dhProtocol = new X3DHProtocol(_cryptoProvider);
-        _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+        _doubleRatchetProtocol = new DoubleRatchetProtocol();
     }
 
     [TestCleanup]
@@ -73,7 +73,7 @@ public class IntegrationTests
         string sessionId = $"test-session-{Guid.NewGuid()}";
 
         // Step 4: Initialize Double Ratchet for Alice (sender)
-        var aliceSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+        var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
             x3dhResult.SharedKey,
             bobPublicBundle.SignedPreKey,
             sessionId);
@@ -91,7 +91,7 @@ public class IntegrationTests
             bobPublicBundle.SignedPreKey,
             bobSignedPreKeyPrivate);
 
-        var bobSession = await _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
+        var bobSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
             x3dhResult.SharedKey,
             bobSignedPreKeyPair,
             x3dhResult.MessageDataToSend.SenderEphemeralKeyPublic,
@@ -103,7 +103,7 @@ public class IntegrationTests
 
         // Step 6: Alice encrypts a message to Bob
         string initialMessage = "Hello Bob, this is Alice!";
-        var (aliceUpdatedSession, encryptedMessage) = await _doubleRatchetProtocol.EncryptAsync(
+        var (aliceUpdatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(
             aliceSession,
             initialMessage);
 
@@ -115,7 +115,7 @@ public class IntegrationTests
         Assert.AreEqual(sessionId, encryptedMessage.SessionId, "Message should have correct session ID");
 
         // Step 7: Bob decrypts Alice's message
-        var (bobUpdatedSession, decryptedMessage) = await _doubleRatchetProtocol.DecryptAsync(
+        var (bobUpdatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(
             bobSession,
             encryptedMessage);
 
@@ -125,7 +125,7 @@ public class IntegrationTests
 
         // Step 8: Bob replies to Alice
         string replyMessage = "Hi Alice, Bob here!";
-        var (bobRepliedSession, bobReplyEncrypted) = await _doubleRatchetProtocol.EncryptAsync(
+        var (bobRepliedSession, bobReplyEncrypted) = _doubleRatchetProtocol.EncryptAsync(
             bobUpdatedSession,
             replyMessage);
 
@@ -133,7 +133,7 @@ public class IntegrationTests
         Assert.IsNotNull(bobReplyEncrypted, "Bob's encrypted reply should not be null");
 
         // Step 9: Alice decrypts Bob's reply
-        var (aliceFinalSession, aliceDecryptedReply) = await _doubleRatchetProtocol.DecryptAsync(
+        var (aliceFinalSession, aliceDecryptedReply) = _doubleRatchetProtocol.DecryptAsync(
             aliceUpdatedSession,
             bobReplyEncrypted);
 
@@ -147,7 +147,7 @@ public class IntegrationTests
 
         // Verify forward secrecy - each message should use different message keys
         string secondMessage = "This is Alice's second message!";
-        var (aliceSession2, encryptedMessage2) = await _doubleRatchetProtocol.EncryptAsync(
+        var (aliceSession2, encryptedMessage2) = _doubleRatchetProtocol.EncryptAsync(
             aliceFinalSession,
             secondMessage);
 
@@ -172,9 +172,9 @@ public class IntegrationTests
         var charlieKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
         // Step 2: Create group chat managers for each participant
-        var aliceGroupChatManager = new GroupChatManager(_cryptoProvider, aliceKeyPair);
-        var bobGroupChatManager = new GroupChatManager(_cryptoProvider, bobKeyPair);
-        var charlieGroupChatManager = new GroupChatManager(_cryptoProvider, charlieKeyPair);
+        var aliceGroupChatManager = new GroupChatManager(aliceKeyPair);
+        var bobGroupChatManager = new GroupChatManager(bobKeyPair);
+        var charlieGroupChatManager = new GroupChatManager(charlieKeyPair);
 
         try
         {
@@ -443,7 +443,7 @@ public class IntegrationTests
             bobKeyBundle.ToPublicBundle(),
             aliceKeyPair);
 
-        var aliceSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+        var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
             x3dhResult.SharedKey,
             bobKeyBundle.ToPublicBundle().SignedPreKey,
             "test-session");
@@ -461,7 +461,7 @@ public class IntegrationTests
         // The DecryptAsync should handle invalid messages gracefully
         try
         {
-            var (updatedSession, decryptedMessage) = await _doubleRatchetProtocol.DecryptAsync(
+            var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(
                 aliceSession,
                 invalidMessage);
 
@@ -486,7 +486,7 @@ public class IntegrationTests
             SenderMessageNumber = 1
         };
 
-        var (wrongSessionUpdated, wrongSessionDecrypted) = await _doubleRatchetProtocol.DecryptAsync(
+        var (wrongSessionUpdated, wrongSessionDecrypted) = _doubleRatchetProtocol.DecryptAsync(
             aliceSession,
             wrongSessionMessage);
 
@@ -496,7 +496,7 @@ public class IntegrationTests
         // Test 3: Null message handling
         try
         {
-            var (nullUpdated, nullDecrypted) = await _doubleRatchetProtocol.DecryptAsync(
+            var (nullUpdated, nullDecrypted) = _doubleRatchetProtocol.DecryptAsync(
                 aliceSession,
                 null!);
 

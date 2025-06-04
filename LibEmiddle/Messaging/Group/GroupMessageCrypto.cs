@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Text;
 using LibEmiddle.Core;
+using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Abstractions;
 
@@ -13,11 +14,8 @@ namespace LibEmiddle.Messaging.Group
     /// <remarks>
     /// Initializes a new instance of the GroupMessageCrypto class.
     /// </remarks>
-    /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
-    public class GroupMessageCrypto(ICryptoProvider cryptoProvider) : IGroupMessageCrypto
+    public class GroupMessageCrypto() : IGroupMessageCrypto
     {
-        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
-
         // Records of when users joined groups, used for replay protection
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _groupJoinTimestamps = new();
 
@@ -56,7 +54,7 @@ namespace LibEmiddle.Messaging.Group
             try
             {
                 // Generate a random nonce
-                byte[] nonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
+                byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
 
                 // Encode the message
                 byte[] plaintext = Encoding.Default.GetBytes(message);
@@ -65,7 +63,7 @@ namespace LibEmiddle.Messaging.Group
                 byte[] associatedData = Encoding.Default.GetBytes($"{groupId}:{rotationTimestamp}");
 
                 // Encrypt the message
-                byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, messageKey, nonce, associatedData);
+                byte[] ciphertext = AES.AESEncrypt(plaintext, messageKey, nonce, associatedData);
 
                 // Create the encrypted message
                 var encryptedMessage = new EncryptedGroupMessage
@@ -81,7 +79,7 @@ namespace LibEmiddle.Messaging.Group
 
                 // Sign the message
                 byte[] messageData = GetDataToSign(encryptedMessage);
-                encryptedMessage.Signature = _cryptoProvider.Sign(messageData, senderKeyPair.PrivateKey);
+                encryptedMessage.Signature = Sodium.SignDetached(messageData, senderKeyPair.PrivateKey);
 
                 return encryptedMessage;
             }
@@ -128,7 +126,7 @@ namespace LibEmiddle.Messaging.Group
                 byte[] associatedData = Encoding.Default.GetBytes($"{groupId}:{encryptedMessage.RotationEpoch}");
 
                 // Decrypt the message
-                byte[] decrypted = _cryptoProvider.Decrypt(
+                byte[] decrypted = AES.AESDecrypt(
                     encryptedMessage.Ciphertext,
                     senderKey,
                     encryptedMessage.Nonce,
@@ -180,7 +178,7 @@ namespace LibEmiddle.Messaging.Group
             byte[] messageData = GetDataToSign(message);
 
             // Verify the signature
-            return _cryptoProvider.VerifySignature(messageData, message.Signature, message.SenderIdentityKey);
+            return Sodium.SignVerifyDetached(message.Signature, messageData, message.SenderIdentityKey);
         }
 
         /// <summary>

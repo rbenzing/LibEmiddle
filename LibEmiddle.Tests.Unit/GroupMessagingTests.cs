@@ -23,7 +23,7 @@ namespace LibEmiddle.Tests.Unit
         {
             _cryptoProvider = new CryptoProvider();
             // Generate a default key pair for tests that don't specify identity
-            _defaultKeyPair = _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519).GetAwaiter().GetResult();
+            _defaultKeyPair = Sodium.GenerateEd25519KeyPair();
         }
 
         [TestMethod]
@@ -32,7 +32,7 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var adminKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var groupManager = new GroupChatManager(_cryptoProvider, adminKeyPair);
+            var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = $"test-authorization-{Guid.NewGuid()}";
             string groupName = "Test Authorization Group";
 
@@ -61,7 +61,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var keyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var groupManager = new GroupChatManager(_cryptoProvider, keyPair);
+            var groupManager = new GroupChatManager(keyPair);
             string groupId = $"test-replay-protection-{Guid.NewGuid()}";
             string groupName = "Test Replay Protection Group";
 
@@ -115,8 +115,8 @@ namespace LibEmiddle.Tests.Unit
             var adminKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var adminManager = new GroupChatManager(_cryptoProvider, adminKeyPair);
-            var memberManager = new GroupChatManager(_cryptoProvider, memberKeyPair);
+            var adminManager = new GroupChatManager(adminKeyPair);
+            var memberManager = new GroupChatManager(memberKeyPair);
 
             string groupId = $"test-forward-secrecy-{Guid.NewGuid()}";
             string groupName = "Test Forward Secrecy Group";
@@ -154,7 +154,7 @@ namespace LibEmiddle.Tests.Unit
             // 8. IMPORTANT: Create a new member manager to simulate restarting the app
             // This ensures we're testing real forward secrecy where membership is enforced
             // on each message, not just based on in-memory state
-            var memberManager2 = new GroupChatManager(_cryptoProvider, memberKeyPair);
+            var memberManager2 = new GroupChatManager(memberKeyPair);
             var memberSession2 = await memberManager2.JoinGroupAsync(adminDistribution,
                 KeyRotationStrategy.Standard); // Try to join the group again
 
@@ -181,9 +181,9 @@ namespace LibEmiddle.Tests.Unit
             var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var untrustedKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var adminManager = new GroupChatManager(_cryptoProvider, adminKeyPair);
-            var memberManager = new GroupChatManager(_cryptoProvider, memberKeyPair);
-            var untrustedManager = new GroupChatManager(_cryptoProvider, untrustedKeyPair);
+            var adminManager = new GroupChatManager(adminKeyPair);
+            var memberManager = new GroupChatManager(memberKeyPair);
+            var untrustedManager = new GroupChatManager(untrustedKeyPair);
 
             string groupId = $"test-untrusted-rejection-{Guid.NewGuid()}";
             string groupName = "Test Untrusted Rejection Group";
@@ -260,8 +260,8 @@ namespace LibEmiddle.Tests.Unit
             var identityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
             // Create an instance of GroupMessageCrypto
-            var messageCrypto = new GroupMessageCrypto(_cryptoProvider);
-            var keyManager = new GroupKeyManager(_cryptoProvider);
+            var messageCrypto = new GroupMessageCrypto();
+            var keyManager = new GroupKeyManager();
 
             // Initialize sender state with new chain key
             byte[] initialChainKey = keyManager.GenerateInitialChainKey();
@@ -291,7 +291,7 @@ namespace LibEmiddle.Tests.Unit
             var senderKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
             // Create an instance of GroupChatManager
-            var groupChatManager = new GroupChatManager(_cryptoProvider, senderKeyPair);
+            var groupChatManager = new GroupChatManager(senderKeyPair);
 
             // Create the group
             var session = await groupChatManager.CreateGroupAsync(groupId, groupName);
@@ -314,8 +314,8 @@ namespace LibEmiddle.Tests.Unit
             var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var aliceManager = new GroupChatManager(_cryptoProvider, aliceKeyPair);
-            var bobManager = new GroupChatManager(_cryptoProvider, bobKeyPair);
+            var aliceManager = new GroupChatManager(aliceKeyPair);
+            var bobManager = new GroupChatManager(bobKeyPair);
 
             string groupId = $"test-group-{Guid.NewGuid()}";
             string groupName = "Test Message Exchange Group";
@@ -357,7 +357,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var keyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var groupManager = new GroupChatManager(_cryptoProvider, keyPair);
+            var groupManager = new GroupChatManager(keyPair);
 
             // Create a non-existent session directly - this will throw because we don't create the group first
             var badOptions = new GroupSessionOptions { GroupId = "non-existent-group" };
@@ -380,10 +380,10 @@ namespace LibEmiddle.Tests.Unit
             var invalidSession = constructor.Invoke(new object[] {
                 "non-existent-group",
                 keyPair,
-                new GroupKeyManager(_cryptoProvider),
+                new GroupKeyManager(),
                 new GroupMemberManager(),
-                new GroupMessageCrypto(_cryptoProvider),
-                new SenderKeyDistribution(_cryptoProvider, new GroupKeyManager(_cryptoProvider))
+                new GroupMessageCrypto(),
+                new SenderKeyDistribution(new GroupKeyManager())
             }) as GroupSession;
 
             // Act & Assert - Should throw InvalidOperationException
@@ -398,9 +398,9 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var charlieKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var aliceManager = new GroupChatManager(_cryptoProvider, aliceKeyPair);
-            var bobManager = new GroupChatManager(_cryptoProvider, bobKeyPair);
-            var charlieManager = new GroupChatManager(_cryptoProvider, charlieKeyPair);
+            var aliceManager = new GroupChatManager(aliceKeyPair);
+            var bobManager = new GroupChatManager(bobKeyPair);
+            var charlieManager = new GroupChatManager(charlieKeyPair);
 
             // Setup the group - Alice is the admin/creator
             string groupId = $"test-multiple-senders-{Guid.NewGuid()}";
@@ -478,9 +478,9 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var daveKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var aliceManager = new GroupChatManager(_cryptoProvider, aliceKeyPair);
-            var bobManager = new GroupChatManager(_cryptoProvider, bobKeyPair);
-            var daveManager = new GroupChatManager(_cryptoProvider, daveKeyPair);
+            var aliceManager = new GroupChatManager(aliceKeyPair);
+            var bobManager = new GroupChatManager(bobKeyPair);
+            var daveManager = new GroupChatManager(daveKeyPair);
 
             // 1. Alice creates the group
             var aliceSession = await aliceManager.CreateGroupAsync(groupId, groupName, null,
@@ -583,9 +583,9 @@ namespace LibEmiddle.Tests.Unit
             var charlieKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
             // Step 2: Create group chat managers for each participant
-            var aliceManager = new GroupChatManager(_cryptoProvider, aliceKeyPair);
-            var bobManager = new GroupChatManager(_cryptoProvider, bobKeyPair);
-            var charlieManager = new GroupChatManager(_cryptoProvider, charlieKeyPair);
+            var aliceManager = new GroupChatManager(aliceKeyPair);
+            var bobManager = new GroupChatManager(bobKeyPair);
+            var charlieManager = new GroupChatManager(charlieKeyPair);
 
             // Step 3: Each participant creates the group
             string groupId = $"test-friends-{Guid.NewGuid()}";
@@ -663,7 +663,7 @@ namespace LibEmiddle.Tests.Unit
             var adminKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var groupManager = new GroupChatManager(_cryptoProvider, adminKeyPair);
+            var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = $"test-delete-{Guid.NewGuid()}";
             string groupName = "Test Delete Group";
 

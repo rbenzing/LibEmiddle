@@ -180,17 +180,18 @@ public class DeviceManager : IDeviceManager, IDisposable
             _linkedDevices.TryAdd(keyBase64, deviceInfo);
 
             LoggingManager.LogInformation(nameof(DeviceManager), $"Successfully linked device {keyBase64}");
-
-            // Set to null so we don't clear the normalized key as it's now stored in the dictionary
-            normalizedKey = null;
         }
-        finally
+        catch
         {
             // Clear the normalized key if we didn't store it successfully
             if (normalizedKey != null)
             {
                 SecureMemory.SecureClear(normalizedKey);
             }
+        }
+        finally
+        {
+            normalizedKey = null;
         }
     }
 

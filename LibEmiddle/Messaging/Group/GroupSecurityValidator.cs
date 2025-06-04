@@ -11,11 +11,9 @@ namespace LibEmiddle.Messaging.Group
     /// <remarks>
     /// Initializes a new instance of the GroupSecurityValidator class.
     /// </remarks>
-    /// <param name="cryptoProvider">The crypto provider interface to use.</param>
     /// <param name="memberManager">The group member manager interface to use.</param>
-    public class GroupSecurityValidator(ICryptoProvider cryptoProvider, IGroupMemberManager memberManager)
+    public class GroupSecurityValidator(IGroupMemberManager memberManager)
     {
-        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
         private readonly IGroupMemberManager _memberManager = memberManager ?? throw new ArgumentNullException(nameof(memberManager));
 
         // Cache of known public keys for validation
@@ -110,7 +108,7 @@ namespace LibEmiddle.Messaging.Group
             if (distribution.Signature != null)
             {
                 byte[] dataToSign = GetDataToSign(distribution);
-                if (!_cryptoProvider.VerifySignature(dataToSign, distribution.Signature, senderIdentityKey))
+                if (!Sodium.SignVerifyDetached(distribution.Signature, dataToSign, senderIdentityKey))
                 {
                     LoggingManager.LogWarning(nameof(GroupSecurityValidator),
                         $"Invalid signature on distribution message for group {groupId}");
@@ -152,7 +150,7 @@ namespace LibEmiddle.Messaging.Group
             if (message.Signature != null)
             {
                 byte[] dataToSign = GetDataToSign(message);
-                if (!_cryptoProvider.VerifySignature(dataToSign, message.Signature, senderIdentityKey))
+                if (!Sodium.SignVerifyDetached(message.Signature, dataToSign, senderIdentityKey))
                 {
                     LoggingManager.LogWarning(nameof(GroupSecurityValidator),
                         $"Invalid signature on message for group {groupId}");

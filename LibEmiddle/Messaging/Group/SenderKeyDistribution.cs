@@ -13,11 +13,9 @@ namespace LibEmiddle.Messaging.Group
     /// <remarks>
     /// Initializes a new instance of the SenderKeyDistribution class.
     /// </remarks>
-    /// <param name="cryptoProvider">The crypto provider interface to use</param>
     /// <param name="groupKeyManager">The group key manager interface to use</param>
-    public class SenderKeyDistribution(ICryptoProvider cryptoProvider, IGroupKeyManager groupKeyManager) : ISenderKeyDistribution
+    public class SenderKeyDistribution(IGroupKeyManager groupKeyManager) : ISenderKeyDistribution
     {
-        private readonly ICryptoProvider _cryptoProvider = cryptoProvider ?? throw new ArgumentNullException(nameof(cryptoProvider));
         private readonly IGroupKeyManager _keyManager = groupKeyManager ?? throw new ArgumentNullException(nameof(groupKeyManager));
 
         // Cache of distribution messages by group ID
@@ -48,7 +46,7 @@ namespace LibEmiddle.Messaging.Group
             var distribution = new SenderKeyDistributionMessage
             {
                 GroupId = groupId,
-                ChainKey = chainKey.ToArray(), // Create a copy
+                ChainKey = chainKey, // Create a copy
                 Iteration = iteration,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             };
@@ -56,9 +54,9 @@ namespace LibEmiddle.Messaging.Group
             // Sign the message if a key pair is provided
             if (senderKeyPair.PrivateKey != null && senderKeyPair.PublicKey != null)
             {
-                distribution.SenderIdentityKey = senderKeyPair.PublicKey.ToArray();
+                distribution.SenderIdentityKey = senderKeyPair.PublicKey;
                 byte[] dataToSign = GetDataToSign(distribution);
-                distribution.Signature = _cryptoProvider.Sign(dataToSign, senderKeyPair.PrivateKey);
+                distribution.Signature = Sodium.SignDetached(dataToSign, senderKeyPair.PrivateKey);
             }
 
             // Cache the distribution message
@@ -96,7 +94,7 @@ namespace LibEmiddle.Messaging.Group
             if (distribution.Signature != null && distribution.SenderIdentityKey != null)
             {
                 byte[] dataToSign = GetDataToSign(distribution);
-                if (!_cryptoProvider.VerifySignature(dataToSign, distribution.Signature, distribution.SenderIdentityKey))
+                if (!Sodium.SignVerifyDetached(distribution.Signature, dataToSign, distribution.SenderIdentityKey))
                 {
                     LoggingManager.LogWarning(nameof(SenderKeyDistribution),
                         $"Invalid signature on distribution message for group {distribution.GroupId}");

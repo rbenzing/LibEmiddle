@@ -480,7 +480,7 @@ namespace LibEmiddle.Protocol
             int ikmLength = 32 + dh1.Length + dh2.Length + dh3.Length + (dh4?.Length ?? 0);
             byte[] ikm = new byte[ikmLength];
 
-            // Fill with 0xFF prefix
+            // Fill with 0xFF prefix as per Signal Protocol specification
             for (int i = 0; i < 32; i++)
             {
                 ikm[i] = 0xFF;
@@ -497,13 +497,13 @@ namespace LibEmiddle.Protocol
 
             try
             {
-                // Use HKDF to derive the final key
+                // FIXED: Use Signal-compliant key derivation with proper info string
                 return await Task.Run(() => {
-                    return _cryptoProvider.DeriveKey(
+                    return Sodium.HkdfDerive(
                         ikm,
                         salt: null,
-                        info: Encoding.Default.GetBytes("WhisperText"),
-                        length: 32);
+                        info: "LibEmiddle-X3DH-v3"u8.ToArray(), // Updated to match our Signal v3 naming
+                        32);
                 });
             }
             finally

@@ -35,7 +35,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Initialize crypto components
             _cryptoProvider = new CryptoProvider();
-            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol();
             _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
             _protocolAdapter = new ProtocolAdapter(_x3DHProtocol, _doubleRatchetProtocol, _cryptoProvider);
 
@@ -64,7 +64,7 @@ namespace LibEmiddle.Tests.Unit
             // Bob needs to generate his initial ratchet key pair for the receiver session
             KeyPair bobInitialRatchetKeyPair = Sodium.GenerateX25519KeyPair();
 
-            var bobDRSession = await _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
+            var bobDRSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
                 sharedSecretKey,
                 bobInitialRatchetKeyPair,
                 initialMessage.SenderEphemeralKeyPublic,

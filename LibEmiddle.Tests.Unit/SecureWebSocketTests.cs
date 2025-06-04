@@ -35,7 +35,7 @@ namespace LibEmiddle.Tests.Unit
             _mockWebSocket = new Mock<IWebSocketClient>();
             _cryptoProvider = new CryptoProvider();
             _x3DHProtocol = new X3DHProtocol(_cryptoProvider);
-            _doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol();
 
             // Create identity key pairs for both parties
             var aliceIdentityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
@@ -51,7 +51,7 @@ namespace LibEmiddle.Tests.Unit
             string sessionId = $"test-session-{Guid.NewGuid():N}";
 
             // Initialize Alice's Double Ratchet session with shared key from X3DH
-            _testSession = await _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            _testSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
                 x3dhResult.SharedKey,
                 bobKeyBundle.SignedPreKey,
                 sessionId);

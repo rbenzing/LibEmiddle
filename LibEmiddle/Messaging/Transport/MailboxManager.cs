@@ -172,7 +172,7 @@ namespace LibEmiddle.Messaging.Transport
             string recipientId = Convert.ToBase64String(recipientKey);
 
             // Encrypt the message
-            var (updatedSession, encryptedPayload) = _doubleRatchetProtocol.EncryptAsync(session, message).GetAwaiter().GetResult();
+            var (updatedSession, encryptedPayload) = _doubleRatchetProtocol.EncryptAsync(session, message);
 
             ArgumentNullException.ThrowIfNull(updatedSession, nameof(updatedSession));
             ArgumentNullException.ThrowIfNull(encryptedPayload, nameof(encryptedPayload));
@@ -226,7 +226,7 @@ namespace LibEmiddle.Messaging.Transport
                     string senderId = Convert.ToBase64String(message.SenderKey);
                     if (_sessions.TryGetValue(senderId, out var session))
                     {
-                        var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(session, message.EncryptedPayload).GetAwaiter().GetResult();
+                        var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(session, message.EncryptedPayload);
 
                         if (updatedSession != null && decryptedMessage != null)
                         {
@@ -555,7 +555,7 @@ namespace LibEmiddle.Messaging.Transport
 
             // Initialize Double Ratchet
             DoubleRatchetSession drSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(sharedSecret, 
-                contactX25519Key, sessionId).GetAwaiter().GetResult();
+                contactX25519Key, sessionId);
             
             // Store the session
             _sessions[contactId] = drSession;

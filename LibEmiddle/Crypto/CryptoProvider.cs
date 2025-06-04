@@ -55,33 +55,6 @@ namespace LibEmiddle.Crypto
         }
 
         /// <inheritdoc/>
-        public Span<byte> DerivePublicKey(Span<byte> privateKey, KeyType keyType)
-        {
-            if (privateKey == null)
-                throw new ArgumentNullException(nameof(privateKey));
-
-            try
-            {
-                switch (keyType)
-                {
-                    case KeyType.Ed25519:
-                        return Sodium.ConvertEd25519PrivateKeyToX25519(privateKey);
-
-                    case KeyType.X25519:
-                        return Sodium.ScalarMultBase(privateKey);
-
-                    default:
-                        throw new ArgumentOutOfRangeException(nameof(keyType), "Unsupported key type.");
-                }
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(CryptoProvider), $"Error deriving public key: {ex.Message}");
-                throw;
-            }
-        }
-
-        /// <inheritdoc/>
         public byte[] GenerateRandomBytes(uint count)
         {
             return Sodium.GenerateRandomBytes(count);
@@ -201,19 +174,68 @@ namespace LibEmiddle.Crypto
         }
 
         /// <inheritdoc/>
-        public byte[] DeriveKey(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length = 32)
+        public byte[] AdvanceChainKey(ReadOnlySpan<byte> chainKey)
         {
-            if (inputKeyMaterial == null)
+            if (chainKey.Length != 32)
+                throw new ArgumentException("Chain key must be 32 bytes", nameof(chainKey));
+ 
+            try
             {
-                throw new ArgumentNullException(nameof(inputKeyMaterial));
+                return Sodium.AdvanceChainKey(chainKey);
             }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error performing chain key advancement: {ex.Message}");
+                throw;
+            }
+        }
 
-            if (length <= 0)
-                throw new ArgumentOutOfRangeException(nameof(length), "Length must be greater than zero.");
+        /// <inheritdoc/>
+        public byte[] DeriveMessageKey(ReadOnlySpan<byte> chainKey)
+        {
+            if (chainKey.Length != 32)
+                throw new ArgumentException("Chain key must be 32 bytes", nameof(chainKey));
 
             try
             {
-                // Use HKDF for key derivation
+                return Sodium.DeriveMessageKey(chainKey);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error performing message key derivation: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <inheritdoc/>
+        public  (byte[] RootKey, byte[] InitialChainKey) DeriveInitialSessionKeys(ReadOnlySpan<byte> sharedSecret)
+        {
+            if (sharedSecret.Length != 32)
+                throw new ArgumentException("Shared secret must be 32 bytes", nameof(sharedSecret));
+
+            try
+            {
+                return Sodium.DeriveInitialSessionKeys(sharedSecret);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error performing initial session key derivation: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <inheritdoc/>
+        public byte[] DeriveKey(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length = 32)
+        {
+            if (inputKeyMaterial == null)
+                throw new ArgumentNullException(nameof(inputKeyMaterial));
+
+            if (length <= 0 || length > 64)
+                throw new ArgumentOutOfRangeException(nameof(length), "Length must be between 1 and 64 bytes.");
+
+            try
+            {
+                // Use Signal-compliant HKDF from Sodium (much simpler!)
                 return Sodium.HkdfDerive(inputKeyMaterial, salt, info, length);
             }
             catch (Exception ex)
@@ -281,6 +303,9 @@ namespace LibEmiddle.Crypto
         {
             if (ed25519PrivateKey == null)
                 throw new ArgumentNullException(nameof(ed25519PrivateKey));
+
+            if (ed25519PrivateKey.Length == Constants.X25519_KEY_SIZE)
+                return ed25519PrivateKey; // if the key is 32 and not 64 then send it back
 
             if (ed25519PrivateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
                 throw new ArgumentException($"Ed25519 private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(ed25519PrivateKey));

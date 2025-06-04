@@ -562,138 +562,246 @@ public sealed partial class Sodium
     /// <param name="outputLength">The length of the PRK.</param>
     /// <returns>Derived key of the specified length.</returns>
     public static byte[] HkdfDerive(ReadOnlySpan<byte> inputKeyMaterial,
-        ReadOnlySpan<byte> salt = default,
-        ReadOnlySpan<byte> info = default,
-        int outputLength = 32)
+    ReadOnlySpan<byte> salt = default,
+    ReadOnlySpan<byte> info = default,
+    int outputLength = 32)
     {
         if (outputLength <= 0 || outputLength > 64)
-            throw new ArgumentOutOfRangeException(nameof(outputLength), "Output length must be greater than 0 and less than or equal to 64.");
+            throw new ArgumentOutOfRangeException(nameof(outputLength),
+                "Output length must be between 1 and 64 bytes.");
 
-        // Allocate heap buffer for PRK (SHA-256 output = 32 bytes)
-        byte[] prk = new byte[Constants.AES_KEY_SIZE];
-        byte[]? output = null;
+        Initialize();
+
+        // Use the existing HKDF methods but with cleaner implementation
+        byte[] prk = new byte[32];
+        byte[] output = new byte[outputLength];
 
         try
         {
-            // Fill PRK buffer securely
+            // Extract phase
             HkdfExtract(salt, inputKeyMaterial, prk);
 
-            // Allocate final output buffer
-            output = new byte[outputLength];
-
-            // Expand with PRK
+            // Expand phase  
             HkdfExpand(prk, info, output);
 
-            // Transfer ownership to caller
-            var result = output;
-            output = null;
-            return result;
+            return output;
+        }
+        catch
+        {
+            SecureMemory.SecureClear(output);
+            throw;
         }
         finally
         {
             SecureMemory.SecureClear(prk);
-            if (output != null)
-                SecureMemory.SecureClear(output);
+        }
+    }
+
+    /// <summary>
+    /// Derives initial session keys from X3DH shared secret following Signal Protocol v3 specification.
+    /// Both root key and chain key are derived from a single root seed.
+    /// </summary>
+    /// <param name="sharedSecret">The 32-byte shared secret from X3DH key agreement</param>
+    /// <returns>A tuple containing (rootKey, initialChainKey) both 32 bytes each</returns>
+    public static (byte[] RootKey, byte[] InitialChainKey) DeriveInitialSessionKeys(ReadOnlySpan<byte> sharedSecret)
+    {
+        if (sharedSecret.Length != 32)
+            throw new ArgumentException("Shared secret must be 32 bytes", nameof(sharedSecret));
+
+        Initialize();
+
+        // Step 1: Derive root seed from shared secret using HKDF-Extract
+        byte[] rootSeed = new byte[32];
+
+        try
+        {
+            // Use empty salt for X3DH as per Signal Protocol specification
+            ReadOnlySpan<byte> emptySalt = ReadOnlySpan<byte>.Empty;
+
+            // HKDF-Extract to create pseudorandom key (root seed)
+            int result = crypto_kdf_hkdf_sha256_extract(
+                rootSeed,
+                emptySalt,
+                0,
+                sharedSecret,
+                (nuint)sharedSecret.Length);
+
+            if (result != 0)
+                throw new InvalidOperationException("HKDF extract failed for root seed derivation");
+
+            // Step 2: Derive root key from root seed
+            byte[] rootKey = new byte[32];
+            ReadOnlySpan<byte> rootKeyInfo = "LibEmiddle-Signal-RootKey-v3"u8;
+
+            result = crypto_kdf_hkdf_sha256_expand(
+                rootKey,
+                32,
+                rootKeyInfo,
+                (nuint)rootKeyInfo.Length,
+                rootSeed);
+
+            if (result != 0)
+                throw new InvalidOperationException("HKDF expand failed for root key derivation");
+
+            // Step 3: Derive initial chain key from root seed  
+            byte[] chainKey = new byte[32];
+            ReadOnlySpan<byte> chainKeyInfo = "LibEmiddle-Signal-ChainKey-v3"u8;
+
+            result = crypto_kdf_hkdf_sha256_expand(
+                chainKey,
+                32,
+                chainKeyInfo,
+                (nuint)chainKeyInfo.Length,
+                rootSeed);
+
+            if (result != 0)
+                throw new InvalidOperationException("HKDF expand failed for chain key derivation");
+
+            return (rootKey, chainKey);
+        }
+        finally
+        {
+            // Securely clear the root seed
+            SecureMemory.SecureClear(rootSeed);
+        }
+    }
+
+    /// <summary>
+    /// Derives a new root key and chain key from current root key and DH output.
+    /// This is used during Double Ratchet key rotation.
+    /// </summary>
+    /// <param name="currentRootKey">Current root key (32 bytes)</param>
+    /// <param name="dhOutput">Diffie-Hellman output from key exchange (32 bytes)</param>
+    /// <returns>A tuple containing (newRootKey, newChainKey) both 32 bytes each</returns>
+    public static (byte[] NewRootKey, byte[] NewChainKey) DeriveRatchetKeys(
+        ReadOnlySpan<byte> currentRootKey,
+        ReadOnlySpan<byte> dhOutput)
+    {
+        if (currentRootKey.Length != 32)
+            throw new ArgumentException("Root key must be 32 bytes", nameof(currentRootKey));
+        if (dhOutput.Length != 32)
+            throw new ArgumentException("DH output must be 32 bytes", nameof(dhOutput));
+
+        Initialize();
+
+        // Use current root key as salt and DH output as input key material
+        byte[] newRootKey = new byte[32];
+        byte[] newChainKey = new byte[32];
+
+        try
+        {
+            // HKDF-Extract with root key as salt and DH output as input
+            int result = crypto_kdf_hkdf_sha256_extract(
+                newRootKey,
+                currentRootKey,
+                (nuint)currentRootKey.Length,
+                dhOutput,
+                (nuint)dhOutput.Length);
+
+            if (result != 0)
+                throw new InvalidOperationException("HKDF extract failed for ratchet root key");
+
+            // Derive chain key from the new root key
+            ReadOnlySpan<byte> chainKeyInfo = "LibEmiddle-Signal-ChainKey-v3"u8;
+
+            result = crypto_kdf_hkdf_sha256_expand(
+                newChainKey,
+                32,
+                chainKeyInfo,
+                (nuint)chainKeyInfo.Length,
+                newRootKey);
+
+            if (result != 0)
+                throw new InvalidOperationException("HKDF expand failed for ratchet chain key");
+
+            return (newRootKey, newChainKey);
+        }
+        catch
+        {
+            // Clear sensitive data on error
+            SecureMemory.SecureClear(newRootKey);
+            SecureMemory.SecureClear(newChainKey);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Derives a message key from a chain key following Signal Protocol specification.
+    /// </summary>
+    /// <param name="chainKey">The chain key to derive from (32 bytes)</param>
+    /// <returns>A 32-byte message key for encryption</returns>
+    public static byte[] DeriveMessageKey(ReadOnlySpan<byte> chainKey)
+    {
+        if (chainKey.Length != 32)
+            throw new ArgumentException("Chain key must be 32 bytes", nameof(chainKey));
+
+        Initialize();
+
+        byte[] messageKey = new byte[32];
+
+        try
+        {
+            ReadOnlySpan<byte> messageKeyInfo = "LibEmiddle-Signal-MessageKey-v3"u8;
+
+            int result = crypto_kdf_hkdf_sha256_expand(
+                messageKey,
+                32,
+                messageKeyInfo,
+                (nuint)messageKeyInfo.Length,
+                chainKey);
+
+            if (result != 0)
+                throw new InvalidOperationException("HKDF expand failed for message key derivation");
+
+            return messageKey;
+        }
+        catch
+        {
+            SecureMemory.SecureClear(messageKey);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Advances a chain key to the next iteration following Signal Protocol specification.
+    /// </summary>
+    /// <param name="chainKey">The current chain key (32 bytes)</param>
+    /// <returns>The next chain key in the sequence (32 bytes)</returns>
+    public static byte[] AdvanceChainKey(ReadOnlySpan<byte> chainKey)
+    {
+        if (chainKey.Length != 32)
+            throw new ArgumentException("Chain key must be 32 bytes", nameof(chainKey));
+
+        Initialize();
+
+        byte[] nextChainKey = new byte[32];
+
+        try
+        {
+            ReadOnlySpan<byte> chainAdvanceInfo = "LibEmiddle-Signal-ChainAdvance-v3"u8;
+
+            int result = crypto_kdf_hkdf_sha256_expand(
+                nextChainKey,
+                32,
+                chainAdvanceInfo,
+                (nuint)chainAdvanceInfo.Length,
+                chainKey);
+
+            if (result != 0)
+                throw new InvalidOperationException("HKDF expand failed for chain key advancement");
+
+            return nextChainKey;
+        }
+        catch
+        {
+            SecureMemory.SecureClear(nextChainKey);
+            throw;
         }
     }
 
     #endregion
 
     #region Signing & Verifying PreKeys
-
-    /// <summary>
-    /// Signs the message m, whose length is mlen bytes, using the secret key sk 
-    /// and puts the signature into sig, which can be up to crypto_sign_BYTES bytes long.
-    /// </summary>
-    [LibraryImport(LibraryName, EntryPoint = "crypto_sign")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    internal static partial int crypto_sign(
-        Span<byte> signature, out nuint signatureLength,
-        ReadOnlySpan<byte> message, nuint messageLength,
-        ReadOnlySpan<byte> secretKey);
-
-    /// <summary>
-    /// Signs a message using Ed25519.
-    /// DEPRECATED: Use SignDetached instead for better performance and security.
-    /// </summary>
-    /// <param name="message">The message to sign.</param>
-    /// <param name="privateKey">The private key (64 bytes).</param>
-    /// <returns>The signature (64 bytes).</returns>
-    [Obsolete("Use SignDetached instead for better performance and security.")]
-    public static byte[] Sign(ReadOnlySpan<byte> message, ReadOnlySpan<byte> privateKey)
-    {
-        if (message.IsEmpty)
-            throw new ArgumentException("Message cannot be empty", nameof(message));
-        if (privateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
-            throw new ArgumentException($"Private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes. Length: {privateKey.Length}", nameof(privateKey));
-
-        Initialize();
-
-        byte[] signature = new byte[Constants.ED25519_PRIVATE_KEY_SIZE];
-
-        try
-        {
-            int result = crypto_sign(
-                signature,
-                out nuint signatureLength,
-                message,
-                (nuint)message.Length,
-                privateKey);
-
-            if (result != 0 || signatureLength != (nuint)signature.Length)
-            {
-                throw new InvalidOperationException("Failed to create signature.");
-            }
-
-            return signature;
-        }
-        catch
-        {
-            SecureMemory.SecureClear(signature);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Verifies that sig is a valid signature for the message m, whose length is mlen 
-    /// bytes, using the signer's public key pk.
-    /// DEPRECATED: Use SignVerifyDetached instead for better performance.
-    /// </summary>
-    [LibraryImport(LibraryName, EntryPoint = "crypto_sign_verify")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    internal static partial int crypto_sign_verify(
-        ReadOnlySpan<byte> signature,
-        ReadOnlySpan<byte> message, nuint messageLength,
-        ReadOnlySpan<byte> publicKey);
-
-    /// <summary>
-    /// Verifies a signature using Ed25519.
-    /// DEPRECATED: Use SignVerifyDetached instead for better performance.
-    /// </summary>
-    /// <param name="signature">The signature to verify.</param>
-    /// <param name="message">The original message.</param>
-    /// <param name="publicKey">The public key (32 bytes).</param>
-    /// <returns>True if the signature is valid, false otherwise.</returns>
-    [Obsolete("Use SignVerifyDetached instead for better performance.")]
-    public static bool SignVerify(ReadOnlySpan<byte> signature, ReadOnlySpan<byte> message, ReadOnlySpan<byte> publicKey)
-    {
-        if (signature.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
-            throw new ArgumentException($"Signature must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(signature));
-        if (message.IsEmpty)
-            throw new ArgumentException("Message cannot be empty", nameof(message));
-        if (publicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
-            throw new ArgumentException($"Public key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(publicKey));
-
-        Initialize();
-
-        int result = crypto_sign_verify(
-            signature,
-            message,
-            (nuint)message.Length,
-            publicKey);
-
-        return result == 0;
-    }
 
     /// <summary>
     /// Randomly generates a secret key and a corresponding public key.
@@ -1308,8 +1416,8 @@ public sealed partial class Sodium
     /// <returns>True if the signature is valid, false otherwise.</returns>
     public static bool SignVerifyDetached(ReadOnlySpan<byte> signature, ReadOnlySpan<byte> message, ReadOnlySpan<byte> publicKey)
     {
-        if (signature.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
-            throw new ArgumentException($"Signature must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(signature));
+        if (signature.Length != Constants.ED25519_SIGNATURE_SIZE)
+            throw new ArgumentException($"Signature must be {Constants.ED25519_SIGNATURE_SIZE} bytes.", nameof(signature));
 
         if (publicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
             throw new ArgumentException($"Public key must be {Constants.ED25519_PUBLIC_KEY_SIZE} bytes.", nameof(publicKey));
@@ -1326,7 +1434,6 @@ public sealed partial class Sodium
         }
         catch
         {
-            // If verification throws, consider it invalid
             return false;
         }
     }

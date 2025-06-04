@@ -43,7 +43,7 @@ namespace LibEmiddle.Messaging.Chat
 
         // Collections
         private readonly ConcurrentQueue<MessageRecord> _messageHistory = new();
-        public Dictionary<string, string> Metadata { get; } = new();
+        public ConcurrentDictionary<string, string> Metadata { get; } = new();
 
         // Services
         private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
@@ -265,7 +265,7 @@ namespace LibEmiddle.Messaging.Chat
                 }
 
                 // Perform encryption
-                var (updatedSession, encryptedMessage) = await _doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(
                     _cryptoSession, message, RotationStrategy);
 
                 if (updatedSession == null || encryptedMessage == null)
@@ -339,7 +339,7 @@ namespace LibEmiddle.Messaging.Chat
                 }
 
                 // Perform decryption
-                var (updatedSession, decryptedMessage) = await _doubleRatchetProtocol.DecryptAsync(_cryptoSession, encryptedMessage);
+                var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(_cryptoSession, encryptedMessage);
 
                 if (updatedSession == null)
                 {

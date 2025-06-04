@@ -17,19 +17,18 @@ namespace LibEmiddle.Abstractions
         public Task<KeyPair> GenerateKeyPairAsync(KeyType keyType);
 
         /// <summary>
-        /// Derives a public key from a private key.
-        /// </summary>
-        /// <param name="privateKey">The private key to derive from.</param>
-        /// <param name="keyType">The type of key to derive.</param>
-        /// <returns>The derived public key.</returns>
-        public Span<byte> DerivePublicKey(Span<byte> privateKey, KeyType keyType);
-
-        /// <summary>
         /// Generates a specified number of random bytes.
         /// </summary>
         /// <param name="count">The number of random bytes to generate.</param>
         /// <returns>An array of random bytes.</returns>
         public byte[] GenerateRandomBytes(uint count);
+
+        /// <summary>
+        /// Generates a random nonce of x size
+        /// </summary>
+        /// <param name="size">The length of the nonce</param>
+        /// <returns></returns>
+        public byte[] GenerateNonce(uint size = Constants.NONCE_SIZE);
 
         /// <summary>
         /// Signs data using a private key.
@@ -84,7 +83,30 @@ namespace LibEmiddle.Abstractions
         /// <param name="info">Optional context info.</param>
         /// <param name="length">Optional desired output length. (default: 32)</param>
         /// <returns>The derived key.</returns>
+        [Obsolete("Please use DeriveMessageKey instead.")]
         public byte[] DeriveKey(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length = 32);
+
+        /// <summary>
+        /// Derives a message key from a chain key following Signal Protocol specification.
+        /// </summary>
+        /// <param name="chainKey">The chain key to derive from (32 bytes)</param>
+        /// <returns>A 32-byte message key for encryption</returns>
+        public byte[] DeriveMessageKey(ReadOnlySpan<byte> chainKey);
+
+        /// <summary>
+        /// Derives initial session keys from X3DH shared secret following Signal Protocol v3 specification.
+        /// Both root key and chain key are derived from a single root seed.
+        /// </summary>
+        /// <param name="sharedSecret">The 32-byte shared secret from X3DH key agreement</param>
+        /// <returns>A tuple containing (rootKey, initialChainKey) both 32 bytes each</returns>
+        public (byte[] RootKey, byte[] InitialChainKey) DeriveInitialSessionKeys(ReadOnlySpan<byte> sharedSecret);
+
+        /// <summary>
+        /// Advances a chain key to the next iteration following Signal Protocol specification.
+        /// </summary>
+        /// <param name="chainKey">The current chain key (32 bytes)</param>
+        /// <returns>The next chain key in the sequence (32 bytes)</returns>
+        public byte[] AdvanceChainKey(ReadOnlySpan<byte> chainKey);
 
         /// <summary>
         /// Derives a key from a password.
@@ -115,13 +137,6 @@ namespace LibEmiddle.Abstractions
         public bool ValidateEd25519PublicKey(byte[] publicKey);
 
         /// <summary>
-        /// Generates a random nonce of x size
-        /// </summary>
-        /// <param name="size">The length of the nonce</param>
-        /// <returns></returns>
-        public byte[] GenerateNonce(uint size = Constants.NONCE_SIZE);
-
-        /// <summary>
         /// Validates that an X25519 public key is properly formatted.
         /// </summary>
         /// <param name="publicKey">The public key to validate.</param>
@@ -144,6 +159,7 @@ namespace LibEmiddle.Abstractions
         /// <param name="info">Optional context info.</param>
         /// <param name="length">Optional desired output length. (default: 32)</param>
         /// <returns>The derived key.</returns>
+        [Obsolete("Please use DeriveMessageKey instead.")]
         public Task<byte[]> DeriveKeyAsync(byte[] inputKeyMaterial, byte[]? salt, byte[]? info, int length = 32);
 
         /// <summary>

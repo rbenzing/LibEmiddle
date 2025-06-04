@@ -12,11 +12,12 @@ namespace LibEmiddle.Messaging.Group
     /// </summary>
     public class GroupChatManager : IDisposable
     {
-        private readonly IGroupKeyManager _keyManager;
-        private readonly IGroupMemberManager _memberManager;
-        private readonly IGroupMessageCrypto _messageCrypto;
+        private readonly GroupKeyManager _keyManager;
+        private readonly GroupMemberManager _memberManager;
+        private readonly GroupMessageCrypto _messageCrypto;
         private readonly SenderKeyDistribution _distributionManager;
-        private readonly KeyPair _identityKeyPair;
+
+        private KeyPair _identityKeyPair;
         private bool _disposed;
 
         // Active sessions
@@ -25,17 +26,16 @@ namespace LibEmiddle.Messaging.Group
         /// <summary>
         /// Initializes a new instance of the GroupChatManager class.
         /// </summary>
-        /// <param name="cryptoProvider">The cryptographic provider implementation.</param>
         /// <param name="identityKeyPair">The user's identity key pair.</param>
-        public GroupChatManager(ICryptoProvider cryptoProvider, KeyPair identityKeyPair)
+        public GroupChatManager(KeyPair identityKeyPair)
         {
             _identityKeyPair = identityKeyPair;
 
             // Create dependent components
-            _keyManager = new GroupKeyManager(cryptoProvider);
+            _keyManager = new GroupKeyManager();
             _memberManager = new GroupMemberManager();
-            _messageCrypto = new GroupMessageCrypto(cryptoProvider);
-            _distributionManager = new SenderKeyDistribution(cryptoProvider, _keyManager);
+            _messageCrypto = new GroupMessageCrypto();
+            _distributionManager = new SenderKeyDistribution(_keyManager);
         }
 
         /// <summary>

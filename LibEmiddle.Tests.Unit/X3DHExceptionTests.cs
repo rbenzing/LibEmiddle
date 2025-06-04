@@ -238,8 +238,8 @@ namespace LibEmiddle.Tests.Unit
             var sessionId = "session-" + Guid.NewGuid().ToString();
 
             // Initialize Double Ratchet protocol
-            var doubleRatchetProtocol = new DoubleRatchetProtocol(_cryptoProvider);
-            var initialSession = await doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            var doubleRatchetProtocol = new DoubleRatchetProtocol();
+            var initialSession = doubleRatchetProtocol.InitializeSessionAsSenderAsync(
                 x3dhResult.SharedKey,
                 bobBundle.SignedPreKey,
                 sessionId
@@ -254,7 +254,7 @@ namespace LibEmiddle.Tests.Unit
             for (int i = 0; i < 5; i++)
             {
                 var message = $"Test message {i}";
-                var (updatedSession, encryptedMessage) = await doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, encryptedMessage) = doubleRatchetProtocol.EncryptAsync(
                     currentSession,
                     message,
                     KeyRotationStrategy.Standard
@@ -288,7 +288,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 try
                 {
-                    var (_, decryptedMessage) = await doubleRatchetProtocol.DecryptAsync(
+                    var (_, decryptedMessage) = doubleRatchetProtocol.DecryptAsync(
                         compromisedSession,
                         encryptedMessages[i]
                     );

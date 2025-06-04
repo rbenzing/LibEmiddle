@@ -68,10 +68,7 @@ namespace LibEmiddle.Messaging.Group
             _memberManager = memberManager ?? throw new ArgumentNullException(nameof(memberManager));
             _messageCrypto = messageCrypto ?? throw new ArgumentNullException(nameof(messageCrypto));
             _distributionManager = distributionManager ?? throw new ArgumentNullException(nameof(distributionManager));
-
-            _securityValidator = new GroupSecurityValidator(
-                new CryptoProvider(), // Use a new instance to avoid dependencies
-                memberManager);
+            _securityValidator = new GroupSecurityValidator(memberManager);
 
             SessionId = $"group-{groupId}-{Guid.NewGuid()}";
             CreatedAt = DateTime.UtcNow;

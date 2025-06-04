@@ -43,7 +43,7 @@ public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
     /// between devices using X25519 ECDH and HKDF key derivation.
     /// </para>
     /// </summary>
-    /// <param name="existingSharedKey">Existing device's shared key used as salt</param>
+    /// <param name="existingSharedKey">Existing device's shared private key (X25519 format)</param>
     /// <param name="newDevicePublicKey">New device's public key (X25519 format)</param>
     /// <returns>Derived shared key for secure communication</returns>
     /// <exception cref="ArgumentNullException">Thrown if inputs are null</exception>
@@ -61,7 +61,6 @@ public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
                 nameof(newDevicePublicKey));
         }
 
-        // Validate the X25519 public key
         if (!_cryptoProvider.ValidateX25519PublicKey(newDevicePublicKey))
         {
             throw new ArgumentException("Invalid X25519 public key", nameof(newDevicePublicKey));
@@ -69,12 +68,12 @@ public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
 
         try
         {
-            // Use HKDF to derive the key following Signal Protocol specification
-            return _cryptoProvider.DeriveKey(
+            // Use Signal-compliant HKDF (simplified from before)
+            return Sodium.HkdfDerive(
                 newDevicePublicKey,
-                existingSharedKey,  // Use existing key as salt
-                Encoding.UTF8.GetBytes("LibEmiddle-DeviceLinking-v1")
-            );
+                existingSharedKey,
+                "LibEmiddle-DeviceLinking-v3"u8.ToArray(),
+                32);
         }
         catch (Exception ex) when (ex is not ArgumentException)
         {

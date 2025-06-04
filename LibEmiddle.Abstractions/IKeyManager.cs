@@ -10,16 +10,6 @@ namespace LibEmiddle.Abstractions
     public interface IKeyManager
     {
         /// <summary>
-        /// Derives a key from input key material.
-        /// </summary>
-        /// <param name="inputKey">The input key material.</param>
-        /// <param name="salt">Optional salt for key derivation.</param>
-        /// <param name="info">Optional context info for key derivation.</param>
-        /// <param name="length">Desired output key length in bytes.</param>
-        /// <returns>The derived key.</returns>
-        Task<byte[]> DeriveKeyAsync(byte[] inputKey, byte[]? salt = null, byte[]? info = null, int length = 32);
-
-        /// <summary>
         /// Stores a key securely.
         /// </summary>
         /// <param name="keyId">The identifier for the key.</param>
