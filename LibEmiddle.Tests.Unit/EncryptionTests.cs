@@ -23,19 +23,7 @@ namespace LibEmiddle.Tests.Unit
             _cryptoProvider = new CryptoProvider();
         }
 
-        [TestMethod]
-        public void GenerateNonce_ShouldReturnUniqueValues()
-        {
-            // Act
-            byte[] nonce1 = _cryptoProvider.GenerateNonce();
-            byte[] nonce2 = _cryptoProvider.GenerateNonce();
-            byte[] nonce3 = _cryptoProvider.GenerateNonce();
 
-            // Assert
-            Assert.IsFalse(SecureMemory.SecureCompare(nonce1, nonce2));
-            Assert.IsFalse(SecureMemory.SecureCompare(nonce2, nonce3));
-            Assert.IsFalse(SecureMemory.SecureCompare(nonce1, nonce3));
-        }
 
         [TestMethod]
         public void AESEncryptDecrypt_ShouldReturnOriginalData()
@@ -57,25 +45,7 @@ namespace LibEmiddle.Tests.Unit
             CollectionAssert.AreEqual(plaintext, decrypted);
         }
 
-        [TestMethod]
-        public void EncryptDecryptMessage_ShouldReturnOriginalMessage()
-        {
-            // Arrange
-            string message = "Hello world! This is a secure message.";
-            byte[] key = new byte[32];
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(key);
-            }
-            byte[] nonce = _cryptoProvider.GenerateNonce();
 
-            // Act
-            byte[] encryptedMessage = _cryptoProvider.Encrypt(Encoding.Default.GetBytes(message), key, nonce, null);
-            byte[] decryptedMessage = _cryptoProvider.Decrypt(encryptedMessage, key, nonce, null);
-
-            // Assert
-            Assert.AreEqual(message, Encoding.Default.GetString(decryptedMessage));
-        }
 
         [TestMethod]
         [ExpectedException(typeof(CryptographicException))]

@@ -371,7 +371,8 @@ public class DeviceManager : IDeviceManager, IDisposable
                 return false;
             }
 
-            // Mark the device as revoked
+            // The revocation message contains the device key in normalized X25519 format
+            // We need to use this exact key to find the device in our dictionary
             string deviceId = Convert.ToBase64String(revocationMessage.RevokedDevicePublicKey);
 
             // Remove the device from linked devices if present
@@ -385,6 +386,15 @@ public class DeviceManager : IDeviceManager, IDisposable
                 {
                     SecureMemory.SecureClear(deviceInfo.PublicKey);
                 }
+            }
+            else
+            {
+                // Device not found in linked devices - this could happen if:
+                // 1. Device was already removed
+                // 2. Device was never linked to this manager
+                // 3. There's a key normalization mismatch
+                LoggingManager.LogDebug(nameof(DeviceManager),
+                    $"Device {deviceId} not found in linked devices during revocation processing");
             }
 
             // Store the revocation message to prevent replay attacks
@@ -817,12 +827,41 @@ public class DeviceManager : IDeviceManager, IDisposable
             syncMessage.Data = syncData;
 
             // Validate the sync message using the validator
-            if (syncMessage.SenderPublicKey != null &&
-                !_syncMessageValidator.ValidateSyncMessage(syncMessage, syncMessage.SenderPublicKey))
+            // We need to validate against the original Ed25519 key, not the normalized X25519 key
+            // The sync message contains the Ed25519 sender key, so we need to convert the X25519 device key back
+            // or find the original Ed25519 key that corresponds to this X25519 key
+            if (syncMessage.SenderPublicKey != null)
             {
-                LoggingManager.LogWarning(nameof(DeviceManager),
-                    "Sync message validation failed");
-                return null;
+                // Check if the sender's Ed25519 key normalizes to the same X25519 key as the device key
+                byte[]? normalizedSenderKey = NormalizeDeviceKey(syncMessage.SenderPublicKey);
+                bool isValidSender = false;
+
+                if (normalizedSenderKey != null)
+                {
+                    try
+                    {
+                        isValidSender = SecureMemory.SecureCompare(normalizedSenderKey, deviceKey);
+                    }
+                    finally
+                    {
+                        SecureMemory.SecureClear(normalizedSenderKey);
+                    }
+                }
+
+                if (!isValidSender)
+                {
+                    LoggingManager.LogWarning(nameof(DeviceManager),
+                        "Sync message sender does not match expected device");
+                    return null;
+                }
+
+                // Now validate the message signature using the sender's Ed25519 key
+                if (!_syncMessageValidator.ValidateSyncMessage(syncMessage, syncMessage.SenderPublicKey))
+                {
+                    LoggingManager.LogWarning(nameof(DeviceManager),
+                        "Sync message validation failed");
+                    return null;
+                }
             }
 
             return syncData;
@@ -872,6 +911,7 @@ public class DeviceManager : IDeviceManager, IDisposable
 
     /// <summary>
     /// Normalizes a device key to X25519 format for consistent storage and lookup.
+    /// Uses the exact same logic as DeviceLinkingService.NormalizeToX25519PublicKey to ensure consistency.
     /// </summary>
     /// <param name="deviceKey">The device key to normalize</param>
     /// <returns>The normalized X25519 key, or null if invalid</returns>
@@ -879,20 +919,27 @@ public class DeviceManager : IDeviceManager, IDisposable
     {
         try
         {
-            // Handle X25519 format (common case)
-            if (deviceKey.Length == Constants.X25519_KEY_SIZE)
+            // Both Ed25519 and X25519 public keys are 32 bytes, so we need to try validation
+            // to determine which type it is. Try Ed25519 first since that's more common in our use case.
+            if (deviceKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE) // Same as X25519_KEY_SIZE (32 bytes)
             {
-                // Validate X25519 public key
-                if (!_cryptoProvider.ValidateX25519PublicKey(deviceKey))
+                // Try Ed25519 validation first
+                if (_cryptoProvider.ValidateEd25519PublicKey(deviceKey))
                 {
+                    // It's an Ed25519 key, convert to X25519
+                    return _cryptoProvider.ConvertEd25519PublicKeyToX25519(deviceKey);
+                }
+                // If Ed25519 validation failed, try X25519 validation
+                else if (_cryptoProvider.ValidateX25519PublicKey(deviceKey))
+                {
+                    // It's already an X25519 key, return a copy
+                    return (byte[])deviceKey.Clone();
+                }
+                else
+                {
+                    // Neither Ed25519 nor X25519 validation passed
                     return null;
                 }
-                return (byte[])deviceKey.Clone();
-            }
-            // Handle Ed25519 format
-            else if (deviceKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
-            {
-                return _cryptoProvider.ConvertEd25519PublicKeyToX25519(deviceKey);
             }
             else
             {

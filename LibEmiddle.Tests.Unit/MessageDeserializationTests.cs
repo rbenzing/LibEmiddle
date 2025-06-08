@@ -33,7 +33,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(message);
             CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, message.Ciphertext);
             CollectionAssert.AreEqual(new byte[] { 5, 6, 7, 8 }, message.Nonce);
-            Assert.AreEqual(42, message.SenderMessageNumber);
+            Assert.AreEqual(42u, message.SenderMessageNumber);
             CollectionAssert.AreEqual(new byte[] { 9, 10, 11, 12 }, message.SenderDHKey);
             Assert.AreEqual(1634567890123L, message.Timestamp);
             Assert.AreEqual(guid, message.MessageId);
@@ -142,7 +142,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(message);
             CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, message.Ciphertext);
             CollectionAssert.AreEqual(new byte[] { 5, 6, 7, 8 }, message.Nonce);
-            Assert.AreEqual(42, message.SenderMessageNumber);
+            Assert.AreEqual(42u, message.SenderMessageNumber);
             CollectionAssert.AreEqual(new byte[] { 9, 10, 11, 12 }, message.SenderDHKey);
             Assert.AreEqual(1634567890123L, message.Timestamp);
             Assert.AreEqual(guid, message.MessageId);
@@ -190,7 +190,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(dict);
             Assert.AreEqual(Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }), dict["Ciphertext"]);
             Assert.AreEqual(Convert.ToBase64String(new byte[] { 5, 6, 7, 8 }), dict["Nonce"]);
-            Assert.AreEqual(42, dict["SenderMessageNumber"]);
+            Assert.AreEqual(42u, dict["SenderMessageNumber"]);
             Assert.AreEqual(Convert.ToBase64String(new byte[] { 9, 10, 11, 12 }), dict["SenderDHKey"]);
             Assert.AreEqual(1634567890123L, dict["Timestamp"]);
             Assert.AreEqual(guid, dict["MessageId"]);
@@ -224,7 +224,8 @@ namespace LibEmiddle.Tests.Unit
                 Nonce = new byte[] { 5, 6, 7, 8 },
                 SenderMessageNumber = 42,
                 SenderDHKey = new byte[] { 9, 10, 11, 12 },
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                SessionId = "test-session-123"
             };
 
             // Act
@@ -288,21 +289,23 @@ namespace LibEmiddle.Tests.Unit
                 MessageId = Guid.NewGuid().ToString()
             };
 
-            byte[] newCiphertext = new byte[] { 13, 14, 15, 16 };
-            byte[] newNonce = new byte[] { 17, 18, 19, 20 };
-
             // Act
-            var newMessage = originalMessage.Clone();
+            var clonedMessage = originalMessage.Clone();
 
             // Assert
-            Assert.IsNotNull(newMessage);
-            Assert.AreNotSame(originalMessage, newMessage, "Should create a new instance");
-            CollectionAssert.AreEqual(newCiphertext, newMessage.Ciphertext);
-            CollectionAssert.AreEqual(newNonce, newMessage.Nonce);
-            Assert.AreEqual(originalMessage.SenderMessageNumber, newMessage.SenderMessageNumber);
-            CollectionAssert.AreEqual(originalMessage.SenderDHKey, newMessage.SenderDHKey);
-            Assert.AreEqual(originalMessage.MessageId, newMessage.MessageId);
-            Assert.IsTrue(newMessage.Timestamp >= originalMessage.Timestamp, "New timestamp should be later");
+            Assert.IsNotNull(clonedMessage);
+            Assert.AreNotSame(originalMessage, clonedMessage, "Should create a new instance");
+            CollectionAssert.AreEqual(originalMessage.Ciphertext, clonedMessage.Ciphertext);
+            CollectionAssert.AreEqual(originalMessage.Nonce, clonedMessage.Nonce);
+            Assert.AreEqual(originalMessage.SenderMessageNumber, clonedMessage.SenderMessageNumber);
+            CollectionAssert.AreEqual(originalMessage.SenderDHKey, clonedMessage.SenderDHKey);
+            Assert.AreEqual(originalMessage.MessageId, clonedMessage.MessageId);
+            Assert.AreEqual(originalMessage.Timestamp, clonedMessage.Timestamp);
+
+            // Verify that arrays are deep copied (different instances)
+            Assert.AreNotSame(originalMessage.Ciphertext, clonedMessage.Ciphertext, "Ciphertext should be deep copied");
+            Assert.AreNotSame(originalMessage.Nonce, clonedMessage.Nonce, "Nonce should be deep copied");
+            Assert.AreNotSame(originalMessage.SenderDHKey, clonedMessage.SenderDHKey, "SenderDHKey should be deep copied");
         }
     }
 }

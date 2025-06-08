@@ -31,7 +31,7 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
     private byte[] _currentChainKey = Array.Empty<byte>();
     private uint _currentIteration;
     private long _lastRotationTimestamp;
-    private readonly ConcurrentDictionary<string, byte[]> _senderKeys = new(); // senderId -> chainKey
+    private readonly ConcurrentDictionary<string, GroupSenderState> _senderKeys = new(); // senderId -> GroupSenderState
 
     // Message tracking for replay protection
     private readonly ConcurrentDictionary<string, long> _lastSeenSequence = new();
@@ -178,9 +178,9 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
 
             // Clear sensitive data
             SecureMemory.SecureClear(_currentChainKey);
-            foreach (var key in _senderKeys.Values)
+            foreach (var senderState in _senderKeys.Values)
             {
-                SecureMemory.SecureClear(key);
+                SecureMemory.SecureClear(senderState.ChainKey);
             }
             _senderKeys.Clear();
 
@@ -392,15 +392,32 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
             if (WasRemovedBeforeTimestamp(_identityKeyPair.PublicKey, encryptedMessage.Timestamp))
                 return null;
 
-            // Get sender chain key
+            // Get sender key state
             string senderId = GetMemberId(encryptedMessage.SenderIdentityKey);
-            if (!_senderKeys.TryGetValue(senderId, out byte[]? senderChainKey))
+            if (!_senderKeys.TryGetValue(senderId, out GroupSenderState? senderKeyState))
                 return null;
+
+            // Extract iteration number from message ID to advance chain key to correct state
+            long? messageIteration = ExtractSequenceFromMessageId(encryptedMessage.MessageId);
+            byte[] currentChainKey = senderKeyState.ChainKey.ToArray();
 
             try
             {
-                // Derive message key from sender's chain key (same process as encryption)
-                byte[] messageKey = Sodium.DeriveMessageKey(senderChainKey);
+                // If we have an iteration number, advance the chain key from the distribution iteration to the message iteration
+                if (messageIteration.HasValue)
+                {
+                    // Calculate how many steps to advance from the distribution iteration to the message iteration
+                    long stepsToAdvance = messageIteration.Value - senderKeyState.Iteration;
+                    for (long i = 0; i < stepsToAdvance; i++)
+                    {
+                        byte[] nextChainKey = Sodium.AdvanceChainKey(currentChainKey);
+                        SecureMemory.SecureClear(currentChainKey);
+                        currentChainKey = nextChainKey;
+                    }
+                }
+
+                // Derive message key from the correctly advanced chain key
+                byte[] messageKey = Sodium.DeriveMessageKey(currentChainKey);
 
                 try
                 {
@@ -422,6 +439,14 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
             catch
             {
                 return null;
+            }
+            finally
+            {
+                // Clean up the advanced chain key
+                if (currentChainKey != senderKeyState.ChainKey)
+                {
+                    SecureMemory.SecureClear(currentChainKey);
+                }
             }
         }
         finally
@@ -477,9 +502,9 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
             _lastRotationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             // Clear old sender keys
-            foreach (var key in _senderKeys.Values)
+            foreach (var senderState in _senderKeys.Values)
             {
-                SecureMemory.SecureClear(key);
+                SecureMemory.SecureClear(senderState.ChainKey);
             }
             _senderKeys.Clear();
 
@@ -543,13 +568,18 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
         if (!_members.ContainsKey(senderId))
             return false;
 
-        // Store the sender key
+        // Store the sender key state
         if (distribution.ChainKey == null || distribution.ChainKey.Length != Constants.CHAIN_KEY_SIZE)
         {
             LoggingManager.LogError(nameof(GroupSession), $"Invalid chain key length for sender {senderId}: expected {Constants.CHAIN_KEY_SIZE}, got {distribution.ChainKey?.Length ?? 0}");
             return false;
         }
-        _senderKeys[senderId] = distribution.ChainKey.ToArray();
+        _senderKeys[senderId] = new GroupSenderState
+        {
+            ChainKey = distribution.ChainKey.ToArray(),
+            Iteration = distribution.Iteration,
+            CreationTimestamp = distribution.Timestamp
+        };
 
         // Record join time if not already recorded
         RecordJoinTime(distribution.SenderIdentityKey);
@@ -699,7 +729,7 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
                 },
                 ReceiverStates = _senderKeys.ToDictionary(
                     kvp => kvp.Key,
-                    kvp => Convert.ToBase64String(kvp.Value))
+                    kvp => Convert.ToBase64String(kvp.Value.ChainKey))
             };
 
             var sessionState = new GroupSessionState
@@ -743,7 +773,12 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
                 // Restore receiver states
                 foreach (var kvp in sessionState.KeyState.ReceiverStates)
                 {
-                    _senderKeys[kvp.Key] = Convert.FromBase64String(kvp.Value);
+                    _senderKeys[kvp.Key] = new GroupSenderState
+                    {
+                        ChainKey = Convert.FromBase64String(kvp.Value),
+                        Iteration = 0, // Default to 0 for backward compatibility
+                        CreationTimestamp = sessionState.KeyState.LastRotationTimestamp
+                    };
                 }
             }
 
@@ -912,9 +947,9 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
 
             // Clear sensitive data
             SecureMemory.SecureClear(_currentChainKey);
-            foreach (var key in _senderKeys.Values)
+            foreach (var senderState in _senderKeys.Values)
             {
-                SecureMemory.SecureClear(key);
+                SecureMemory.SecureClear(senderState.ChainKey);
             }
             _senderKeys.Clear();
 

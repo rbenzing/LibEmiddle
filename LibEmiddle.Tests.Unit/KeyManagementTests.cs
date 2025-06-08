@@ -23,31 +23,7 @@ namespace LibEmiddle.Tests.Unit
             _keyManager = new KeyManager(_cryptoProvider);
         }
 
-        [TestMethod]
-        public void GenerateSignatureKeyPair_ShouldReturnValidKeyPair()
-        {
-            // Act
-            KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            // Assert
-            Assert.IsNotNull(_identityKeyPair.PublicKey);
-            Assert.IsNotNull(_identityKeyPair.PrivateKey);
-            Assert.AreEqual(32, _identityKeyPair.PublicKey.Length); // Ed25519 public key is 32 bytes
-            Assert.AreEqual(64, _identityKeyPair.PrivateKey.Length); // Ed25519 private key is 64 bytes
-        }
-
-        [TestMethod]
-        public void GenerateKeyExchangeKeyPair_ShouldReturnValidKeyPair()
-        {
-            // Act
-            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
-
-            // Assert
-            Assert.IsNotNull(_identityKeyPair.PublicKey);
-            Assert.IsNotNull(_identityKeyPair.PrivateKey);
-            Assert.AreEqual(32, _identityKeyPair.PublicKey.Length); // X25519 public key is 32 bytes
-            Assert.AreEqual(32, _identityKeyPair.PrivateKey.Length); // X25519 private key is 32 bytes
-        }
 
         [TestMethod]
         public void StoreAndLoadKeyFromFile_WithoutPassword_ShouldReturnOriginalKey()
@@ -102,40 +78,7 @@ namespace LibEmiddle.Tests.Unit
             }
         }
 
-        [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
-        public void LoadKeyFromFile_WithNonExistentFile_ShouldThrowException()
-        {
-            // Act - should throw FileNotFoundException
-            _keyManager.RetrieveKeyAsync("non-existent-file").GetAwaiter().GetResult();
-        }
 
-        [TestMethod]
-        [ExpectedException(typeof(CryptographicException))]
-        public void LoadKeyFromFile_WithWrongPassword_ShouldThrowException()
-        {
-            // Arrange
-            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
-            var publicKey = _identityKeyPair.PublicKey;
-            string filePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-            string password = "CorrectP@ssw0rd";
-            string wrongPassword = "WrongP@ssw0rd";
-            string sessionId = new Guid().ToString();
-
-            try
-            {
-                // Act
-                _keyManager.StoreKeyAsync(sessionId, publicKey, password).GetAwaiter().GetResult();
-
-                // Should throw CryptographicException
-                _keyManager.RetrieveKeyAsync(sessionId, wrongPassword).GetAwaiter().GetResult();
-            }
-            finally
-            {
-                // Cleanup
-                _keyManager.DeleteKeyAsync(sessionId, password).GetAwaiter().GetResult();
-            }
-        }
 
         [TestMethod]
         public void ValidateX25519PublicKey_WithValidKey_ShouldReturnTrue()

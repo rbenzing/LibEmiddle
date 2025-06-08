@@ -11,13 +11,13 @@ namespace LibEmiddle.Abstractions
     {
         /// <summary>
         /// Adds a linked device to the device manager.
-        /// 
+        ///
         /// <para>
         /// Records a new device as being linked to this device for synchronization purposes.
-        /// The device key is normalized to ensure consistent lookup regardless of the key format.
+        /// The device key is normalized to X25519 format to ensure consistent lookup regardless of the input key format.
         /// </para>
         /// </summary>
-        /// <param name="devicePublicKey">Public key of the device to link</param>
+        /// <param name="devicePublicKey">Ed25519 or X25519 public key of the device to link (32 bytes)</param>
         /// <exception cref="ArgumentNullException">Thrown if devicePublicKey is null</exception>
         /// <exception cref="ArgumentException">Thrown if devicePublicKey has invalid format</exception>
         /// <exception cref="SecurityException">Thrown if trying to add a revoked device</exception>
@@ -80,7 +80,7 @@ namespace LibEmiddle.Abstractions
         /// <summary>
         /// Creates a revocation message for a device.
         /// </summary>
-        /// <param name="devicePublicKey">The public key of the device to revoke.</param>
+        /// <param name="devicePublicKey">The Ed25519 or X25519 public key of the device to revoke (32 bytes).</param>
         /// <param name="reason">Optional reason for the revocation.</param>
         /// <returns>A signed revocation message that can be distributed to other devices.</returns>
         /// <exception cref="ArgumentException">Thrown when deviceKeyToRevoke is null or empty.</exception>
@@ -167,7 +167,7 @@ namespace LibEmiddle.Abstractions
         /// the necessary cryptographic material to verify identity and establish a secure channel.
         /// </para>
         /// </summary>
-        /// <param name="newDevicePublicKey">The public key of the new device to link</param>
+        /// <param name="newDevicePublicKey">The Ed25519 or X25519 public key of the new device to link (32 bytes)</param>
         /// <returns>An encrypted message containing linking information</returns>
         /// <exception cref="ArgumentNullException">Thrown if newDevicePublicKey is null</exception>
         /// <exception cref="ArgumentException">Thrown if newDevicePublicKey is invalid</exception>

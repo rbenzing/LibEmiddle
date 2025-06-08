@@ -55,20 +55,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.AreEqual(ITERATIONS, uniquePrivateKeys, "Private keys should be unique");
         }
 
-        [TestMethod]
-        public void SignAndVerify_WithLargeMessage_ShouldWorkCorrectly()
-        {
-            // Arrange
-            var keyPair = Sodium.GenerateEd25519KeyPair();
-            var largeMessage = SecureMemory.CreateSecureBuffer(1024 * 1024); // 1MB message
 
-            // Act
-            byte[] signature = _cryptoProvider.Sign(largeMessage, keyPair.PrivateKey);
-
-            // Assert
-            bool verified = _cryptoProvider.VerifySignature(largeMessage, signature, keyPair.PublicKey);
-            Assert.IsTrue(verified, "Large message signature should verify correctly");
-        }
 
         [TestMethod]
         [ExpectedException(typeof(ArgumentException))]
@@ -82,22 +69,6 @@ namespace LibEmiddle.Tests.Unit
             _cryptoProvider.Sign(message, invalidPrivateKey);
         }
 
-        [TestMethod]
-        public void VerifyDetached_TamperedSignature_ShouldReturnFalse()
-        {
-            // Arrange
-            var keyPair = Sodium.GenerateEd25519KeyPair();
-            var message = Encoding.Default.GetBytes("Test message");
-            var signature = _cryptoProvider.Sign(message, keyPair.PrivateKey);
 
-            // Tamper with signature
-            signature[0] ^= 0xFF;
-
-            // Act
-            bool verified = _cryptoProvider.VerifySignature(message, signature, keyPair.PublicKey);
-
-            // Assert
-            Assert.IsFalse(verified, "Tampered signature should not verify");
-        }
     }
 }

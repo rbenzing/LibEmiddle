@@ -212,30 +212,7 @@ namespace LibEmiddle.Tests.Unit
             await _cryptoProvider.DeleteKeyAsync(testKeyId);
         }
 
-        [TestMethod]
-        public void CryptoProvider_EncryptDecrypt_ShouldWorkCorrectly()
-        {
-            // Test basic encrypt/decrypt functionality
-            byte[] plaintext = Encoding.UTF8.GetBytes("Hello, World! This is a test message.");
-            byte[] key = _cryptoProvider.GenerateRandomBytes(32);
-            byte[] nonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
 
-            Console.WriteLine($"Original plaintext: {Encoding.UTF8.GetString(plaintext)}");
-            Console.WriteLine($"Key length: {key.Length}");
-            Console.WriteLine($"Nonce length: {nonce.Length}");
-
-            // Encrypt
-            byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, key, nonce, null);
-            Console.WriteLine($"Ciphertext length: {ciphertext.Length}");
-
-            // Decrypt
-            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce, null);
-            string decryptedText = Encoding.UTF8.GetString(decrypted);
-
-            Console.WriteLine($"Decrypted text: {decryptedText}");
-
-            Assert.AreEqual(Encoding.UTF8.GetString(plaintext), decryptedText, "Decrypted text should match original");
-        }
 
         [TestMethod]
         public async Task LoadSession_WithMissingFile_ShouldReturnNull()

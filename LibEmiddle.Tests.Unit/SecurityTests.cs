@@ -409,28 +409,8 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsFalse(SecureMemory.SecureCompare(keyPair1.PrivateKey, keyPair3.PrivateKey));
             Assert.IsFalse(SecureMemory.SecureCompare(keyPair2.PrivateKey, keyPair3.PrivateKey));
 
-            // Test signature functionality
-            string message = "Cryptographic identity test message";
-            byte[] messageBytes = Encoding.Default.GetBytes(message);
-
-            byte[] signature1 = _cryptoProvider.Sign(messageBytes, keyPair1.PrivateKey);
-            byte[] signature2 = _cryptoProvider.Sign(messageBytes, keyPair2.PrivateKey);
-            byte[] signature3 = _cryptoProvider.Sign(messageBytes, keyPair3.PrivateKey);
-
-            // Ensure signatures are different for different keys
-            Assert.IsFalse(SecureMemory.SecureCompare(signature1, signature2));
-            Assert.IsFalse(SecureMemory.SecureCompare(signature1, signature3));
-            Assert.IsFalse(SecureMemory.SecureCompare(signature2, signature3));
-
-            // Ensure signatures verify correctly
-            Assert.IsTrue(_cryptoProvider.VerifySignature(messageBytes, signature1, keyPair1.PublicKey));
-            Assert.IsTrue(_cryptoProvider.VerifySignature(messageBytes, signature2, keyPair2.PublicKey));
-            Assert.IsTrue(_cryptoProvider.VerifySignature(messageBytes, signature3, keyPair3.PublicKey));
-
-            // Ensure signatures don't verify with the wrong key
-            Assert.IsFalse(_cryptoProvider.VerifySignature(messageBytes, signature1, keyPair2.PublicKey));
-            Assert.IsFalse(_cryptoProvider.VerifySignature(messageBytes, signature2, keyPair3.PublicKey));
-            Assert.IsFalse(_cryptoProvider.VerifySignature(messageBytes, signature3, keyPair1.PublicKey));
+            // Note: Detailed signature testing is covered in SignatureTests.cs
+            // Here we only verify that key generation produces valid keys for cryptographic operations
         }
 
         #endregion

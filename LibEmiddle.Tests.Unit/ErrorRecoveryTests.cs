@@ -736,8 +736,10 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning($"Main device X25519 public key: {Convert.ToBase64String(mainDeviceX25519Public)}");
             Trace.TraceWarning($"Second device X25519 public key: {Convert.ToBase64String(secondDeviceX25519Public)}");
 
-            // Link devices
+            // Link devices to each other
+            // Main device knows about second device
             mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);
+            // Second device knows about main device
             secondDeviceManager.AddLinkedDevice(mainDeviceKeyPair.PublicKey);
             Trace.TraceWarning("Linked both devices successfully");
 
@@ -753,25 +755,32 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning($"Created {syncMessages.Count} sync messages");
 
             // Get the sync message for the second device
-            // The DeviceManager uses the Base64 representation of the normalized key as the device ID
-            // Since we added the Ed25519 key, it should be normalized to X25519 and used as the key
+            // The DeviceManager normalizes Ed25519 keys to X25519 keys for storage and sync message creation
+            // So we need to use the X25519 version of the second device's key as the device ID
             string expectedDeviceId = Convert.ToBase64String(secondDeviceX25519Public);
 
             Trace.TraceWarning($"Expected device ID: {expectedDeviceId}");
             Trace.TraceWarning($"Available sync message keys: {string.Join(", ", syncMessages.Keys)}");
 
-            // The sync messages should contain the normalized key
+            // The sync messages should contain the normalized X25519 key
             if (syncMessages.Count == 0)
             {
                 Assert.Inconclusive("No sync messages were created - sync functionality may not be implemented or device linking failed");
                 return;
             }
 
-            // Use the first available key since there should only be one linked device
-            string actualDeviceId = syncMessages.Keys.First();
-            Trace.TraceWarning($"Using device ID: {actualDeviceId}");
-
-            var syncMessageForSecondDevice = syncMessages[actualDeviceId];
+            // Look for the sync message using the X25519 device ID
+            if (!syncMessages.TryGetValue(expectedDeviceId, out var syncMessageForSecondDevice))
+            {
+                // If not found by X25519 key, try the first available key as fallback
+                string actualDeviceId = syncMessages.Keys.First();
+                Trace.TraceWarning($"Expected device ID not found, using first available: {actualDeviceId}");
+                syncMessageForSecondDevice = syncMessages[actualDeviceId];
+            }
+            else
+            {
+                Trace.TraceWarning($"Found sync message for expected device ID: {expectedDeviceId}");
+            }
             Trace.TraceWarning($"Got sync message with ciphertext length: {syncMessageForSecondDevice.Ciphertext?.Length}");
 
             // Simulate main device sending a corrupted message - create a tampered copy
@@ -796,13 +805,14 @@ namespace LibEmiddle.Tests.Unit
             Trace.TraceWarning($"Created tampered message by modifying byte at index {middleIndex}");
 
             // Try to process the tampered message - should fail
+            // Use the X25519 version of the main device key as the sender hint for proper device matching
             Trace.TraceWarning("Attempting to process tampered message...");
-            byte[] result1 = secondDeviceManager.ProcessSyncMessage(tamperedMessage, mainDeviceKeyPair.PublicKey);
+            byte[] result1 = secondDeviceManager.ProcessSyncMessage(tamperedMessage, mainDeviceX25519Public);
             Trace.TraceWarning($"Tampered message processing result: {(result1 == null ? "null" : "success")}");
 
             // Main device notices failure (no acknowledgment) and resends the correct message
             Trace.TraceWarning("Attempting to process valid message...");
-            byte[] result2 = secondDeviceManager.ProcessSyncMessage(syncMessageForSecondDevice, mainDeviceKeyPair.PublicKey);
+            byte[] result2 = secondDeviceManager.ProcessSyncMessage(syncMessageForSecondDevice, mainDeviceX25519Public);
             Trace.TraceWarning($"Valid message processing result: {(result2 == null ? "null" : "success")}");
 
             // Assert

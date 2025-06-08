@@ -31,19 +31,19 @@ namespace LibEmiddle.Abstractions
         public byte[] GenerateNonce(uint size = Constants.NONCE_SIZE);
 
         /// <summary>
-        /// Signs data using a private key.
+        /// Signs data using an Ed25519 private key.
         /// </summary>
         /// <param name="data">The data to sign.</param>
-        /// <param name="privateKey">The private key to sign with.</param>
-        /// <returns>The signature.</returns>
+        /// <param name="privateKey">The Ed25519 private key to sign with (64 bytes).</param>
+        /// <returns>The Ed25519 signature (64 bytes).</returns>
         public byte[] Sign(byte[] data, byte[] privateKey);
 
         /// <summary>
-        /// Verifies a signature against data using a public key.
+        /// Verifies an Ed25519 signature against data using a public key.
         /// </summary>
         /// <param name="message">The data that was signed.</param>
-        /// <param name="signature">The signature to verify.</param>
-        /// <param name="publicKey">The public key to verify with.</param>
+        /// <param name="signature">The Ed25519 signature to verify (64 bytes).</param>
+        /// <param name="publicKey">The Ed25519 public key to verify with (32 bytes).</param>
         /// <returns>True if the signature is valid, false otherwise.</returns>
         public bool VerifySignature(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey);
 
@@ -68,11 +68,11 @@ namespace LibEmiddle.Abstractions
         public byte[] Decrypt(byte[] ciphertext, byte[] key, byte[]? nonce, byte[]? associatedData);
 
         /// <summary>
-        /// Performs scalar multiplication (X25519).
+        /// Performs X25519 scalar multiplication to compute a shared secret.
         /// </summary>
-        /// <param name="privateKey">The private key.</param>
-        /// <param name="publicKey">The public key.</param>
-        /// <returns>The shared secret.</returns>
+        /// <param name="privateKey">The X25519 private key (32 bytes).</param>
+        /// <param name="publicKey">The X25519 public key (32 bytes).</param>
+        /// <returns>The 32-byte shared secret.</returns>
         public byte[] ScalarMult(byte[] privateKey, byte[] publicKey);
 
         /// <summary>
@@ -118,28 +118,28 @@ namespace LibEmiddle.Abstractions
         /// <summary>
         /// Converts an Ed25519 public key to an X25519 public key.
         /// </summary>
-        /// <param name="ed25519PublicKey">The Ed25519 public key.</param>
-        /// <returns>The X25519 public key.</returns>
+        /// <param name="ed25519PublicKey">The Ed25519 public key (32 bytes).</param>
+        /// <returns>The corresponding X25519 public key (32 bytes).</returns>
         public byte[] ConvertEd25519PublicKeyToX25519(byte[] ed25519PublicKey);
 
         /// <summary>
         /// Converts an Ed25519 private key to an X25519 private key.
         /// </summary>
-        /// <param name="ed25519PrivateKey">The Ed25519 private key.</param>
-        /// <returns>The X25519 private key.</returns>
+        /// <param name="ed25519PrivateKey">The Ed25519 private key (64 bytes).</param>
+        /// <returns>The corresponding X25519 private key (32 bytes).</returns>
         public byte[] ConvertEd25519PrivateKeyToX25519(byte[] ed25519PrivateKey);
 
         /// <summary>
         /// Validates that an Ed25519 public key is properly formatted.
         /// </summary>
-        /// <param name="publicKey">The public key to validate.</param>
+        /// <param name="publicKey">The Ed25519 public key to validate (must be 32 bytes).</param>
         /// <returns>True if the key is valid, false otherwise.</returns>
         public bool ValidateEd25519PublicKey(byte[] publicKey);
 
         /// <summary>
         /// Validates that an X25519 public key is properly formatted.
         /// </summary>
-        /// <param name="publicKey">The public key to validate.</param>
+        /// <param name="publicKey">The X25519 public key to validate (must be 32 bytes).</param>
         /// <returns>True if the key is valid, false otherwise.</returns>
         public bool ValidateX25519PublicKey(byte[] publicKey);
 
@@ -225,11 +225,11 @@ namespace LibEmiddle.Abstractions
         public Task<string?> RetrieveAsync(string keyId);
 
         /// <summary>
-        /// Async signs data using a private key.
+        /// Asynchronously signs data using an Ed25519 private key.
         /// </summary>
-        /// <param name="data"></param>
-        /// <param name="privateKey"></param>
-        /// <returns></returns>
+        /// <param name="data">The data to sign.</param>
+        /// <param name="privateKey">The Ed25519 private key to sign with (64 bytes).</param>
+        /// <returns>The Ed25519 signature (64 bytes).</returns>
         public Task<byte[]> SignAsync(byte[] data, byte[] privateKey);
     }
 }

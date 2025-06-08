@@ -342,6 +342,10 @@ namespace LibEmiddle.Tests.Unit
             bool linkResult = secondDeviceManager.ProcessDeviceLinkMessage(managerLinkMessage, mainDeviceKeyPair.PublicKey);
             Assert.IsTrue(linkResult, "Device linking should succeed");
 
+            // Add the second device to the main device manager's linked devices list
+            // This is necessary because ProcessDeviceLinkMessage only adds the main device to the second device's list
+            mainDeviceManager.AddLinkedDevice(secondDeviceKeyPair.PublicKey);
+
             // Create test data
             byte[] testMessage = Encoding.UTF8.GetBytes("Sensitive data to be synced");
 

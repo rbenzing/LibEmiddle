@@ -526,29 +526,32 @@ public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
     /// <exception cref="ArgumentException">Thrown if the key is invalid or has wrong length</exception>
     private byte[] NormalizeToX25519PublicKey(byte[] publicKey)
     {
-        if (publicKey.Length == Constants.X25519_KEY_SIZE)
+        // Both Ed25519 and X25519 public keys are 32 bytes, so we need to try validation
+        // to determine which type it is. Try Ed25519 first since that's more common in our use case.
+        if (publicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE) // Same as X25519_KEY_SIZE (32 bytes)
         {
-            // Already X25519 format, validate and return copy
-            if (!_cryptoProvider.ValidateX25519PublicKey(publicKey))
+            // Try Ed25519 validation first
+            if (_cryptoProvider.ValidateEd25519PublicKey(publicKey))
             {
-                throw new ArgumentException("Invalid X25519 public key", nameof(publicKey));
+                // It's an Ed25519 key, convert to X25519
+                return _cryptoProvider.ConvertEd25519PublicKeyToX25519(publicKey);
             }
-            return publicKey.ToArray();
-        }
-        else if (publicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE)
-        {
-            // Ed25519 format, validate and convert to X25519
-            if (!_cryptoProvider.ValidateEd25519PublicKey(publicKey))
+            // If Ed25519 validation failed, try X25519 validation
+            else if (_cryptoProvider.ValidateX25519PublicKey(publicKey))
             {
-                throw new ArgumentException("Invalid Ed25519 public key", nameof(publicKey));
+                // It's already an X25519 key, return a copy
+                return publicKey.ToArray();
             }
-            return _cryptoProvider.ConvertEd25519PublicKeyToX25519(publicKey);
+            else
+            {
+                throw new ArgumentException("Invalid public key - neither Ed25519 nor X25519 validation passed", nameof(publicKey));
+            }
         }
         else
         {
             throw new ArgumentException(
                 $"Invalid public key length: {publicKey.Length}. " +
-                $"Expected {Constants.ED25519_PUBLIC_KEY_SIZE} or {Constants.X25519_KEY_SIZE} bytes",
+                $"Expected {Constants.ED25519_PUBLIC_KEY_SIZE} bytes (32 bytes)",
                 nameof(publicKey));
         }
     }

@@ -131,7 +131,7 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(session);
             Assert.IsNotNull(session.SharedKey);
             Assert.IsNotNull(session.MessageDataToSend);
-            Assert.IsFalse(session.MessageDataToSend.RecipientOneTimePreKeyId == null, "Should not have used a one-time pre-key");
+            Assert.IsNull(session.MessageDataToSend.RecipientOneTimePreKeyId, "Should not have used a one-time pre-key");
         }
 
         [TestMethod]
@@ -174,11 +174,13 @@ namespace LibEmiddle.Tests.Unit
                 IdentityKey = bobBundle.IdentityKey,
                 SignedPreKey = bobBundle.SignedPreKey,
                 SignedPreKeySignature = tamperedSignature,
-                OneTimePreKeys = bobBundle.OneTimePreKeys
+                OneTimePreKeys = bobBundle.OneTimePreKeys,
+                SignedPreKeyId = bobBundle.SignedPreKeyId,
+                OneTimePreKeyIds = bobBundle.OneTimePreKeyIds
             };
 
             // Act & Assert - Should throw ArgumentException
-            var sessionResult = _x3DHProtocol.InitiateSessionAsSenderAsync(bobPublicBundle, _aliceIdentityKeyPair);
+            var sessionResult = _x3DHProtocol.InitiateSessionAsSenderAsync(bobPublicBundle, _aliceIdentityKeyPair).GetAwaiter().GetResult();
         }
 
         [TestMethod]

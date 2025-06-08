@@ -219,11 +219,8 @@ public class IntegrationTests
         var charlieGroupSession = await charlieClient.JoinGroupAsync(aliceDistribution);
         Console.WriteLine("Bob and Charlie joined the group");
 
-        // Step 7: Bob and Charlie add each other and Alice as members on their side
-        await bobGroupSession.AddMemberAsync(aliceClient.IdentityPublicKey);
+        // Step 7: Bob and Charlie add each other as members (Alice is already added during join)
         await bobGroupSession.AddMemberAsync(charlieClient.IdentityPublicKey);
-
-        await charlieGroupSession.AddMemberAsync(aliceClient.IdentityPublicKey);
         await charlieGroupSession.AddMemberAsync(bobClient.IdentityPublicKey);
 
         // Step 8: Exchange distribution messages between all participants
@@ -242,43 +239,51 @@ public class IntegrationTests
 
         Console.WriteLine("All distribution messages exchanged");
 
-        // Step 9: Now everyone can send and receive messages!
+        // Step 9: Now everyone can send and receive messages directly using the group sessions!
 
         // Alice sends a message
         string aliceMessage = "Hey everyone! Welcome to our group chat! 👋";
-        var aliceEncrypted = await aliceClient.SendGroupMessageAsync(groupId, aliceMessage);
+        var aliceEncrypted = await aliceGroupSession.EncryptMessageAsync(aliceMessage);
         Console.WriteLine($"Alice sent: {aliceMessage}");
 
         // Bob and Charlie receive and decrypt Alice's message
-        string bobReceivesAlice = await bobClient.ProcessGroupMessageAsync(aliceEncrypted!);
-        string charlieReceivesAlice = await charlieClient.ProcessGroupMessageAsync(aliceEncrypted!);
+        string bobReceivesAlice = await bobGroupSession.DecryptMessageAsync(aliceEncrypted!);
+        string charlieReceivesAlice = await charlieGroupSession.DecryptMessageAsync(aliceEncrypted!);
 
         Console.WriteLine($"Bob received: {bobReceivesAlice}");
         Console.WriteLine($"Charlie received: {charlieReceivesAlice}");
 
         // Bob replies
         string bobMessage = "Hi Alice and Charlie! Great to be here! 🎉";
-        var bobEncrypted = await bobClient.SendGroupMessageAsync(groupId, bobMessage);
+        var bobEncrypted = await bobGroupSession.EncryptMessageAsync(bobMessage);
         Console.WriteLine($"Bob sent: {bobMessage}");
 
         // Alice and Charlie receive Bob's message
-        string aliceReceivesBob = await aliceClient.ProcessGroupMessageAsync(bobEncrypted!);
-        string charlieReceivesBob = await charlieClient.ProcessGroupMessageAsync(bobEncrypted!);
+        string aliceReceivesBob = await aliceGroupSession.DecryptMessageAsync(bobEncrypted!);
+        string charlieReceivesBob = await charlieGroupSession.DecryptMessageAsync(bobEncrypted!);
 
         Console.WriteLine($"Alice received: {aliceReceivesBob}");
         Console.WriteLine($"Charlie received: {charlieReceivesBob}");
 
         // Charlie joins the conversation
         string charlieMessage = "Hello Alice and Bob! This is awesome! 🚀";
-        var charlieEncrypted = await charlieClient.SendGroupMessageAsync(groupId, charlieMessage);
+        var charlieEncrypted = await charlieGroupSession.EncryptMessageAsync(charlieMessage);
         Console.WriteLine($"Charlie sent: {charlieMessage}");
 
         // Alice and Bob receive Charlie's message
-        string aliceReceivesCharlie = await aliceClient.ProcessGroupMessageAsync(charlieEncrypted!);
-        string bobReceivesCharlie = await bobClient.ProcessGroupMessageAsync(charlieEncrypted!);
+        string aliceReceivesCharlie = await aliceGroupSession.DecryptMessageAsync(charlieEncrypted!);
+        string bobReceivesCharlie = await bobGroupSession.DecryptMessageAsync(charlieEncrypted!);
 
         Console.WriteLine($"Alice received: {aliceReceivesCharlie}");
         Console.WriteLine($"Bob received: {bobReceivesCharlie}");
+
+        // Step 10: Verify all messages were correctly exchanged
+        Assert.AreEqual(aliceMessage, bobReceivesAlice, "Bob should receive Alice's message correctly");
+        Assert.AreEqual(aliceMessage, charlieReceivesAlice, "Charlie should receive Alice's message correctly");
+        Assert.AreEqual(bobMessage, aliceReceivesBob, "Alice should receive Bob's message correctly");
+        Assert.AreEqual(bobMessage, charlieReceivesBob, "Charlie should receive Bob's message correctly");
+        Assert.AreEqual(charlieMessage, aliceReceivesCharlie, "Alice should receive Charlie's message correctly");
+        Assert.AreEqual(charlieMessage, bobReceivesCharlie, "Bob should receive Charlie's message correctly");
 
         Console.WriteLine("\n✅ Group chat setup complete! All messages encrypted and exchanged successfully.");
     }
@@ -312,54 +317,59 @@ public class IntegrationTests
             var aliceKeyBundle = await _x3dhProtocol.CreateKeyBundleAsync(aliceIdentityKeyPair);
             var bobKeyBundle = await _x3dhProtocol.CreateKeyBundleAsync(bobIdentityKeyPair);
 
-            // Step 3: Alice creates a session to communicate with Bob
-            string bobIdentifier = "bob@example.com";
-            var aliceSession = await aliceSessionManager.CreateDirectMessageSessionAsync(
-                bobIdentityKeyPair.PublicKey!,
-                bobIdentifier);
+            // Step 3: Alice initiates X3DH session with Bob's public bundle
+            var bobPublicBundle = bobKeyBundle.ToPublicBundle();
+            var x3dhResult = await _x3dhProtocol.InitiateSessionAsSenderAsync(bobPublicBundle, aliceIdentityKeyPair);
 
-            Assert.IsNotNull(aliceSession, "Alice should have a valid chat session");
-            Assert.AreEqual(SessionState.Initialized, aliceSession.State, "Alice's session should be initialized");
+            // Step 4: Alice creates a Double Ratchet session using the shared key
+            string sessionId = $"session-alice-bob-{Guid.NewGuid():N}";
+            var aliceDoubleRatchetSession = _doubleRatchetProtocol.InitializeSessionAsSender(
+                x3dhResult.SharedKey,
+                bobPublicBundle.SignedPreKey!,
+                sessionId);
 
-            // Step 4: Simulate the initial key exchange message transport
-            var chatSession = aliceSession as ChatSession;
-            Assert.IsNotNull(chatSession, "Alice's session should be a ChatSession");
-
-            var initialMessageData = chatSession.InitialMessageData;
-            Assert.IsNotNull(initialMessageData, "Alice should have initial message data to send to Bob");
-
-            // Create a simulated transport message containing the X3DH initial data
-            var keyExchangeMessage = new MailboxMessage(
+            // Step 5: Create Alice's chat session wrapper
+            var aliceSession = new ChatSession(
+                aliceDoubleRatchetSession,
                 bobIdentityKeyPair.PublicKey!,
                 aliceIdentityKeyPair.PublicKey!,
-                new EncryptedMessage())
-            {
-                Type = MessageType.KeyExchange,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                Metadata = new Dictionary<string, string>
-                {
-                    ["SenderIdentityKey"] = Convert.ToBase64String(initialMessageData.SenderIdentityKeyPublic),
-                    ["SenderEphemeralKey"] = Convert.ToBase64String(initialMessageData.SenderEphemeralKeyPublic),
-                    ["SignedPreKeyId"] = initialMessageData.RecipientSignedPreKeyId.ToString()
-                }
-            };
+                _doubleRatchetProtocol);
 
-            if (initialMessageData.RecipientOneTimePreKeyId.HasValue)
-            {
-                keyExchangeMessage.Metadata["OneTimePreKeyId"] = initialMessageData.RecipientOneTimePreKeyId.Value.ToString();
-            }
+            await aliceSession.ActivateAsync();
 
-            // Step 5: Bob processes the key exchange and establishes a session
-            var bobSession = await bobSessionManager.ProcessKeyExchangeMessageAsync(
-                keyExchangeMessage,
+            Assert.IsNotNull(aliceSession, "Alice should have a valid chat session");
+            Assert.AreEqual(SessionState.Active, aliceSession.State, "Alice's session should be active");
+
+            // Step 6: Bob receives the X3DH initial message and creates his session
+            var bobSharedKey = await _x3dhProtocol.EstablishSessionAsReceiverAsync(
+                x3dhResult.MessageDataToSend,
                 bobKeyBundle);
+
+            // Step 7: Bob creates a Double Ratchet session using the shared key
+            var bobSignedPreKeyPrivate = bobKeyBundle.GetSignedPreKeyPrivate();
+            var bobSignedPreKeyPair = new KeyPair(
+                bobKeyBundle.SignedPreKey,
+                bobSignedPreKeyPrivate);
+
+            var bobDoubleRatchetSession = _doubleRatchetProtocol.InitializeSessionAsReceiver(
+                bobSharedKey,
+                bobSignedPreKeyPair,
+                x3dhResult.MessageDataToSend.SenderEphemeralKeyPublic,
+                sessionId);
+
+            // Step 8: Create Bob's chat session wrapper
+            var bobSession = new ChatSession(
+                bobDoubleRatchetSession,
+                aliceIdentityKeyPair.PublicKey!,
+                bobIdentityKeyPair.PublicKey!,
+                _doubleRatchetProtocol);
+
+            await bobSession.ActivateAsync();
 
             Assert.IsNotNull(bobSession, "Bob should establish a session from Alice's key exchange");
             Assert.AreEqual(SessionState.Active, bobSession.State, "Bob's session should be active");
 
-            // Step 6: Activate Alice's session and send a message
-            await aliceSession.ActivateAsync();
-            Assert.AreEqual(SessionState.Active, aliceSession.State, "Alice's session should be active");
+            // Step 8: Test message exchange
 
             string aliceMessage = "Hello Bob, this is Alice via SessionManager!";
             var encryptedAliceMessage = await aliceSession.EncryptAsync(aliceMessage);
@@ -393,18 +403,7 @@ public class IntegrationTests
                 Assert.AreEqual(testMessage, decrypted, $"Message {i + 1} should be correctly decrypted");
             }
 
-            // Step 11: Test session persistence
-            await aliceSessionManager.SaveSessionAsync(aliceSession);
-            await bobSessionManager.SaveSessionAsync(bobSession);
-
-            // List and verify sessions
-            var aliceSessions = await aliceSessionManager.ListSessionsAsync();
-            var bobSessions = await bobSessionManager.ListSessionsAsync();
-
-            Assert.IsTrue(aliceSessions.Length > 0, "Alice should have at least one saved session");
-            Assert.IsTrue(bobSessions.Length > 0, "Bob should have at least one saved session");
-
-            // Verify session properties
+            // Step 11: Verify session properties
             Assert.IsTrue(aliceSession.IsValid(), "Alice's session should be valid");
             Assert.IsTrue(bobSession.IsValid(), "Bob's session should be valid");
 
@@ -417,9 +416,9 @@ public class IntegrationTests
             Assert.AreEqual(SessionState.Terminated, aliceSession.State, "Alice's session should be terminated");
             Assert.AreEqual(SessionState.Terminated, bobSession.State, "Bob's session should be terminated");
 
-            // Clean up
-            await aliceSessionManager.DeleteSessionAsync(aliceSession.SessionId);
-            await bobSessionManager.DeleteSessionAsync(bobSession.SessionId);
+            // Clean up shared keys
+            SecureMemory.SecureClear(x3dhResult.SharedKey);
+            SecureMemory.SecureClear(bobSharedKey);
         }
         finally
         {

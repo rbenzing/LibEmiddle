@@ -540,6 +540,16 @@ public sealed class LibEmiddleClient : IDisposable
                 _identityKeyPair,
                 rotationStrategy);
 
+            // Add ourselves as a member first
+            await newGroupSession.AddMemberAsync(_identityKeyPair.PublicKey);
+
+            // Add the sender of the distribution message as a member (they're likely the group creator)
+            if (distribution.SenderIdentityKey != null &&
+                !distribution.SenderIdentityKey.SequenceEqual(_identityKeyPair.PublicKey))
+            {
+                await newGroupSession.AddMemberAsync(distribution.SenderIdentityKey);
+            }
+
             // Process the distribution message
             if (!newGroupSession.ProcessDistributionMessage(distribution))
             {
