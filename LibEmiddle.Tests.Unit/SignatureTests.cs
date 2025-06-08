@@ -56,13 +56,13 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        [ExpectedException(typeof(NullReferenceException))]
+        [ExpectedException(typeof(ArgumentNullException))]
         public void SignMessage_WithNullPrivateKey_ShouldThrowException()
         {
             // Arrange
             byte[] message = Encoding.Default.GetBytes("Test message");
 
-            // Act & Assert - Should throw NullReferenceException
+            // Act & Assert - Should throw ArgumentNullException
             _cryptoProvider.Sign(message, null);
         }
 
@@ -91,26 +91,35 @@ namespace LibEmiddle.Tests.Unit
 
             KeyPair _signIdentityKeyPair = Sodium.GenerateEd25519KeyPair();
             var publicKey = _signIdentityKeyPair.PublicKey;
-            var privateKey = _signIdentityKeyPair.PrivateKey;
+            var originalPrivateKey = _signIdentityKeyPair.PrivateKey;
+
+            // Create copies of the private key since Sign() method clears it
+            byte[] privateKey1 = new byte[originalPrivateKey.Length];
+            byte[] privateKey2 = new byte[originalPrivateKey.Length];
+            byte[] privateKey3 = new byte[originalPrivateKey.Length];
+
+            Array.Copy(originalPrivateKey, privateKey1, originalPrivateKey.Length);
+            Array.Copy(originalPrivateKey, privateKey2, originalPrivateKey.Length);
+            Array.Copy(originalPrivateKey, privateKey3, originalPrivateKey.Length);
 
             // Act - Measure signing time
             System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
 
             // Small message
             stopwatch.Start();
-            byte[] smallSignature = _cryptoProvider.Sign(smallMessage, privateKey);
+            byte[] smallSignature = _cryptoProvider.Sign(smallMessage, privateKey1);
             stopwatch.Stop();
             long smallSignTime = stopwatch.ElapsedMilliseconds;
 
             // Medium message
             stopwatch.Restart();
-            byte[] mediumSignature = _cryptoProvider.Sign(mediumMessage, privateKey);
+            byte[] mediumSignature = _cryptoProvider.Sign(mediumMessage, privateKey2);
             stopwatch.Stop();
             long mediumSignTime = stopwatch.ElapsedMilliseconds;
 
             // Large message
             stopwatch.Restart();
-            byte[] largeSignature = _cryptoProvider.Sign(largeMessage, privateKey);
+            byte[] largeSignature = _cryptoProvider.Sign(largeMessage, privateKey3);
             stopwatch.Stop();
             long largeSignTime = stopwatch.ElapsedMilliseconds;
 

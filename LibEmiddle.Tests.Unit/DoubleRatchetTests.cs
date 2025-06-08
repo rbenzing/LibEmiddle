@@ -46,13 +46,13 @@ namespace LibEmiddle.Tests.Unit
             string sessionId = $"test-session-{Guid.NewGuid()}";
 
             // Initialize Alice's session as the sender
-            var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSender(
                 sharedSecret,
                 bobKeyPair.PublicKey,
                 sessionId);
 
             // Initialize Bob's session as the receiver
-            var bobSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
+            var bobSession = _doubleRatchetProtocol.InitializeSessionAsReceiver(
                 sharedSecret,
                 bobKeyPair,
                 aliceKeyPair.PublicKey,
@@ -489,7 +489,7 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async void MultiThreadedRatchetingSecurity_SimulatesStressTest()
+        public async Task MultiThreadedRatchetingSecurity_SimulatesStressTest()
         {
             // Arrange
             var (aliceSession, bobSession, sessionId) = CreateTestSessionsAsync();
@@ -524,7 +524,7 @@ namespace LibEmiddle.Tests.Unit
                 Assert.IsNotNull(encryptedMessage.Ciphertext, "Ciphertext should not be null");
 
                 // Make sure the session has been updated properly
-                Assert.AreEqual(1, updatedSession.SendMessageNumber,
+                Assert.AreEqual(1u, updatedSession.SendMessageNumber,
                     "All sessions should have message number 1");
 
                 // Make sure the chain key has changed (it's not the same as the original session)

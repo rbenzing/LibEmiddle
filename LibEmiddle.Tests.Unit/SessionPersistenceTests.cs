@@ -5,6 +5,7 @@ using System.Text;
 using System.Security.Cryptography;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Linq;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
@@ -26,12 +27,17 @@ namespace LibEmiddle.Tests.Unit
         [TestInitialize]
         public void Setup()
         {
-            _cryptoProvider = new CryptoProvider();
-            _doubleRatchetProtocol = new DoubleRatchetProtocol();
-
             // Create a temporary directory for test session storage
             _testStoragePath = Path.Combine(Path.GetTempPath(), $"LibEmiddle_Tests_{Guid.NewGuid()}");
             Directory.CreateDirectory(_testStoragePath);
+
+            // Create a subdirectory for key storage to ensure keys and sessions use the same base path
+            string keyStoragePath = Path.Combine(_testStoragePath, "Keys");
+            Directory.CreateDirectory(keyStoragePath);
+
+            // Initialize crypto provider with the same base path as the session storage
+            _cryptoProvider = new CryptoProvider(keyStoragePath);
+            _doubleRatchetProtocol = new DoubleRatchetProtocol();
 
             _persistenceManager = new SessionPersistenceManager(_cryptoProvider, _testStoragePath);
         }
@@ -73,8 +79,8 @@ namespace LibEmiddle.Tests.Unit
             // Create session ID
             string sessionId = $"test-session-{Guid.NewGuid()}";
 
-            // Initialize a Double Ratchet session as the sender
-            return _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            // Initialize a Double Ratchet session as the sender (note: this is not async)
+            return _doubleRatchetProtocol.InitializeSessionAsSender(
                 sharedKeyFromX3DH: sharedSecret,
                 recipientInitialPublicKey: bobKeyPair.PublicKey,
                 sessionId: sessionId);
@@ -157,6 +163,78 @@ namespace LibEmiddle.Tests.Unit
             Assert.AreEqual(2, loadedData.Metadata.Count, "Should have 2 metadata entries");
             Assert.AreEqual("TestValue1", loadedData.Metadata["TestKey1"], "TestKey1 value should match");
             Assert.AreEqual("TestValue2", loadedData.Metadata["TestKey2"], "TestKey2 value should match");
+        }
+
+        [TestMethod]
+        public async Task CryptoProvider_KeyStorage_ShouldWorkCorrectly()
+        {
+            // Test the basic key storage functionality to isolate the issue
+            string testKeyId = "test-key-123";
+            byte[] testKey = _cryptoProvider.GenerateRandomBytes(32);
+
+            // Store the key
+            bool storeResult = await _cryptoProvider.StoreKeyAsync(testKeyId, testKey);
+            Assert.IsTrue(storeResult, "Key should be stored successfully");
+
+            // Retrieve the key
+            byte[] retrievedKey = await _cryptoProvider.RetrieveKeyAsync(testKeyId);
+            Assert.IsNotNull(retrievedKey, "Retrieved key should not be null");
+            Assert.IsTrue(SecureMemory.SecureCompare(testKey, retrievedKey), "Retrieved key should match original");
+
+            // Clean up
+            await _cryptoProvider.DeleteKeyAsync(testKeyId);
+        }
+
+        [TestMethod]
+        public async Task CryptoProvider_KeyStorage_WithColonInId_ShouldWorkCorrectly()
+        {
+            // Test key storage with a colon in the ID (like session keys)
+            string testKeyId = "session:test-session-12345";
+            byte[] testKey = _cryptoProvider.GenerateRandomBytes(32);
+
+            Console.WriteLine($"Original key length: {testKey.Length}");
+            Console.WriteLine($"Original key (first 8 bytes): {Convert.ToHexString(testKey.Take(8).ToArray())}");
+
+            // Store the key
+            bool storeResult = await _cryptoProvider.StoreKeyAsync(testKeyId, testKey);
+            Assert.IsTrue(storeResult, "Key with colon should be stored successfully");
+
+            // Retrieve the key
+            byte[] retrievedKey = await _cryptoProvider.RetrieveKeyAsync(testKeyId);
+            Assert.IsNotNull(retrievedKey, "Retrieved key with colon should not be null");
+
+            Console.WriteLine($"Retrieved key length: {retrievedKey.Length}");
+            Console.WriteLine($"Retrieved key (first 8 bytes): {Convert.ToHexString(retrievedKey.Take(8).ToArray())}");
+
+            Assert.IsTrue(SecureMemory.SecureCompare(testKey, retrievedKey), "Retrieved key with colon should match original");
+
+            // Clean up
+            await _cryptoProvider.DeleteKeyAsync(testKeyId);
+        }
+
+        [TestMethod]
+        public void CryptoProvider_EncryptDecrypt_ShouldWorkCorrectly()
+        {
+            // Test basic encrypt/decrypt functionality
+            byte[] plaintext = Encoding.UTF8.GetBytes("Hello, World! This is a test message.");
+            byte[] key = _cryptoProvider.GenerateRandomBytes(32);
+            byte[] nonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
+
+            Console.WriteLine($"Original plaintext: {Encoding.UTF8.GetString(plaintext)}");
+            Console.WriteLine($"Key length: {key.Length}");
+            Console.WriteLine($"Nonce length: {nonce.Length}");
+
+            // Encrypt
+            byte[] ciphertext = _cryptoProvider.Encrypt(plaintext, key, nonce, null);
+            Console.WriteLine($"Ciphertext length: {ciphertext.Length}");
+
+            // Decrypt
+            byte[] decrypted = _cryptoProvider.Decrypt(ciphertext, key, nonce, null);
+            string decryptedText = Encoding.UTF8.GetString(decrypted);
+
+            Console.WriteLine($"Decrypted text: {decryptedText}");
+
+            Assert.AreEqual(Encoding.UTF8.GetString(plaintext), decryptedText, "Decrypted text should match original");
         }
 
         [TestMethod]
@@ -271,6 +349,10 @@ namespace LibEmiddle.Tests.Unit
         private async Task<DoubleRatchetSession> LoadAndDeserializeSessionAsync(string sessionId)
         {
             var chatSession = await _persistenceManager.LoadChatSessionAsync(sessionId, _doubleRatchetProtocol);
+            if (chatSession == null)
+            {
+                throw new FileNotFoundException($"Session {sessionId} not found");
+            }
             return chatSession.GetCryptoSessionState();
         }
 

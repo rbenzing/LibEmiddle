@@ -160,7 +160,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsNotNull(largeBuffer, "Large buffer should not be null");
-            Assert.AreEqual(largeSize, largeBuffer.Length, "Large buffer should have the requested size");
+            Assert.AreEqual((int)largeSize, largeBuffer.Length, "Large buffer should have the requested size");
         }
 
         [TestMethod]

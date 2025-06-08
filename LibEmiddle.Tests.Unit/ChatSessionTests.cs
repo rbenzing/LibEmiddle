@@ -53,28 +53,20 @@ namespace LibEmiddle.Tests.Unit
             X3DHKeyBundle bobX3DHBundle = await _x3DHProtocol.CreateKeyBundleAsync(_bobKeyPair);
             X3DHPublicBundle bobPublicBundle = bobX3DHBundle.ToPublicBundle();
 
-            // Step 2: Alice initiates session (sender side)
+            // Step 2: Alice initiates session (sender side) using ProtocolAdapter
             var (aliceDRSession, initialMessage) = await _protocolAdapter.PrepareSenderSessionAsync(
                 bobPublicBundle, _aliceKeyPair, sessionId);
 
-            // Step 3: Bob receives the initial message and establishes session (receiver side)
-            byte[] sharedSecretKey = await _x3DHProtocol.EstablishSessionAsReceiverAsync(initialMessage, bobX3DHBundle);
-
-            // Step 4: Initialize Bob's Double Ratchet session as receiver
-            // Bob needs to generate his initial ratchet key pair for the receiver session
-            KeyPair bobInitialRatchetKeyPair = Sodium.GenerateX25519KeyPair();
-
-            var bobDRSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
-                sharedSecretKey,
-                bobInitialRatchetKeyPair,
-                initialMessage.SenderEphemeralKeyPublic,
-                sessionId);
+            // Step 3: Bob receives the initial message and establishes session (receiver side) using ProtocolAdapter
+            // This ensures proper synchronization between Alice and Bob's sessions
+            var bobDRSession = await _protocolAdapter.PrepareReceiverSessionAsync(
+                initialMessage, bobX3DHBundle, sessionId);
 
             // Store the sessions
             _aliceDoubleRatchetSession = aliceDRSession;
             _bobDoubleRatchetSession = bobDRSession;
 
-            // Step 5: Create chat sessions for both Alice and Bob
+            // Step 4: Create chat sessions for both Alice and Bob
             _aliceChatSession = new ChatSession(
                 _aliceDoubleRatchetSession,
                 _bobKeyPair.PublicKey,

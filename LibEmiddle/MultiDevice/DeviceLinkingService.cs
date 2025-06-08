@@ -147,8 +147,8 @@ public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
             byte[] nonce = Nonce.GenerateNonce();
             byte[] ciphertext = AES.AESEncrypt(plaintext, sharedSecret, nonce);
 
-            // Convert main device's Ed25519 public key to X25519 for SenderDHKey
-            byte[] mainDeviceX25519Public = _cryptoProvider.ConvertEd25519PublicKeyToX25519(mainDeviceKeyPair.PublicKey);
+            // Derive the X25519 public key from the X25519 private key we used for ECDH
+            byte[] mainDeviceX25519Public = Sodium.ScalarMultBase(mainDeviceX25519Private);
 
             return new EncryptedMessage
             {
@@ -264,10 +264,19 @@ public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
             sharedSecret = _cryptoProvider.ScalarMult(newDeviceX25519Private, mainDeviceX25519Public);
 
             // Decrypt the message payload
-            byte[] plaintext = AES.AESDecrypt(
-                encryptedMessage.Ciphertext,
-                sharedSecret,
-                encryptedMessage.Nonce);
+            byte[] plaintext;
+            try
+            {
+                plaintext = AES.AESDecrypt(
+                    encryptedMessage.Ciphertext,
+                    sharedSecret,
+                    encryptedMessage.Nonce);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(DeviceLinkingService), $"Message decryption failed: {ex.Message}");
+                return null;
+            }
 
             string json = Encoding.UTF8.GetString(plaintext);
 
@@ -297,6 +306,9 @@ public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
             }
 
             // Verify the signature of the new device's public key
+            LoggingManager.LogInformation(nameof(DeviceLinkingService),
+                $"Verifying signature of {Convert.ToBase64String(newDeviceKeyPair.PublicKey)} with key {Convert.ToBase64String(mainDeviceEd25519Public)}");
+
             if (!_cryptoProvider.VerifySignature(newDeviceKeyPair.PublicKey, signature, mainDeviceEd25519Public))
             {
                 LoggingManager.LogWarning(nameof(DeviceLinkingService),

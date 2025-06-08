@@ -25,7 +25,7 @@ namespace LibEmiddle.Protocol
         /// <param name="recipientInitialPublicKey">The recipient's initial ratchet public key (X25519)</param>
         /// <param name="sessionId">Unique identifier for this session</param>
         /// <returns>The initialized DoubleRatchetSession object</returns>
-        public DoubleRatchetSession InitializeSessionAsSenderAsync(
+        public DoubleRatchetSession InitializeSessionAsSender(
             byte[] sharedKeyFromX3DH,
             byte[] recipientInitialPublicKey,
             string sessionId)
@@ -96,7 +96,7 @@ namespace LibEmiddle.Protocol
         /// <param name="senderEphemeralKeyPublic">The sender's ephemeral public key from X3DH</param>
         /// <param name="sessionId">Unique identifier for this session</param>
         /// <returns>The initialized DoubleRatchetSession object</returns>
-        public DoubleRatchetSession InitializeSessionAsReceiverAsync(
+        public DoubleRatchetSession InitializeSessionAsReceiver(
             byte[] sharedKeyFromX3DH,
             KeyPair receiverInitialKeyPair,
             byte[] senderEphemeralKeyPublic,
@@ -150,7 +150,7 @@ namespace LibEmiddle.Protocol
         /// <param name="senderRatchetPublicKey">The sender's ratchet public key</param>
         /// <param name="sessionId">Unique identifier for this session</param>
         /// <returns>The initialized DoubleRatchetSession object</returns>
-        public DoubleRatchetSession InitializeSessionAsReceiverAsync(
+        public DoubleRatchetSession InitializeSessionAsReceiver(
             byte[] sharedKeyFromX3DH,
             byte[] senderRatchetPublicKey,
             string sessionId)
@@ -171,7 +171,7 @@ namespace LibEmiddle.Protocol
                 throw new CryptographicException("Failed to generate receiver's initial ratchet key pair");
 
             // Call the main initialization method
-            return InitializeSessionAsReceiverAsync(
+            return InitializeSessionAsReceiver(
                 sharedKeyFromX3DH,
                 receiverInitialKeyPair,
                 senderRatchetPublicKey,
@@ -206,6 +206,16 @@ namespace LibEmiddle.Protocol
                 if (updatedSession.ReceiverRatchetPublicKey == null)
                     throw new InvalidOperationException("Cannot encrypt: Receiver's ratchet public key not set");
 
+                // For bidirectional communication, Bob needs to generate a new key pair when he sends his first message
+                // This happens when Bob (receiver) wants to send a message back but is still using his original signed prekey
+                // We detect this by checking if we don't have a receiver ratchet public key set (meaning we haven't received any rotated keys)
+                // and our sender chain key is null (meaning we haven't sent any messages yet)
+                if (updatedSession.ReceiverRatchetPublicKey != null && updatedSession.SenderChainKey == null)
+                {
+                    // Generate a new ratchet key pair for sending - this is Bob's first message back to Alice
+                    updatedSession.SenderRatchetKeyPair = Sodium.GenerateX25519KeyPair();
+                }
+
                 // Calculate the first DH output using our private key and their public key
                 byte[] dhResult = Sodium.ScalarMult(
                     updatedSession.SenderRatchetKeyPair.PrivateKey,
@@ -232,7 +242,7 @@ namespace LibEmiddle.Protocol
             // If rotation is needed, update the ratchet key
             if (shouldRotate)
             {
-                RotateRatchetKeyAsync(updatedSession);
+                RotateRatchetKey(updatedSession);
             }
 
             try
@@ -298,14 +308,32 @@ namespace LibEmiddle.Protocol
                     if (encryptedMessage.Ciphertext == null || encryptedMessage.Nonce == null || encryptedMessage.SenderDHKey == null)
                         throw new ArgumentException("Encrypted message is incomplete", nameof(encryptedMessage));
 
-                    if (encryptedMessage.SessionId != session.SessionId)
-                        throw new ArgumentException("Message session ID does not match current session", nameof(encryptedMessage));
-
                     // Create a deep clone of the session to avoid modifying the original during processing
                     var updatedSession = DeepCloneSession(session);
 
                     try
                     {
+                        // Check session ID match inside try-catch to return null on mismatch
+                        if (encryptedMessage.SessionId != session.SessionId)
+                        {
+                            LoggingManager.LogWarning(nameof(DoubleRatchetProtocol), "Message session ID does not match current session");
+                            return (null, null);
+                        }
+
+                        // Validate timestamp to reject negative timestamps and extremely old/future messages
+                        if (encryptedMessage.Timestamp < 0)
+                        {
+                            LoggingManager.LogWarning(nameof(DoubleRatchetProtocol), "Message has negative timestamp");
+                            return (null, null);
+                        }
+
+                        // Check for extremely future timestamps (more than 1 hour in the future)
+                        long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        if (encryptedMessage.Timestamp > currentTime + (60 * 60 * 1000))
+                        {
+                            LoggingManager.LogWarning(nameof(DoubleRatchetProtocol), "Message timestamp is too far in the future");
+                            return (null, null);
+                        }
                         // Check if this is a message we've already decrypted by looking in the skipped message keys
                         SkippedMessageKey skippedMessageKeyId = new SkippedMessageKey(
                             encryptedMessage.SenderDHKey,
@@ -374,9 +402,10 @@ namespace LibEmiddle.Protocol
                                 SecureMemory.SecureClear(dhResult);
                             }
 
-                            // Generate a new ratchet key pair for future sending
-                            var newRatchetKeyPair = Sodium.GenerateX25519KeyPair();
-                            updatedSession.SenderRatchetKeyPair = newRatchetKeyPair;
+                            // Do NOT generate a new ratchet key pair here for unidirectional communication.
+                            // The receiver should keep their current key pair because the sender is still using
+                            // the receiver's current public key for DH calculations.
+                            // A new key pair will be generated when the receiver actually sends a message.
                             updatedSession.SenderChainKey = null; // Will be derived when sending
                             updatedSession.SendMessageNumber = 0;
                         }
@@ -469,13 +498,15 @@ namespace LibEmiddle.Protocol
         /// </summary>
         private void SkipReceiverMessageKeysAsync(DoubleRatchetSession session)
         {
-            // Skip remaining keys in the old chain
-            uint remainingKeys = 100; // Use a reasonable maximum
+            // When a new ratchet key arrives, we should skip any remaining keys in the old receiver chain
+            // But we need to be careful not to skip too many keys
 
             LoggingManager.LogDebug(nameof(DoubleRatchetProtocol),
                 $"Skipping receiver chain keys due to new ratchet key");
 
-            SkipMessageKeys(session, Math.Min(remainingKeys, (uint)_maxSkippedMessageKeys));
+            // Skip only the keys that we haven't received yet in the old chain
+            // Since we're starting a new chain, we don't need to skip any keys
+            // The new ratchet key indicates a fresh start
         }
 
         /// <summary>
@@ -490,15 +521,15 @@ namespace LibEmiddle.Protocol
 
                 case KeyRotationStrategy.Standard:
                 default:
-                    // In standard mode, rotate after 20 messages or if no rotations have happened yet
-                    return session.SendMessageNumber % 20 == 0 || session.SendMessageNumber == 0;
+                    // In standard mode, rotate after 20 messages (but not on the very first message)
+                    return session.SendMessageNumber > 0 && session.SendMessageNumber % 20 == 0;
             }
         }
 
         /// <summary>
         /// Rotates the ratchet key to provide forward secrecy
         /// </summary>
-        private void RotateRatchetKeyAsync(DoubleRatchetSession session)
+        private void RotateRatchetKey(DoubleRatchetSession session)
         {
             if (session.ReceiverRatchetPublicKey == null)
                 throw new InvalidOperationException("Cannot rotate ratchet key: Receiver's public key not set");

@@ -554,7 +554,7 @@ namespace LibEmiddle.Messaging.Transport
             string sessionId = $"session-{contactId}-{Guid.NewGuid()}";
 
             // Initialize Double Ratchet
-            DoubleRatchetSession drSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(sharedSecret, 
+            DoubleRatchetSession drSession = _doubleRatchetProtocol.InitializeSessionAsSender(sharedSecret,
                 contactX25519Key, sessionId);
             
             // Store the session

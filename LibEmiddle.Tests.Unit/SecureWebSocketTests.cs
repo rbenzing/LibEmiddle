@@ -51,7 +51,7 @@ namespace LibEmiddle.Tests.Unit
             string sessionId = $"test-session-{Guid.NewGuid():N}";
 
             // Initialize Alice's Double Ratchet session with shared key from X3DH
-            _testSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            _testSession = _doubleRatchetProtocol.InitializeSessionAsSender(
                 x3dhResult.SharedKey,
                 bobKeyBundle.SignedPreKey,
                 sessionId);

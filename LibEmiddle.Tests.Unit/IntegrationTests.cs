@@ -74,7 +74,7 @@ public class IntegrationTests
         string sessionId = $"test-session-{Guid.NewGuid()}";
 
         // Step 4: Initialize Double Ratchet for Alice (sender)
-        var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+        var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSender(
             x3dhResult.SharedKey,
             bobPublicBundle.SignedPreKey,
             sessionId);
@@ -92,7 +92,7 @@ public class IntegrationTests
             bobPublicBundle.SignedPreKey,
             bobSignedPreKeyPrivate);
 
-        var bobSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
+        var bobSession = _doubleRatchetProtocol.InitializeSessionAsReceiver(
             x3dhResult.SharedKey,
             bobSignedPreKeyPair,
             x3dhResult.MessageDataToSend.SenderEphemeralKeyPublic,
@@ -443,7 +443,7 @@ public class IntegrationTests
             bobKeyBundle.ToPublicBundle(),
             aliceKeyPair);
 
-        var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+        var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSender(
             x3dhResult.SharedKey,
             bobKeyBundle.ToPublicBundle().SignedPreKey,
             "test-session");

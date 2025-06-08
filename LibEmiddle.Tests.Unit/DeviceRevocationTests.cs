@@ -161,13 +161,12 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_ProcessRevocationMessage_ShouldRemoveLinkedDevice()
         {
             // Arrange
-            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
-            var otherDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var userIdentityKeyPair = Sodium.GenerateEd25519KeyPair(); // Same identity for both devices
             var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            // Create two device managers with the same identity for this test
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingSvc, _cryptoProvider);
-            var otherDeviceManager = new DeviceManager(otherDeviceKeyPair, _deviceLinkingSvc, _cryptoProvider);
+            // Create two device managers with the same user identity (simulating different devices of same user)
+            var mainDeviceManager = new DeviceManager(userIdentityKeyPair, _deviceLinkingSvc, _cryptoProvider);
+            var otherDeviceManager = new DeviceManager(userIdentityKeyPair, _deviceLinkingSvc, _cryptoProvider);
 
             // Link the device to both managers
             mainDeviceManager.AddLinkedDevice(deviceToRevokeKeyPair.PublicKey);
@@ -189,13 +188,12 @@ namespace LibEmiddle.Tests.Unit
         public void DeviceManager_ProcessRevocationMessage_WithInvalidSignature_ShouldReturnFalse()
         {
             // Arrange
-            var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
-            var otherDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var userIdentityKeyPair = Sodium.GenerateEd25519KeyPair(); // Same identity for both devices
             var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            // Create two device managers
-            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingSvc, _cryptoProvider);
-            var otherDeviceManager = new DeviceManager(otherDeviceKeyPair, _deviceLinkingSvc, _cryptoProvider); // Same identity for valid processing
+            // Create two device managers with the same user identity
+            var mainDeviceManager = new DeviceManager(userIdentityKeyPair, _deviceLinkingSvc, _cryptoProvider);
+            var otherDeviceManager = new DeviceManager(userIdentityKeyPair, _deviceLinkingSvc, _cryptoProvider);
 
             // Link the device to the other manager
             otherDeviceManager.AddLinkedDevice(deviceToRevokeKeyPair.PublicKey);

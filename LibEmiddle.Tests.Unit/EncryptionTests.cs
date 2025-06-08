@@ -67,13 +67,14 @@ namespace LibEmiddle.Tests.Unit
             {
                 rng.GetBytes(key);
             }
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act
-            byte[] encryptedMessage = _cryptoProvider.Encrypt(Encoding.Default.GetBytes(message), key, null, null);
-            byte[] decryptedMessage = _cryptoProvider.Decrypt(encryptedMessage, key, null, null);
+            byte[] encryptedMessage = _cryptoProvider.Encrypt(Encoding.Default.GetBytes(message), key, nonce, null);
+            byte[] decryptedMessage = _cryptoProvider.Decrypt(encryptedMessage, key, nonce, null);
 
             // Assert
-            Assert.AreEqual(message, decryptedMessage);
+            Assert.AreEqual(message, Encoding.Default.GetString(decryptedMessage));
         }
 
         [TestMethod]
@@ -122,9 +123,10 @@ namespace LibEmiddle.Tests.Unit
             {
                 rng.GetBytes(key);
             }
+            byte[] nonce = _cryptoProvider.GenerateNonce();
 
             // Act & Assert - Should throw ArgumentException
-            _cryptoProvider.Encrypt(Encoding.Default.GetBytes([]), key, null, null);
+            _cryptoProvider.Encrypt(Encoding.Default.GetBytes([]), key, nonce, null);
         }
 
         [TestMethod]

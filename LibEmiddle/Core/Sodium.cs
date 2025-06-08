@@ -1338,8 +1338,9 @@ public sealed partial class Sodium
                 return false;
         }
 
-        // Additional validation: ensure high bit is clear for Montgomery form
-        return (x25519PublicKey[31] & 0x80) == 0;
+        // For X25519, we don't need to check the high bit as it's automatically cleared
+        // during scalar multiplication. The key is valid as long as it's not a small-order point.
+        return true;
     }
 
     private static readonly byte[][] SMALL_ORDER_POINTS = {

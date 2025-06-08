@@ -101,6 +101,26 @@ namespace LibEmiddle.Core
         }
 
         /// <summary>
+        /// Performs a secure copy of the source byte array into a new byte array.
+        /// </summary>
+        /// <param name="source">The byte array to copy.</param>
+        /// <returns>A new byte array containing a copy of the source.</returns>
+        /// <exception cref="ArgumentNullException">If the source array is null.</exception>
+        /// <exception cref="ArgumentException">If the source array is empty.</exception>
+        public static byte[] SecureCopy(byte[]? source)
+        {
+            if (source == null)
+                throw new ArgumentNullException(nameof(source), "Source array cannot be null.");
+
+            if (source.Length == 0)
+                throw new ArgumentException("Source array must not be empty.", nameof(source));
+
+            byte[] copy = CreateSecureBuffer((uint)source.Length);
+            source.CopyTo(copy, 0);
+            return copy;
+        }
+
+        /// <summary>
         /// Performs a secure copy of the source span into a new byte array.
         /// </summary>
         /// <param name="source">The span to copy.</param>

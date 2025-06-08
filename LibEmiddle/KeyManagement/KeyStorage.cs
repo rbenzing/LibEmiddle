@@ -505,7 +505,7 @@ namespace LibEmiddle.KeyManagement
 
                 // Use custom protection (Sodium secretbox with a hardcoded key)
                 // In a production environment, you'd want a better key management strategy
-                byte[] hardcodedKey = new byte[Constants.AES_KEY_SIZE];
+                byte[] hardcodedKey = GetHardcodedEncryptionKey();
                 byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
                 byte[] ciphertext = AES.AESEncrypt(encryptionKey, hardcodedKey, nonce, null);
 
@@ -539,7 +539,7 @@ namespace LibEmiddle.KeyManagement
                 byte[] protectedData = File.ReadAllBytes(filePath);
 
                 // Use custom protection (Sodium secretbox with a hardcoded key)
-                byte[] hardcodedKey = new byte[Constants.AES_KEY_SIZE]; // Should match the key used for encryption
+                byte[] hardcodedKey = GetHardcodedEncryptionKey(); // Should match the key used for encryption
 
                 // Extract nonce
                 byte[] nonce = new byte[Constants.NONCE_SIZE];
@@ -569,6 +569,23 @@ namespace LibEmiddle.KeyManagement
         {
             // Use the same approach as key encryption keys
             return RetrieveKeyEncryptionKey($"data_{dataId}");
+        }
+
+        /// <summary>
+        /// Gets a hardcoded encryption key for protecting stored encryption keys.
+        /// In production, this should be replaced with proper key management.
+        /// </summary>
+        private static byte[] GetHardcodedEncryptionKey()
+        {
+            // Use a fixed but non-zero key for testing/development
+            // In production, this should come from a secure key management system
+            return new byte[]
+            {
+                0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+                0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c,
+                0x76, 0x2e, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2,
+                0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f
+            };
         }
 
         #endregion

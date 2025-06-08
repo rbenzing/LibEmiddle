@@ -61,9 +61,17 @@ namespace LibEmiddle.Domain
         /// <summary>
         /// Gets or sets the dictionary of skipped message keys.
         /// Key is a SkippedMessageKeyDto, value is Base64-encoded key.
+        /// Note: This is kept for backward compatibility but may cause JSON serialization issues.
+        /// Use SkippedMessageKeysList for new implementations.
         /// </summary>
         public Dictionary<SkippedMessageKeyDto, string> SkippedMessageKeys { get; set; } =
             new Dictionary<SkippedMessageKeyDto, string>();
+
+        /// <summary>
+        /// Gets or sets the list of skipped message keys.
+        /// This is the preferred way to serialize skipped message keys to avoid JSON issues.
+        /// </summary>
+        public List<SkippedMessageKeyEntryDto> SkippedMessageKeysList { get; set; } = new List<SkippedMessageKeyEntryDto>();
 
         /// <summary>
         /// Gets or sets whether the session is initialized.
@@ -74,5 +82,22 @@ namespace LibEmiddle.Domain
         /// Gets or sets the creation timestamp (milliseconds since Unix epoch).
         /// </summary>
         public long CreationTimestamp { get; set; }
+    }
+
+    /// <summary>
+    /// DTO for serializing a single skipped message key entry.
+    /// Used to avoid JSON serialization issues with complex dictionary keys.
+    /// </summary>
+    public class SkippedMessageKeyEntryDto
+    {
+        /// <summary>
+        /// Gets or sets the skipped message key.
+        /// </summary>
+        public SkippedMessageKeyDto Key { get; set; } = new SkippedMessageKeyDto();
+
+        /// <summary>
+        /// Gets or sets the Base64-encoded message key value.
+        /// </summary>
+        public string Value { get; set; } = string.Empty;
     }
 }

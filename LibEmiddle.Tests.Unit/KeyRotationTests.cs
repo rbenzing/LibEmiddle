@@ -229,7 +229,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Initialize Double Ratchet session as Alice (sender)
             string sessionId = $"session-{Guid.NewGuid()}";
-            var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSender(
                 sharedSecret,
                 bobKeyPair.PublicKey,
                 sessionId);
@@ -272,27 +272,74 @@ namespace LibEmiddle.Tests.Unit
             var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
             var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            // Create device manager instances
+            // Test basic signature verification first
+            byte[] testData = Encoding.UTF8.GetBytes("test data");
+            byte[] signature = _cryptoProvider.Sign(testData, mainDeviceKeyPair.PrivateKey);
+            bool signatureValid = _cryptoProvider.VerifySignature(testData, signature, mainDeviceKeyPair.PublicKey);
+            Assert.IsTrue(signatureValid, "Basic signature verification should work");
+
+            // Test signing the second device's public key with main device's private key
+            byte[] secondDeviceSignature = _cryptoProvider.Sign(secondDeviceKeyPair.PublicKey, mainDeviceKeyPair.PrivateKey);
+            bool secondDeviceSignatureValid = _cryptoProvider.VerifySignature(secondDeviceKeyPair.PublicKey, secondDeviceSignature, mainDeviceKeyPair.PublicKey);
+            Assert.IsTrue(secondDeviceSignatureValid, "Second device signature verification should work");
+
+            // Test key conversion consistency
+            byte[] mainX25519Private = _cryptoProvider.ConvertEd25519PrivateKeyToX25519(mainDeviceKeyPair.PrivateKey);
+            byte[] mainX25519Public = _cryptoProvider.ConvertEd25519PublicKeyToX25519(mainDeviceKeyPair.PublicKey);
+            byte[] secondX25519Private = _cryptoProvider.ConvertEd25519PrivateKeyToX25519(secondDeviceKeyPair.PrivateKey);
+            byte[] secondX25519Public = _cryptoProvider.ConvertEd25519PublicKeyToX25519(secondDeviceKeyPair.PublicKey);
+
+            // Test ECDH consistency: both directions should produce the same shared secret
+            byte[] sharedSecret1 = _cryptoProvider.ScalarMult(mainX25519Private, secondX25519Public);
+            byte[] sharedSecret2 = _cryptoProvider.ScalarMult(secondX25519Private, mainX25519Public);
+            Assert.IsTrue(SecureMemory.SecureCompare(sharedSecret1, sharedSecret2), "ECDH should be consistent in both directions");
+
+            // Test the two methods of deriving X25519 public keys
+            byte[] mainX25519PublicFromPrivate = Sodium.ScalarMultBase(mainX25519Private);
+            Assert.IsTrue(SecureMemory.SecureCompare(mainX25519Public, mainX25519PublicFromPrivate),
+                "X25519 public key should be the same whether derived from Ed25519 public key or from X25519 private key");
+
+            byte[] secondX25519PublicFromPrivate = Sodium.ScalarMultBase(secondX25519Private);
+            Assert.IsTrue(SecureMemory.SecureCompare(secondX25519Public, secondX25519PublicFromPrivate),
+                "X25519 public key should be the same whether derived from Ed25519 public key or from X25519 private key");
+
+            // Test the exact key derivation that happens in DeviceLinkingService
+            // Simulate CreateDeviceLinkMessage key derivation
+            byte[] mainX25519PrivateForECDH = _cryptoProvider.ConvertEd25519PrivateKeyToX25519(mainDeviceKeyPair.PrivateKey);
+            byte[] secondX25519PublicForECDH = _cryptoProvider.ConvertEd25519PublicKeyToX25519(secondDeviceKeyPair.PublicKey);
+            byte[] sharedSecretCreate = _cryptoProvider.ScalarMult(mainX25519PrivateForECDH, secondX25519PublicForECDH);
+
+            // Simulate ProcessDeviceLinkMessage key derivation
+            byte[] secondX25519PrivateForECDH = _cryptoProvider.ConvertEd25519PrivateKeyToX25519(secondDeviceKeyPair.PrivateKey);
+            byte[] mainX25519PublicForECDH = Sodium.ScalarMultBase(mainX25519PrivateForECDH);
+            byte[] sharedSecretProcess = _cryptoProvider.ScalarMult(secondX25519PrivateForECDH, mainX25519PublicForECDH);
+
+            Assert.IsTrue(SecureMemory.SecureCompare(sharedSecretCreate, sharedSecretProcess),
+                "Shared secrets should match between CreateDeviceLinkMessage and ProcessDeviceLinkMessage");
+
+            // Test the DeviceLinkingService directly
             var deviceLinkingService = new DeviceLinkingService(_cryptoProvider);
+
+            // Create device link message directly using the service
+            var linkMessage = deviceLinkingService.CreateDeviceLinkMessage(mainDeviceKeyPair, secondDeviceKeyPair.PublicKey);
+            Assert.IsNotNull(linkMessage, "Link message should be created");
+
+            // Process the link message directly using the service
+            byte[] result = deviceLinkingService.ProcessDeviceLinkMessage(linkMessage, secondDeviceKeyPair, mainDeviceKeyPair.PublicKey);
+            Assert.IsNotNull(result, "Device linking should succeed at service level");
+            Assert.IsTrue(SecureMemory.SecureCompare(result, mainDeviceKeyPair.PublicKey), "Returned key should match main device public key");
+
+            // Now test with DeviceManager
             var syncMessageValidator = new SyncMessageValidator(_cryptoProvider);
-
-            var mainDeviceManager = new DeviceManager(
-                mainDeviceKeyPair,
-                deviceLinkingService,
-                _cryptoProvider,
-                syncMessageValidator);
-
-            var secondDeviceManager = new DeviceManager(
-                secondDeviceKeyPair,
-                deviceLinkingService,
-                _cryptoProvider,
-                syncMessageValidator);
+            var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, deviceLinkingService, _cryptoProvider, syncMessageValidator);
+            var secondDeviceManager = new DeviceManager(secondDeviceKeyPair, deviceLinkingService, _cryptoProvider, syncMessageValidator);
 
             // Create device link message from main to second device
-            var linkMessage = mainDeviceManager.CreateDeviceLinkMessage(secondDeviceKeyPair.PublicKey);
+            var managerLinkMessage = mainDeviceManager.CreateDeviceLinkMessage(secondDeviceKeyPair.PublicKey);
+            Assert.IsNotNull(managerLinkMessage, "Manager link message should be created");
 
             // Process the link message on the second device
-            bool linkResult = secondDeviceManager.ProcessDeviceLinkMessage(linkMessage, mainDeviceKeyPair.PublicKey);
+            bool linkResult = secondDeviceManager.ProcessDeviceLinkMessage(managerLinkMessage, mainDeviceKeyPair.PublicKey);
             Assert.IsTrue(linkResult, "Device linking should succeed");
 
             // Create test data

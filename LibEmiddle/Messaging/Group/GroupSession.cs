@@ -20,6 +20,7 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
     private readonly string _groupId;
     private readonly KeyPair _identityKeyPair;
     private bool _disposed;
+    private bool _isRotating;
 
     // Group member management using existing domain objects
     private readonly ConcurrentDictionary<string, GroupMember> _members = new();
@@ -35,6 +36,7 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
     // Message tracking for replay protection
     private readonly ConcurrentDictionary<string, long> _lastSeenSequence = new();
     private readonly ConcurrentDictionary<string, long> _joinTimestamps = new();
+    private readonly ConcurrentDictionary<string, HashSet<string>> _seenMessageIds = new();
 
     // ISession interface properties
     public string SessionId { get; }
@@ -44,7 +46,7 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
 
     // IGroupSession interface properties
     public string GroupId => _groupId;
-    public byte[] ChainKey => _currentChainKey.ToArray();
+    public byte[] ChainKey => _currentChainKey;
     public uint Iteration => _currentIteration;
     public KeyRotationStrategy RotationStrategy { get; set; }
     public byte[] CreatorPublicKey { get; }
@@ -89,6 +91,17 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
             CreatorPublicKey = CreatorPublicKey
         };
 
+        // Add creator as owner member
+        string creatorId = GetMemberId(_identityKeyPair.PublicKey);
+        var creatorMember = new GroupMember
+        {
+            PublicKey = _identityKeyPair.PublicKey.ToArray(),
+            JoinedAt = _lastRotationTimestamp,
+            IsAdmin = true,
+            IsOwner = true
+        };
+        _members.TryAdd(creatorId, creatorMember);
+
         // Record our join time
         RecordJoinTime(_identityKeyPair.PublicKey);
     }
@@ -105,6 +118,18 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
                 throw new InvalidOperationException("Cannot activate a terminated session.");
             if (State == SessionState.Active)
                 return false;
+
+            // Initialize chain key if not already set
+            if (_currentChainKey.Length == 0)
+            {
+                _currentChainKey = Sodium.GenerateRandomBytes(Constants.CHAIN_KEY_SIZE);
+                _currentIteration = 0;
+                _lastRotationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                // Process our own distribution message so we can decrypt our own messages
+                var ownDistribution = CreateDistributionMessage();
+                ProcessDistributionMessage(ownDistribution);
+            }
 
             var previousState = State;
             State = SessionState.Active;
@@ -243,7 +268,7 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
                     _removedMembers[memberId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
                     // Rotate key after removing member for forward secrecy
-                    await RotateKeyAsync();
+                    await RotateKeyInternalAsync();
                     return true;
                 }
             }
@@ -367,22 +392,32 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
             if (WasRemovedBeforeTimestamp(_identityKeyPair.PublicKey, encryptedMessage.Timestamp))
                 return null;
 
-            // Get sender key
+            // Get sender chain key
             string senderId = GetMemberId(encryptedMessage.SenderIdentityKey);
-            if (!_senderKeys.TryGetValue(senderId, out byte[]? senderKey))
+            if (!_senderKeys.TryGetValue(senderId, out byte[]? senderChainKey))
                 return null;
 
             try
             {
-                // Decrypt the message
-                byte[] associatedData = Encoding.UTF8.GetBytes($"{_groupId}:{encryptedMessage.RotationEpoch}");
-                byte[] decrypted = AES.AESDecrypt(
-                    encryptedMessage.Ciphertext,
-                    senderKey,
-                    encryptedMessage.Nonce,
-                    associatedData);
+                // Derive message key from sender's chain key (same process as encryption)
+                byte[] messageKey = Sodium.DeriveMessageKey(senderChainKey);
 
-                return Encoding.UTF8.GetString(decrypted);
+                try
+                {
+                    // Decrypt the message
+                    byte[] associatedData = Encoding.UTF8.GetBytes($"{_groupId}:{encryptedMessage.RotationEpoch}");
+                    byte[] decrypted = AES.AESDecrypt(
+                        encryptedMessage.Ciphertext,
+                        messageKey,
+                        encryptedMessage.Nonce,
+                        associatedData);
+
+                    return Encoding.UTF8.GetString(decrypted);
+                }
+                finally
+                {
+                    SecureMemory.SecureClear(messageKey);
+                }
             }
             catch
             {
@@ -406,11 +441,29 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
         await _sessionLock.WaitAsync();
         try
         {
-            if (State == SessionState.Terminated)
-                throw new InvalidOperationException("Cannot rotate key: Session is terminated.");
+            return await RotateKeyInternalAsync();
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
 
-            if (!HasPermission(GroupOperation.RotateKey))
-                throw new UnauthorizedAccessException("You don't have permission to rotate the group key.");
+    private Task<bool> RotateKeyInternalAsync()
+    {
+        if (State == SessionState.Terminated)
+            throw new InvalidOperationException("Cannot rotate key: Session is terminated.");
+
+        if (!HasPermission(GroupOperation.RotateKey))
+            throw new UnauthorizedAccessException("You don't have permission to rotate the group key.");
+
+        // Prevent infinite recursion
+        if (_isRotating)
+            return Task.FromResult(false);
+
+        try
+        {
+            _isRotating = true;
 
             // Generate new chain key
             byte[] newChainKey = Sodium.GenerateRandomBytes(Constants.CHAIN_KEY_SIZE);
@@ -434,17 +487,21 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
             var distribution = CreateDistributionMessage();
             ProcessDistributionMessage(distribution);
 
-            return true;
+            return Task.FromResult(true);
         }
         finally
         {
-            _sessionLock.Release();
+            _isRotating = false;
         }
     }
 
     public SenderKeyDistributionMessage CreateDistributionMessage()
     {
         ThrowIfDisposed();
+
+        // Ensure chain key is initialized
+        if (_currentChainKey.Length == 0)
+            throw new InvalidOperationException("Cannot create distribution message: Session chain key is not initialized. Call ActivateAsync() first.");
 
         var distribution = new SenderKeyDistributionMessage
         {
@@ -487,6 +544,11 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
             return false;
 
         // Store the sender key
+        if (distribution.ChainKey == null || distribution.ChainKey.Length != Constants.CHAIN_KEY_SIZE)
+        {
+            LoggingManager.LogError(nameof(GroupSession), $"Invalid chain key length for sender {senderId}: expected {Constants.CHAIN_KEY_SIZE}, got {distribution.ChainKey?.Length ?? 0}");
+            return false;
+        }
         _senderKeys[senderId] = distribution.ChainKey.ToArray();
 
         // Record join time if not already recorded
@@ -521,23 +583,59 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
         }
 
         // Validate message sequence for replay protection
-        return ValidateMessageSequence(message.SenderIdentityKey!, message.RotationEpoch, message.Timestamp);
+        // First check for message ID replay (exact duplicate detection)
+        if (!string.IsNullOrEmpty(message.MessageId))
+        {
+            string senderId = GetMemberId(message.SenderIdentityKey!);
+            var senderMessageIds = _seenMessageIds.GetOrAdd(senderId, _ => new HashSet<string>());
+
+            lock (senderMessageIds)
+            {
+                if (senderMessageIds.Contains(message.MessageId))
+                {
+                    LoggingManager.LogSecurityEvent(nameof(GroupSession), "Message ID replay detected", isAlert: true);
+                    return false;
+                }
+                senderMessageIds.Add(message.MessageId);
+
+                // Limit the size of the set to prevent memory issues (keep last 1000 message IDs)
+                if (senderMessageIds.Count > 1000)
+                {
+                    var oldestIds = senderMessageIds.Take(senderMessageIds.Count - 1000).ToList();
+                    foreach (var oldId in oldestIds)
+                    {
+                        senderMessageIds.Remove(oldId);
+                    }
+                }
+            }
+        }
+
+        // Extract iteration number from message ID for sequence tracking
+        long sequenceNumber = ExtractSequenceFromMessageId(message.MessageId) ?? message.Timestamp;
+        return ValidateMessageSequence(message.SenderIdentityKey!, sequenceNumber, message.Timestamp);
     }
 
     private bool ValidateMessageSequence(byte[] senderKey, long sequence, long timestamp)
     {
         string senderId = GetMemberId(senderKey);
 
+        // For concurrent scenarios, we use a more flexible approach
+        // Instead of strict sequence ordering, we track seen message IDs to prevent actual replays
+        // This allows for out-of-order processing while still preventing replay attacks
+
+        // Update the last seen sequence if this one is higher (for general tracking)
         if (_lastSeenSequence.TryGetValue(senderId, out long lastSeen))
         {
-            if (sequence <= lastSeen)
+            if (sequence > lastSeen)
             {
-                LoggingManager.LogSecurityEvent(nameof(GroupSession), "Sequence replay detected", isAlert: true);
-                return false;
+                _lastSeenSequence[senderId] = sequence;
             }
         }
+        else
+        {
+            _lastSeenSequence[senderId] = sequence;
+        }
 
-        _lastSeenSequence[senderId] = sequence;
         return ValidateMessageTimestamp(senderKey, timestamp);
     }
 
@@ -688,6 +786,10 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
 
     private async Task CheckAndRotateKeyIfNeededAsync()
     {
+        // Prevent infinite recursion by checking if we're already in a rotation
+        if (_isRotating)
+            return;
+
         long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         TimeSpan elapsed = TimeSpan.FromMilliseconds(currentTime - _lastRotationTimestamp);
 
@@ -705,7 +807,8 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
         {
             try
             {
-                await RotateKeyAsync();
+                // Use internal rotation to avoid double-locking
+                await RotateKeyInternalAsync();
             }
             catch (Exception ex)
             {
@@ -733,6 +836,20 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
     }
 
     private static string GetMemberId(byte[] publicKey) => Convert.ToBase64String(publicKey);
+
+    private static long? ExtractSequenceFromMessageId(string? messageId)
+    {
+        if (string.IsNullOrEmpty(messageId) || !messageId.StartsWith("iter:"))
+            return null;
+
+        var parts = messageId.Split(':');
+        if (parts.Length >= 2 && uint.TryParse(parts[1], out uint iteration))
+        {
+            return iteration;
+        }
+
+        return null;
+    }
 
     private static byte[] GetMessageDataToSign(EncryptedGroupMessage message)
     {

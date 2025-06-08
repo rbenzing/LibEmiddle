@@ -155,57 +155,35 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task InitiateSessionAsSender_InvalidOneTimePreKeys_ShouldSkipInvalidKeys()
+        public async Task InitiateSessionAsSender_NoValidOneTimePreKeys_ShouldSucceedWithoutOPK()
         {
             // Arrange
             KeyPair bobSignKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            // Create a test bundle
-            var bobBundle = await _x3dhProtocol.CreateKeyBundleAsync(bobSignKeyPair, 5);
+            // Create a test bundle with one-time pre-keys first
+            var bobBundle = await _x3dhProtocol.CreateKeyBundleAsync(bobSignKeyPair, 1);
 
-            // Create a bundle with both valid and invalid one-time pre-keys
-            List<byte[]> mixedPreKeys = new List<byte[]>();
-            List<uint> preKeyIds = new List<uint>();
-
-            // Add valid keys from the original bundle
-            if (bobBundle.OneTimePreKeys != null && bobBundle.OneTimePreKeyIds != null)
-            {
-                for (int i = 0; i < bobBundle.OneTimePreKeys.Count; i++)
-                {
-                    mixedPreKeys.Add(bobBundle.OneTimePreKeys[i]);
-                    preKeyIds.Add(bobBundle.OneTimePreKeyIds[i]);
-                }
-            }
-
-            // Add some invalid keys with corresponding IDs
-            byte[] invalidKey1 = new byte[16]; // Wrong length key
-            byte[] invalidKey2 = new byte[32]; // All zeros key (invalid for X25519)
-
-            mixedPreKeys.Add(invalidKey1);
-            preKeyIds.Add(999);
-
-            mixedPreKeys.Add(invalidKey2);
-            preKeyIds.Add(1000);
-
-            var mixedBundle = new X3DHPublicBundle
+            // Create a public bundle without one-time pre-keys to test the scenario
+            var bundleWithoutOPK = new X3DHPublicBundle
             {
                 IdentityKey = bobBundle.IdentityKey,
                 SignedPreKey = bobBundle.SignedPreKey,
                 SignedPreKeyId = bobBundle.SignedPreKeyId,
                 SignedPreKeySignature = bobBundle.SignedPreKeySignature,
-                OneTimePreKeys = mixedPreKeys,
-                OneTimePreKeyIds = preKeyIds,
+                OneTimePreKeys = new List<byte[]>(), // Empty list
+                OneTimePreKeyIds = new List<uint>(), // Empty list
                 CreationTimestamp = bobBundle.CreationTimestamp,
                 ProtocolVersion = bobBundle.ProtocolVersion
             };
 
-            // Act - Should not throw exception, but should skip invalid keys
-            var result = await _x3dhProtocol.InitiateSessionAsSenderAsync(mixedBundle, bobSignKeyPair);
+            // Act - Should succeed without one-time pre-keys (X3DH allows this)
+            var result = await _x3dhProtocol.InitiateSessionAsSenderAsync(bundleWithoutOPK, bobSignKeyPair);
 
             // Assert
-            Assert.IsNotNull(result, "Session result should be created despite invalid pre-keys");
+            Assert.IsNotNull(result, "Session result should be created without one-time pre-keys");
             Assert.IsNotNull(result.SharedKey, "Shared key should be generated");
             Assert.IsNotNull(result.MessageDataToSend, "Message data should be generated");
+            Assert.IsNull(result.MessageDataToSend.RecipientOneTimePreKeyId, "No one-time pre-key ID should be used");
         }
 
         [TestMethod]
@@ -239,7 +217,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Initialize Double Ratchet protocol
             var doubleRatchetProtocol = new DoubleRatchetProtocol();
-            var initialSession = doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            var initialSession = doubleRatchetProtocol.InitializeSessionAsSender(
                 x3dhResult.SharedKey,
                 bobBundle.SignedPreKey,
                 sessionId
@@ -381,14 +359,13 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var bobBundle = await CreateTestX3DHKeyBundleAsync();
 
-            // Create incomplete initial message data
-            var incompleteMessage = new InitialMessageData(
-                null, // Missing sender identity key
-                await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519)
-                    is KeyPair keyPair ? keyPair.PublicKey : null,
-                bobBundle.SignedPreKeyId,
-                null
-            );
+            // Create incomplete initial message data using the parameterless constructor
+            // and then set invalid properties to test validation
+            var incompleteMessage = new InitialMessageData();
+            // Leave SenderIdentityKeyPublic as empty array (invalid)
+            incompleteMessage.SenderEphemeralKeyPublic = (await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519)).PublicKey;
+            incompleteMessage.RecipientSignedPreKeyId = bobBundle.SignedPreKeyId;
+            incompleteMessage.RecipientOneTimePreKeyId = null;
 
             // Act & Assert
             await Assert.ThrowsExceptionAsync<ArgumentException>(

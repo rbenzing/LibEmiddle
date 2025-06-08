@@ -30,32 +30,29 @@ namespace LibEmiddle.Tests.Unit
             // Arrange - Create a group with 10 members
             int memberCount = 10;
             var memberKeyPairs = new List<KeyPair>();
-            var groupManagers = new List<GroupChatManager>();
+            var groupSessions = new List<GroupSession>();
 
             for (int i = 0; i < memberCount; i++)
             {
                 var keyPair = Sodium.GenerateEd25519KeyPair();
                 memberKeyPairs.Add(keyPair);
-                var manager = new GroupChatManager(keyPair);
-                groupManagers.Add(manager);
             }
 
             string groupId = "large-group-test";
+            string groupName = "Large Group Test";
 
-            // Create groups for each member
+            // Create group sessions for each member
             for (int i = 0; i < memberCount; i++)
             {
-                await groupManagers[i].CreateGroupAsync(
-                    groupId,
-                    $"Test Group {i}",
-                    new List<byte[]>(),  // No initial members - we'll add them explicitly
-                    new GroupSessionOptions { GroupId = groupId, RotationStrategy = KeyRotationStrategy.Standard });
+                var session = new GroupSession(groupId, groupName, memberKeyPairs[i]);
+                await session.ActivateAsync();
+                groupSessions.Add(session);
             }
 
             // Each member needs to authorize every other member - bidirectional authorization
             for (int authorizerIdx = 0; authorizerIdx < memberCount; authorizerIdx++)
             {
-                var group = await groupManagers[authorizerIdx].GetGroupAsync(groupId);
+                var group = groupSessions[authorizerIdx];
 
                 for (int targetIdx = 0; targetIdx < memberCount; targetIdx++)
                 {
@@ -73,7 +70,7 @@ namespace LibEmiddle.Tests.Unit
             var distributionMessages = new List<SenderKeyDistributionMessage>();
             for (int i = 0; i < memberCount; i++)
             {
-                var group = await groupManagers[i].GetGroupAsync(groupId);
+                var group = groupSessions[i];
                 distributionMessages.Add(group.CreateDistributionMessage());
             }
 
@@ -81,7 +78,7 @@ namespace LibEmiddle.Tests.Unit
             for (int receiverIdx = 0; receiverIdx < memberCount; receiverIdx++)
             {
                 Trace.TraceWarning($"Processing distributions for receiver {receiverIdx}");
-                var receiverGroup = await groupManagers[receiverIdx].GetGroupAsync(groupId);
+                var receiverGroup = groupSessions[receiverIdx];
 
                 for (int senderIdx = 0; senderIdx < memberCount; senderIdx++)
                 {
@@ -95,24 +92,11 @@ namespace LibEmiddle.Tests.Unit
                             string senderKey = Convert.ToBase64String(memberKeyPairs[senderIdx].PublicKey);
                             Trace.TraceWarning($"Failed to process distribution from sender {senderIdx} with key {senderKey}");
 
-                            // Check authorization status - internal reflection access for debug only in tests
-                            FieldInfo memberManagerField = typeof(GroupSession).GetField("_memberManager",
-                                BindingFlags.NonPublic | BindingFlags.Instance);
-                            if (memberManagerField != null)
-                            {
-                                var memberManager = memberManagerField.GetValue(receiverGroup) as GroupMemberManager;
-                                if (memberManager != null)
-                                {
-                                    bool isMember = memberManager.IsMember(groupId, memberKeyPairs[senderIdx].PublicKey);
+                            string receiverKey = Convert.ToBase64String(memberKeyPairs[receiverIdx].PublicKey);
+                            string senderBase64Key = Convert.ToBase64String(memberKeyPairs[senderIdx].PublicKey);
 
-                                    string receiverKey = Convert.ToBase64String(memberKeyPairs[receiverIdx].PublicKey);
-                                    string senderBase64Key = Convert.ToBase64String(memberKeyPairs[senderIdx].PublicKey);
-
-                                    Trace.TraceWarning($"Receiver {receiverIdx} key: {receiverKey}");
-                                    Trace.TraceWarning($"Sender {senderIdx} key: {senderBase64Key}");
-                                    Trace.TraceWarning($"Is sender authorized: {isMember}");
-                                }
-                            }
+                            Trace.TraceWarning($"Receiver {receiverIdx} key: {receiverKey}");
+                            Trace.TraceWarning($"Sender {senderIdx} key: {senderBase64Key}");
                         }
 
                         Assert.IsTrue(result, $"Member {receiverIdx} should process distribution from member {senderIdx}");
@@ -129,14 +113,14 @@ namespace LibEmiddle.Tests.Unit
                 string message = $"Message {senderIdx} from member {senderIdx}";
                 messages.Add(message);
 
-                var senderGroup = await groupManagers[senderIdx].GetGroupAsync(groupId);
+                var senderGroup = groupSessions[senderIdx];
                 encryptedMessages.Add(await senderGroup.EncryptMessageAsync(message));
             }
 
             // Check that all members can decrypt all messages
             for (int receiverIdx = 0; receiverIdx < memberCount; receiverIdx++)
             {
-                var receiverGroup = await groupManagers[receiverIdx].GetGroupAsync(groupId);
+                var receiverGroup = groupSessions[receiverIdx];
 
                 for (int msgIdx = 0; msgIdx < memberCount; msgIdx++)
                 {
@@ -155,7 +139,7 @@ namespace LibEmiddle.Tests.Unit
             // Dispose
             for (int i = 0; i < memberCount; i++)
             {
-                groupManagers[i].Dispose();
+                groupSessions[i].Dispose();
             }
         }
 
@@ -168,32 +152,22 @@ namespace LibEmiddle.Tests.Unit
             var charlieKeyPair = Sodium.GenerateEd25519KeyPair();
             var daveKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            var aliceManager = new GroupChatManager(aliceKeyPair);
-            var bobManager = new GroupChatManager(bobKeyPair);
-            var charlieManager = new GroupChatManager(charlieKeyPair);
-            var daveManager = new GroupChatManager(daveKeyPair);
-
             string groupId = "member-removal-test";
+            string groupName = "Member Removal Test";
 
             // Alice creates the group as admin
-            var aliceGroup = await aliceManager.CreateGroupAsync(
-                groupId,
-                "Member Removal Test",
-                new List<byte[]>(),
-                new GroupSessionOptions { GroupId = groupId, CreatorIsAdmin = true });
+            var aliceGroup = new GroupSession(groupId, groupName, aliceKeyPair);
+            await aliceGroup.ActivateAsync();
 
             // Everyone creates their local view of the group
-            var bobGroup = await bobManager.CreateGroupAsync(
-                groupId, "Bob's View", null,
-                new GroupSessionOptions { GroupId = groupId });
+            var bobGroup = new GroupSession(groupId, groupName, bobKeyPair);
+            await bobGroup.ActivateAsync();
 
-            var charlieGroup = await charlieManager.CreateGroupAsync(
-                groupId, "Charlie's View", null,
-                new GroupSessionOptions { GroupId = groupId });
+            var charlieGroup = new GroupSession(groupId, groupName, charlieKeyPair);
+            await charlieGroup.ActivateAsync();
 
-            var daveGroup = await daveManager.CreateGroupAsync(
-                groupId, "Dave's View", null,
-                new GroupSessionOptions { GroupId = groupId });
+            var daveGroup = new GroupSession(groupId, groupName, daveKeyPair);
+            await daveGroup.ActivateAsync();
 
             // All members add each other for bidirectional communication
             await aliceGroup.AddMemberAsync(bobKeyPair.PublicKey);
@@ -254,22 +228,18 @@ namespace LibEmiddle.Tests.Unit
 
             // 1. Create new group (in reality, this would be a key rotation after member removal)
             string newGroupId = "member-removal-test-new";
+            string newGroupName = "New Group Without Dave";
 
             // Alice creates new group and adds only Bob and Charlie
-            var aliceNewGroup = await aliceManager.CreateGroupAsync(
-                newGroupId,
-                "New Group Without Dave",
-                new List<byte[]>(),
-                new GroupSessionOptions { GroupId = newGroupId, CreatorIsAdmin = true });
+            var aliceNewGroup = new GroupSession(newGroupId, newGroupName, aliceKeyPair);
+            await aliceNewGroup.ActivateAsync();
 
             // Bob and Charlie create their view of the new group
-            var bobNewGroup = await bobManager.CreateGroupAsync(
-                newGroupId, "Bob's New View", null,
-                new GroupSessionOptions { GroupId = newGroupId });
+            var bobNewGroup = new GroupSession(newGroupId, newGroupName, bobKeyPair);
+            await bobNewGroup.ActivateAsync();
 
-            var charlieNewGroup = await charlieManager.CreateGroupAsync(
-                newGroupId, "Charlie's New View", null,
-                new GroupSessionOptions { GroupId = newGroupId });
+            var charlieNewGroup = new GroupSession(newGroupId, newGroupName, charlieKeyPair);
+            await charlieNewGroup.ActivateAsync();
 
             // Add members to the new group (without Dave)
             await aliceNewGroup.AddMemberAsync(bobKeyPair.PublicKey);
@@ -305,9 +275,8 @@ namespace LibEmiddle.Tests.Unit
             string charlieDecryptedNew = await charlieNewGroup.DecryptMessageAsync(aliceNewMsg);
 
             // 6. Try to have Dave decrypt (even if Dave creates his own group, he won't be authorized by others)
-            var daveNewGroup = await daveManager.CreateGroupAsync(
-                newGroupId, "Dave's Unauthorized View", null,
-                new GroupSessionOptions { GroupId = newGroupId });
+            var daveNewGroup = new GroupSession(newGroupId, newGroupName, daveKeyPair);
+            await daveNewGroup.ActivateAsync();
 
             await daveNewGroup.AddMemberAsync(aliceKeyPair.PublicKey);
             // But no one has authorized Dave in the new group
@@ -319,10 +288,14 @@ namespace LibEmiddle.Tests.Unit
             Assert.AreEqual(newMessage, charlieDecryptedNew, "Charlie should decrypt the new message");
             Assert.IsNull(daveDecryptedNew, "Dave should not be able to decrypt the new message");
 
-            aliceManager.Dispose();
-            bobManager.Dispose();
-            charlieManager.Dispose();
-            daveManager.Dispose();
+            aliceGroup.Dispose();
+            bobGroup.Dispose();
+            charlieGroup.Dispose();
+            daveGroup.Dispose();
+            aliceNewGroup.Dispose();
+            bobNewGroup.Dispose();
+            charlieNewGroup.Dispose();
+            daveNewGroup.Dispose();
         }
 
         [TestMethod]
@@ -332,23 +305,15 @@ namespace LibEmiddle.Tests.Unit
             var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
             var bobKeyPair = Sodium.GenerateEd25519KeyPair();
 
-            var aliceManager = new GroupChatManager(aliceKeyPair);
-            var bobManager = new GroupChatManager(bobKeyPair);
-
             string groupId = "concurrent-access-test";
+            string groupName = "Concurrent Access Test";
 
             // Both create their local view of the group
-            var aliceGroup = await aliceManager.CreateGroupAsync(
-                groupId,
-                "Alice's Group",
-                null,
-                new GroupSessionOptions { GroupId = groupId });
+            var aliceGroup = new GroupSession(groupId, groupName, aliceKeyPair);
+            await aliceGroup.ActivateAsync();
 
-            var bobGroup = await bobManager.CreateGroupAsync(
-                groupId,
-                "Bob's Group",
-                null,
-                new GroupSessionOptions { GroupId = groupId });
+            var bobGroup = new GroupSession(groupId, groupName, bobKeyPair);
+            await bobGroup.ActivateAsync();
 
             // Both add each other - this is the key for bidirectional communication
             bool aliceAuthBobResult = await aliceGroup.AddMemberAsync(bobKeyPair.PublicKey);
@@ -465,8 +430,8 @@ namespace LibEmiddle.Tests.Unit
                 Assert.AreEqual(aliceMessages[i], decryptionResults[i], $"Decrypted message {i} should match original");
             }
 
-            bobManager.Dispose();
-            aliceManager.Dispose();
+            bobGroup.Dispose();
+            aliceGroup.Dispose();
         }
 
         [TestCleanup]

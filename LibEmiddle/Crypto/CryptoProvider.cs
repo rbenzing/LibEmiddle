@@ -24,6 +24,15 @@ namespace LibEmiddle.Crypto
             _keyStorage = new KeyStorage();
         }
 
+        /// <summary>
+        /// Initializes a new instance of the CryptoProvider class with a custom storage path.
+        /// </summary>
+        /// <param name="storagePath">Custom path for key storage. If null, the default path is used.</param>
+        public CryptoProvider(string? storagePath)
+        {
+            _keyStorage = new KeyStorage(storagePath);
+        }
+
         /// <inheritdoc/>
         public Task<KeyPair> GenerateKeyPairAsync(KeyType keyType)
         {
@@ -77,11 +86,9 @@ namespace LibEmiddle.Crypto
             {
                 LoggingManager.LogError(nameof(CryptoProvider), $"Error signing data: {ex.Message}");
                 throw;
-            } finally
-            {
-                // secure clear private key
-                SecureMemory.SecureClear(privateKey);
             }
+            // Note: We should NOT clear the private key here as it's owned by the caller
+            // The caller is responsible for managing the lifetime of their private key
         }
 
         /// <inheritdoc/>
@@ -110,6 +117,9 @@ namespace LibEmiddle.Crypto
         {
             if (plaintext == null)
                 throw new ArgumentNullException(nameof(plaintext));
+
+            if (plaintext.Length == 0)
+                throw new ArgumentException("Plaintext cannot be empty.", nameof(plaintext));
 
             if (key == null)
                 throw new ArgumentNullException(nameof(key));
@@ -263,8 +273,16 @@ namespace LibEmiddle.Crypto
 
             try
             {
-                // Use Argon2id for password-based hashing
-                 return Encoding.Default.GetBytes(Sodium.Argon2id(password));
+                // Use a deterministic approach for key derivation
+                // Convert password to bytes
+                byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+
+                // Use a fixed salt for deterministic key derivation
+                // In production, you might want to use a per-application salt
+                byte[] salt = Encoding.UTF8.GetBytes("LibEmiddle-KeyDerivation-Salt-v1");
+
+                // Use HKDF to derive exactly 32 bytes for AES encryption
+                return Sodium.HkdfDerive(passwordBytes, salt, Encoding.UTF8.GetBytes("LibEmiddle-Password-Key"), 32);
             }
             catch (Exception ex)
             {
@@ -370,6 +388,9 @@ namespace LibEmiddle.Crypto
             if (key == null)
                 throw new ArgumentNullException(nameof(key));
 
+            if (key.Length == 0)
+                return Task.FromResult(false);
+
             try
             {
                 if (password != null)
@@ -381,12 +402,12 @@ namespace LibEmiddle.Crypto
                         byte[] nonce = GenerateNonce(Constants.NONCE_SIZE);
                         byte[] encryptedKey = Encrypt(key, encryptionKey, nonce, null);
 
-                        // Store encrypted key with nonce
+                        // Store encrypted key with nonce using StoreData (which doesn't double-encrypt)
                         byte[] combinedData = new byte[nonce.Length + encryptedKey.Length];
                         nonce.AsSpan().CopyTo(combinedData.AsSpan(0));
                         encryptedKey.AsSpan().CopyTo(combinedData.AsSpan(nonce.Length));
 
-                        return Task.FromResult(_keyStorage.StoreKey(keyId, combinedData));
+                        return Task.FromResult(_keyStorage.StoreData($"password-key:{keyId}", combinedData));
                     }
                     finally
                     {
@@ -420,18 +441,19 @@ namespace LibEmiddle.Crypto
 
             try
             {
-                byte[]? storedData = _keyStorage.RetrieveKey(keyId);
-                if (storedData == null)
-                    return Task.FromResult<byte[]?>(null);
-
                 if (password != null)
                 {
+                    // Try to retrieve password-protected key
+                    byte[]? storedData = _keyStorage.RetrieveData($"password-key:{keyId}");
+                    if (storedData == null)
+                        return Task.FromResult<byte[]?>(null);
+
                     // Key is encrypted, decrypt it
                     byte[] encryptionKey = DeriveKeyFromPassword(password);
                     try
                     {
                         // Extract nonce and encrypted key
-                        byte[] nonce = GenerateNonce(Constants.NONCE_SIZE);
+                        byte[] nonce = new byte[Constants.NONCE_SIZE];
                         byte[] encryptedKey = new byte[storedData.Length - Constants.NONCE_SIZE];
 
                         storedData.AsSpan(0, Constants.NONCE_SIZE).CopyTo(nonce);
@@ -452,7 +474,8 @@ namespace LibEmiddle.Crypto
                 }
                 else
                 {
-                    // Key is not encrypted
+                    // Key is not password-protected
+                    byte[]? storedData = _keyStorage.RetrieveKey(keyId);
                     return Task.FromResult<byte[]?>(storedData);
                 }
             }
@@ -477,7 +500,16 @@ namespace LibEmiddle.Crypto
 
             try
             {
-                return Task.FromResult(_keyStorage.DeleteKey(keyId));
+                if (password != null)
+                {
+                    // Delete password-protected key
+                    return Task.FromResult(_keyStorage.DeleteData($"password-key:{keyId}"));
+                }
+                else
+                {
+                    // Delete regular key
+                    return Task.FromResult(_keyStorage.DeleteKey(keyId));
+                }
             }
             catch (Exception ex)
             {

@@ -83,7 +83,7 @@ namespace LibEmiddle.Protocol
 
                 // Step 2: Initialize Double Ratchet with the shared key from X3DH
                 // UPDATED: This now uses our Signal-compliant initialization that calls DeriveInitialSessionKeys()
-                var session = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+                var session = _doubleRatchetProtocol.InitializeSessionAsSender(
                     x3dhResult.SharedKey,
                     recipientBundle.SignedPreKey, // Use recipient's signed prekey as their initial ratchet key
                     sessionId);
@@ -139,13 +139,14 @@ namespace LibEmiddle.Protocol
                 }
 
                 // Step 2: Get the signed prekey private key for Double Ratchet initialization
+                // Both Alice and Bob must use the same key (Bob's signed prekey) for the initial ratchet
                 byte[]? signedPreKeyPrivate = receiverKeyBundle.GetSignedPreKeyPrivate();
                 if (signedPreKeyPrivate == null)
                 {
                     throw new InvalidOperationException("Missing signed prekey private key in receiver bundle");
                 }
 
-                // Create KeyPair for the signed prekey
+                // Create KeyPair for the signed prekey - this must match what Alice uses
                 var signedPreKeyPair = new KeyPair
                 {
                     PublicKey = receiverKeyBundle.SignedPreKey,
@@ -154,9 +155,9 @@ namespace LibEmiddle.Protocol
 
                 // Step 3: Initialize Double Ratchet with the shared key from X3DH
                 // UPDATED: This now uses our Signal-compliant initialization that calls DeriveInitialSessionKeys()
-                var session = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
+                var session = _doubleRatchetProtocol.InitializeSessionAsReceiver(
                     sharedKey,
-                    signedPreKeyPair,
+                    signedPreKeyPair, // Use the signed prekey pair to match Alice's expectation
                     initialMessage.SenderEphemeralKeyPublic, // Sender's ephemeral key from X3DH
                     sessionId);
 

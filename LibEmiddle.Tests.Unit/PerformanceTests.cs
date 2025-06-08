@@ -3,7 +3,6 @@ using System;
 using System.Text;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
-using LibEmiddle.API;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
@@ -19,6 +18,7 @@ namespace LibEmiddle.Tests.Unit
         private CryptoProvider _cryptoProvider;
         private X3DHProtocol _x3dhProtocol;
         private DoubleRatchetProtocol _doubleRatchetProtocol;
+        private ProtocolAdapter _protocolAdapter;
 
         [TestInitialize]
         public void Setup()
@@ -26,6 +26,7 @@ namespace LibEmiddle.Tests.Unit
             _cryptoProvider = new CryptoProvider();
             _x3dhProtocol = new X3DHProtocol(_cryptoProvider);
             _doubleRatchetProtocol = new DoubleRatchetProtocol();
+            _protocolAdapter = new ProtocolAdapter(_x3dhProtocol, _doubleRatchetProtocol, _cryptoProvider);
         }
 
         [TestMethod]
@@ -57,38 +58,47 @@ namespace LibEmiddle.Tests.Unit
 
             // Small message
             stopwatch.Restart();
-            var smallEncrypted = LibEmiddleClient.EncryptMessage(smallMessage, key);
+            byte[] smallPlaintext = System.Text.Encoding.UTF8.GetBytes(smallMessage);
+            byte[] smallNonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
+            var smallEncrypted = _cryptoProvider.Encrypt(smallPlaintext, key, smallNonce, null);
             stopwatch.Stop();
             long smallEncryptTime = stopwatch.ElapsedMilliseconds;
 
             // Medium message
             stopwatch.Restart();
-            var mediumEncrypted = LibEmiddleClient.EncryptMessage(mediumMessage, key);
+            byte[] mediumPlaintext = System.Text.Encoding.UTF8.GetBytes(mediumMessage);
+            byte[] mediumNonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
+            var mediumEncrypted = _cryptoProvider.Encrypt(mediumPlaintext, key, mediumNonce, null);
             stopwatch.Stop();
             long mediumEncryptTime = stopwatch.ElapsedMilliseconds;
 
             // Large message
             stopwatch.Restart();
-            var largeEncrypted = LibEmiddleClient.EncryptMessage(largeMessage, key);
+            byte[] largePlaintext = System.Text.Encoding.UTF8.GetBytes(largeMessage);
+            byte[] largeNonce = _cryptoProvider.GenerateRandomBytes(Constants.NONCE_SIZE);
+            var largeEncrypted = _cryptoProvider.Encrypt(largePlaintext, key, largeNonce, null);
             stopwatch.Stop();
             long largeEncryptTime = stopwatch.ElapsedMilliseconds;
 
             // Measure decryption time
             // Small message
             stopwatch.Restart();
-            string smallDecrypted = LibEmiddleClient.DecryptMessage(smallEncrypted, key);
+            byte[] smallDecryptedBytes = _cryptoProvider.Decrypt(smallEncrypted, key, smallNonce, null);
+            string smallDecrypted = System.Text.Encoding.UTF8.GetString(smallDecryptedBytes);
             stopwatch.Stop();
             long smallDecryptTime = stopwatch.ElapsedMilliseconds;
 
             // Medium message
             stopwatch.Restart();
-            string mediumDecrypted = LibEmiddleClient.DecryptMessage(mediumEncrypted, key);
+            byte[] mediumDecryptedBytes = _cryptoProvider.Decrypt(mediumEncrypted, key, mediumNonce, null);
+            string mediumDecrypted = System.Text.Encoding.UTF8.GetString(mediumDecryptedBytes);
             stopwatch.Stop();
             long mediumDecryptTime = stopwatch.ElapsedMilliseconds;
 
             // Large message
             stopwatch.Restart();
-            string largeDecrypted = LibEmiddleClient.DecryptMessage(largeEncrypted, key);
+            byte[] largeDecryptedBytes = _cryptoProvider.Decrypt(largeEncrypted, key, largeNonce, null);
+            string largeDecrypted = System.Text.Encoding.UTF8.GetString(largeDecryptedBytes);
             stopwatch.Stop();
             long largeDecryptTime = stopwatch.ElapsedMilliseconds;
 
@@ -149,14 +159,14 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void Performance_GroupMessageEncryptionTest()
+        public async Task Performance_GroupMessageEncryptionTest()
         {
             // Arrange
             var aliceKeyPair = Sodium.GenerateEd25519KeyPair();
-            var groupChatManager = new GroupChatManager(aliceKeyPair);
             string groupId = "performance-test-group";
             string groupName = "Performance Test Group";
-            groupChatManager.CreateGroupAsync(groupId, groupName).GetAwaiter().GetResult();
+            var groupSession = new GroupSession(groupId, groupName, aliceKeyPair);
+            await groupSession.ActivateAsync();
 
             // Create a message of moderate size
             StringBuilder messageBuilder = new(50 * 1024);
@@ -173,7 +183,7 @@ namespace LibEmiddle.Tests.Unit
             // Measure time to encrypt 10 messages
             for (int i = 0; i < 10; i++)
             {
-                var encryptedMessage = groupChatManager.SendMessageAsync(groupId, message).GetAwaiter().GetResult();
+                var encryptedMessage = await groupSession.EncryptMessageAsync(message);
             }
 
             stopwatch.Stop();
@@ -182,44 +192,44 @@ namespace LibEmiddle.Tests.Unit
             // Assert
             Assert.IsTrue(avgEncryptionTime < 200,
                 $"Group message encryption took an average of {avgEncryptionTime}ms per message");
+
+            groupSession.Dispose();
         }
 
         [TestMethod]
         public async Task Performance_DoubleRatchetMessageExchangeTest()
         {
-            // Arrange - Set up X3DH and Double Ratchet sessions
+            // Arrange - Set up X3DH and Double Ratchet sessions using the working pattern from IntegrationTests
             // 1. Generate identity key pairs for Alice and Bob
             var aliceIdentityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var bobIdentityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
             // 2. Create Bob's key bundle (recipient)
             var bobKeyBundle = await _x3dhProtocol.CreateKeyBundleAsync(bobIdentityKeyPair, numOneTimeKeys: 1);
+            var bobPublicBundle = bobKeyBundle.ToPublicBundle();
 
-            // 3. Alice initiates session with Bob's bundle (Alice is the sender)
+            // 3. Perform X3DH key exchange (Alice initiating with Bob) - same as IntegrationTests
+            var x3dhResult = await _x3dhProtocol.InitiateSessionAsSenderAsync(
+                bobPublicBundle,
+                aliceIdentityKeyPair);
+
+            // Create a unique session ID
             string sessionId = $"test-session-{Guid.NewGuid():N}";
-            var x3dhResult = await _x3dhProtocol.InitiateSessionAsSenderAsync(bobKeyBundle.ToPublicBundle(), aliceIdentityKeyPair);
 
-            // 4. Initialize Alice's Double Ratchet session with the shared key from X3DH
-            var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSenderAsync(
+            // 4. Initialize Double Ratchet for Alice (sender) - same as IntegrationTests
+            var aliceSession = _doubleRatchetProtocol.InitializeSessionAsSender(
                 x3dhResult.SharedKey,
-                bobKeyBundle.SignedPreKey,
+                bobPublicBundle.SignedPreKey,
                 sessionId);
 
-            // 5. Bob processes the initial message and establishes his session
-            var bobSharedKey = await _x3dhProtocol.EstablishSessionAsReceiverAsync(
-                x3dhResult.MessageDataToSend,
-                bobKeyBundle);
+            // 5. Initialize Double Ratchet for Bob (receiver) - same as IntegrationTests
+            var bobSignedPreKeyPrivate = bobKeyBundle.GetSignedPreKeyPrivate();
+            var bobSignedPreKeyPair = new KeyPair(
+                bobPublicBundle.SignedPreKey,
+                bobSignedPreKeyPrivate);
 
-            // 6. Create a signed prekey pair for Bob's Double Ratchet initialization
-            var bobSignedPreKeyPair = new KeyPair
-            {
-                PublicKey = bobKeyBundle.SignedPreKey,
-                PrivateKey = bobKeyBundle.GetSignedPreKeyPrivate()
-            };
-
-            // 7. Initialize Bob's Double Ratchet session
-            var bobSession = _doubleRatchetProtocol.InitializeSessionAsReceiverAsync(
-                bobSharedKey,
+            var bobSession = _doubleRatchetProtocol.InitializeSessionAsReceiver(
+                x3dhResult.SharedKey,
                 bobSignedPreKeyPair,
                 x3dhResult.MessageDataToSend.SenderEphemeralKeyPublic,
                 sessionId);

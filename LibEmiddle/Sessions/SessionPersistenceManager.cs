@@ -311,7 +311,7 @@ namespace LibEmiddle.Sessions
         {
             // Serialize to JSON
             string json = JsonSerialization.Serialize(dto);
-            byte[] data = Encoding.Default.GetBytes(json);
+            byte[] data = Encoding.UTF8.GetBytes(json);
 
             // Generate a key for encryption
             byte[] key = _cryptoProvider.GenerateRandomBytes(32);
@@ -340,14 +340,17 @@ namespace LibEmiddle.Sessions
                 await _ioLock.WaitAsync();
                 try
                 {
-                    // Write metadata and encrypted data
+                    // Write metadata and encrypted data using binary approach
                     using (var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
-                    using (var writer = new StreamWriter(fs))
+                    using (var writer = new BinaryWriter(fs))
                     {
-                        await writer.WriteLineAsync(metadataJson);
-                        await writer.FlushAsync();
+                        // Write metadata length and metadata
+                        byte[] metadataBytes = Encoding.UTF8.GetBytes(metadataJson);
+                        writer.Write(metadataBytes.Length);
+                        writer.Write(metadataBytes);
 
-                        await fs.WriteAsync(encryptedData, 0, encryptedData.Length);
+                        // Write encrypted data
+                        writer.Write(encryptedData);
                     }
 
                     // Store the encryption key in secure storage
@@ -382,21 +385,23 @@ namespace LibEmiddle.Sessions
                 if (!File.Exists(filePath))
                     return null;
 
-                // Read the file
-                string? metadataJson;
+                // Read the file using binary approach
+                string metadataJson;
                 byte[] encryptedData;
 
                 using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                using (var reader = new StreamReader(fs))
+                using (var reader = new BinaryReader(fs))
                 {
-                    // Read metadata from the first line
-                    metadataJson = await reader.ReadLineAsync();
+                    // Read metadata length and metadata
+                    int metadataLength = reader.ReadInt32();
+                    byte[] metadataBytes = reader.ReadBytes(metadataLength);
+                    metadataJson = Encoding.UTF8.GetString(metadataBytes);
+
                     if (string.IsNullOrEmpty(metadataJson))
                         throw new InvalidDataException("Session file is corrupted");
 
                     // Read encrypted data
-                    encryptedData = new byte[fs.Length - fs.Position];
-                    await fs.ReadAsync(encryptedData, 0, encryptedData.Length);
+                    encryptedData = reader.ReadBytes((int)(fs.Length - fs.Position));
                 }
 
                 // Parse metadata
@@ -468,14 +473,17 @@ namespace LibEmiddle.Sessions
                     kvp => kvp.Key,
                     kvp => Convert.ToBase64String(kvp.Value)
                 ),
-                SkippedMessageKeys = session.SkippedMessageKeys.ToDictionary(
-                    kvp => new SkippedMessageKeyDto
+                // Convert SkippedMessageKeys to a list to avoid JSON serialization issues with complex dictionary keys
+                SkippedMessageKeys = new Dictionary<SkippedMessageKeyDto, string>(),
+                SkippedMessageKeysList = session.SkippedMessageKeys.Select(kvp => new SkippedMessageKeyEntryDto
+                {
+                    Key = new SkippedMessageKeyDto
                     {
                         DhPublicKey = Convert.ToBase64String(kvp.Key.DhPublicKey),
                         MessageNumber = kvp.Key.MessageNumber
                     },
-                    kvp => Convert.ToBase64String(kvp.Value)
-                ),
+                    Value = Convert.ToBase64String(kvp.Value)
+                }).ToList(),
                 IsInitialized = session.IsInitialized,
                 CreationTimestamp = session.CreationTimestamp
             };
@@ -519,13 +527,29 @@ namespace LibEmiddle.Sessions
                 session.SentMessages[kvp.Key] = Convert.FromBase64String(kvp.Value);
             }
 
-            foreach (var kvp in dto.SkippedMessageKeys)
+            // Handle skipped message keys - prefer the list format, fall back to dictionary
+            if (dto.SkippedMessageKeysList != null && dto.SkippedMessageKeysList.Count > 0)
             {
-                var key = new SkippedMessageKey(
-                    Convert.FromBase64String(kvp.Key.DhPublicKey),
-                    kvp.Key.MessageNumber
-                );
-                session.SkippedMessageKeys[key] = Convert.FromBase64String(kvp.Value);
+                foreach (var entry in dto.SkippedMessageKeysList)
+                {
+                    var key = new SkippedMessageKey(
+                        Convert.FromBase64String(entry.Key.DhPublicKey),
+                        entry.Key.MessageNumber
+                    );
+                    session.SkippedMessageKeys[key] = Convert.FromBase64String(entry.Value);
+                }
+            }
+            else
+            {
+                // Fallback to dictionary format for backward compatibility
+                foreach (var kvp in dto.SkippedMessageKeys)
+                {
+                    var key = new SkippedMessageKey(
+                        Convert.FromBase64String(kvp.Key.DhPublicKey),
+                        kvp.Key.MessageNumber
+                    );
+                    session.SkippedMessageKeys[key] = Convert.FromBase64String(kvp.Value);
+                }
             }
 
             return session;
