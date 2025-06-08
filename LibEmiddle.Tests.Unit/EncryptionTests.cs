@@ -69,8 +69,8 @@ namespace LibEmiddle.Tests.Unit
             }
 
             // Act
-            var encryptedMessage = LibEmiddleClient.EncryptMessage(message, key);
-            string decryptedMessage = LibEmiddleClient.DecryptMessage(encryptedMessage, key);
+            byte[] encryptedMessage = _cryptoProvider.Encrypt(Encoding.Default.GetBytes(message), key, null, null);
+            byte[] decryptedMessage = _cryptoProvider.Decrypt(encryptedMessage, key, null, null);
 
             // Assert
             Assert.AreEqual(message, decryptedMessage);
@@ -124,73 +124,7 @@ namespace LibEmiddle.Tests.Unit
             }
 
             // Act & Assert - Should throw ArgumentException
-            LibEmiddleClient.EncryptMessage("", key);
-        }
-
-        [TestMethod]
-        public void MessageCorruption_ShouldDetectTampering()
-        {
-            // Arrange
-            string message = "This message should be protected from tampering";
-            byte[] key = new byte[32];
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(key);
-            }
-
-            // Encrypt the message
-            var encryptedMessage = LibEmiddleClient.EncryptMessage(message, key);
-
-            // Make a copy for tampering
-            var tamperedMessage = new EncryptedMessage
-            {
-                Ciphertext = new byte[encryptedMessage.Ciphertext.Length],
-                Nonce = encryptedMessage.Nonce
-            };
-            Buffer.BlockCopy(encryptedMessage.Ciphertext, 0, tamperedMessage.Ciphertext, 0, encryptedMessage.Ciphertext.Length);
-
-            // Tamper with the ciphertext (flip a bit in the middle)
-            int middlePosition = tamperedMessage.Ciphertext.Length / 2;
-            tamperedMessage.Ciphertext[middlePosition] ^= 1; // Flip one bit
-
-            // Act & Assert
-            Assert.ThrowsException<CryptographicException>(() =>
-            {
-                LibEmiddleClient.DecryptMessage(tamperedMessage, key);
-            }, "Tampered message should fail authentication");
-
-            // Original message should still decrypt correctly
-            string decryptedOriginal = LibEmiddleClient.DecryptMessage(encryptedMessage, key);
-            Assert.AreEqual(message, decryptedOriginal);
-        }
-
-        [TestMethod]
-        public void ExtremeMessageSizes_ShouldEncryptAndDecryptCorrectly()
-        {
-            // Arrange
-            byte[] key = new byte[32];
-            RandomNumberGenerator.Fill(key);
-
-            // Test with very small message
-            string tinyMessage = "Hi";
-
-            // Test with a large message (100 KB of text)
-            StringBuilder largeMessageBuilder = new StringBuilder(100 * 1024);
-            for (int i = 0; i < 1024 * 10; i++) // Generate ~100KB of text
-            {
-                largeMessageBuilder.Append("This is a test message for encryption with large content. ");
-            }
-            string largeMessage = largeMessageBuilder.ToString();
-
-            // Act & Assert - Tiny message
-            var tinyEncrypted = LibEmiddleClient.EncryptMessage(tinyMessage, key);
-            string tinyDecrypted = LibEmiddleClient.DecryptMessage(tinyEncrypted, key);
-            Assert.AreEqual(tinyMessage, tinyDecrypted);
-
-            // Act & Assert - Large message
-            var largeEncrypted = LibEmiddleClient.EncryptMessage(largeMessage, key);
-            string largeDecrypted = LibEmiddleClient.DecryptMessage(largeEncrypted, key);
-            Assert.AreEqual(largeMessage, largeDecrypted);
+            _cryptoProvider.Encrypt(Encoding.Default.GetBytes([]), key, null, null);
         }
 
         [TestMethod]

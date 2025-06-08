@@ -11,6 +11,11 @@
         public string? GroupId { get; set; }
 
         /// <summary>
+        /// Group name
+        /// </summary>
+        public string? GroupName { get; set; }
+
+        /// <summary>
         /// Current chain key for the group
         /// </summary>
         public byte[]? ChainKey { get; set; }

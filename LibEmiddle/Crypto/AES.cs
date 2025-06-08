@@ -110,7 +110,7 @@ namespace LibEmiddle.Crypto
                 throw new CryptographicException("Ciphertext too short to contain tag");
 
             // Prepare additional data if provided
-            byte[] ad = additionalData ?? Array.Empty<byte>();
+            byte[] ad = additionalData ?? [];
 
             // Allocate output buffer for plaintext
             byte[] plaintext = new byte[ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE];

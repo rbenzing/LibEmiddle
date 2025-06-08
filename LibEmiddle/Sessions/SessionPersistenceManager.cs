@@ -12,6 +12,7 @@ namespace LibEmiddle.Sessions
 {
     /// <summary>
     /// Provides centralized persistence for all types of cryptographic sessions.
+    /// Updated to work with the consolidated GroupSession implementation.
     /// </summary>
     public class SessionPersistenceManager : IDisposable
     {
@@ -69,7 +70,7 @@ namespace LibEmiddle.Sessions
         }
 
         /// <summary>
-        /// Saves a group session to persistent storage.
+        /// Saves a group session to persistent storage using the new consolidated GroupSession.
         /// </summary>
         public async Task<bool> SaveGroupSessionAsync(IGroupSession session)
         {
@@ -79,27 +80,39 @@ namespace LibEmiddle.Sessions
             if (session is not GroupSession groupSession)
                 throw new ArgumentException("Unsupported session type", nameof(session));
 
-            // Serialize the session
-            var dto = new SerializedSessionData
+            try
             {
-                SessionId = groupSession.SessionId,
-                SessionType = SessionType.Group,
-                State = groupSession.State,
-                CreatedAt = groupSession.CreatedAt,
-                LastModifiedAt = DateTime.UtcNow,
-                Metadata = new Dictionary<string, string>()
-            };
+                // Get the serialized state directly from the GroupSession
+                string groupState = await groupSession.GetSerializedStateAsync();
 
-            // Add group-specific metadata
-            dto.Properties["GroupId"] = groupSession.GroupId;
-            dto.Properties["CreatorPublicKey"] = Convert.ToBase64String(groupSession.CreatorPublicKey);
-            dto.Properties["RotationStrategy"] = groupSession.RotationStrategy.ToString();
+                // Create the session data container
+                var dto = new SerializedSessionData
+                {
+                    SessionId = groupSession.SessionId,
+                    SessionType = SessionType.Group,
+                    State = groupSession.State,
+                    CreatedAt = groupSession.CreatedAt,
+                    LastModifiedAt = DateTime.UtcNow,
+                    Metadata = new Dictionary<string, string>()
+                };
 
-            // Serialize group state
-            dto.GroupState = await groupSession.GetSerializedStateAsync();
+                // Add group-specific metadata
+                dto.Properties["GroupId"] = groupSession.GroupId;
+                dto.Properties["CreatorPublicKey"] = Convert.ToBase64String(groupSession.CreatorPublicKey);
+                dto.Properties["RotationStrategy"] = groupSession.RotationStrategy.ToString();
 
-            // Encrypt and save the session
-            return await EncryptAndSaveSessionAsync(dto);
+                // Store the complete group state
+                dto.GroupState = groupState;
+
+                // Encrypt and save the session
+                return await EncryptAndSaveSessionAsync(dto);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(SessionPersistenceManager),
+                    $"Failed to save group session {session.SessionId}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -156,61 +169,79 @@ namespace LibEmiddle.Sessions
         }
 
         /// <summary>
-        /// Loads a group session from persistent storage.
+        /// Loads group session state as a string for the new consolidated GroupSession.
+        /// This method is used by SessionManager to restore GroupSession state.
         /// </summary>
-        public async Task<IGroupSession?> LoadGroupSessionAsync(
-            string sessionId,
-            KeyPair identityKeyPair,
-            IGroupKeyManager keyManager,
-            IGroupMemberManager memberManager,
-            IGroupMessageCrypto messageCrypto,
-            ISenderKeyDistribution distributionManager)
+        public async Task<string?> LoadGroupSessionStateAsync(string sessionId)
         {
             ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
-            
-            // Load and decrypt the session data
-            var dto = await LoadAndDecryptSessionAsync(sessionId);
-            if (dto == null || dto.SessionType != SessionType.Group)
-                return null;
-
-            ArgumentNullException.ThrowIfNull(dto.GroupState, nameof(dto.GroupState));
 
             try
             {
-                // Extract necessary data
-                if (!dto.Properties.TryGetValue("GroupId", out string? groupId) ||
-                    !dto.Properties.TryGetValue("CreatorPublicKey", out string? creatorPublicKeyBase64) ||
-                    !dto.Properties.TryGetValue("RotationStrategy", out string? rotationStrategyStr))
+                // Load and decrypt the session data
+                var dto = await LoadAndDecryptSessionAsync(sessionId);
+                if (dto?.SessionType != SessionType.Group || string.IsNullOrEmpty(dto.GroupState))
                 {
-                    throw new InvalidOperationException("Missing required keys in session data");
+                    LoggingManager.LogWarning(nameof(SessionPersistenceManager),
+                        $"No valid group state found for session {sessionId}");
+                    return null;
                 }
 
-                // Parse the rotation strategy
-                if (!Enum.TryParse<KeyRotationStrategy>(rotationStrategyStr, out var rotationStrategy))
-                {
-                    rotationStrategy = KeyRotationStrategy.Standard;
-                }
+                return dto.GroupState;
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(SessionPersistenceManager),
+                    $"Failed to load group session state {sessionId}: {ex.Message}");
+                return null;
+            }
+        }
 
-                byte[] creatorPublicKey = Convert.FromBase64String(creatorPublicKeyBase64);
+        /// <summary>
+        /// Legacy method - loads a group session using the old multi-component approach.
+        /// This is kept for backward compatibility but will use the new GroupSession internally.
+        /// </summary>
+        public async Task<IGroupSession?> LoadGroupSessionAsync(
+            string sessionId,
+            KeyPair identityKeyPair)
+        {
+            ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
+            ArgumentNullException.ThrowIfNull(identityKeyPair, nameof(identityKeyPair));
 
-                // Create the group session
+            try
+            {
+                // Load the group state using the new method
+                string? groupState = await LoadGroupSessionStateAsync(sessionId);
+                if (string.IsNullOrEmpty(groupState))
+                    return null;
+
+                // Parse the group state to extract the group ID
+                var sessionState = JsonSerialization.Deserialize<GroupSessionState>(groupState);
+                if (sessionState?.GroupId == null)
+                    return null;
+
+                // Create a new consolidated GroupSession
                 var groupSession = new GroupSession(
-                    groupId,
+                    sessionState.GroupId,
+                    sessionState.GroupInfo?.GroupName ?? "Untitled",
                     identityKeyPair,
-                    keyManager,
-                    memberManager,
-                    messageCrypto,
-                    distributionManager,
-                    rotationStrategy);
+                    sessionState.RotationStrategy);
 
-                // Restore group state
-                await groupSession.RestoreSerializedStateAsync(dto.GroupState);
+                // Restore the session state
+                bool restored = await groupSession.RestoreSerializedStateAsync(groupState);
+                if (!restored)
+                {
+                    LoggingManager.LogError(nameof(SessionPersistenceManager),
+                        $"Failed to restore group session state for {sessionId}");
+                    return null;
+                }
 
                 return groupSession;
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError(nameof(SessionPersistenceManager), $"Failed to load group session {sessionId}: {ex.Message}");
+                LoggingManager.LogError(nameof(SessionPersistenceManager),
+                    $"Failed to load group session {sessionId}: {ex.Message}");
                 return null;
             }
         }
@@ -509,7 +540,7 @@ namespace LibEmiddle.Sessions
 
             if (disposing)
             {
-                
+                _ioLock?.Dispose();
             }
 
             _disposed = true;

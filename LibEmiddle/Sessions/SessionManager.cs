@@ -12,6 +12,7 @@ namespace LibEmiddle.Sessions
     /// <summary>
     /// Implements the ISessionManager interface, providing centralized management
     /// for both individual and group chat sessions.
+    /// Updated to work with the consolidated GroupSession implementation.
     /// </summary>
     /// <remarks>
     /// Initializes a new instance of the SessionManager class.
@@ -375,7 +376,7 @@ namespace LibEmiddle.Sessions
         }
 
         /// <summary>
-        /// Creates a new group session.
+        /// Creates a new group session using the consolidated GroupSession implementation.
         /// </summary>
         /// <param name="options">The group session options.</param>
         /// <returns>The created group session.</returns>
@@ -386,38 +387,18 @@ namespace LibEmiddle.Sessions
 
             try
             {
-                // Create required components
-                var keyManager = new GroupKeyManager();
-                var memberManager = new GroupMemberManager();
-                var messageCrypto = new GroupMessageCrypto();
-                var distributionManager = new SenderKeyDistribution(keyManager);
+                LoggingManager.LogInformation("SessionManager", $"Creating new group session for group {options.GroupId}");
 
-                // Create the group
-                string groupName = options.GroupName ?? $"Group {options.GroupId}";
-                bool groupCreated = memberManager.CreateGroup(
-                    options.GroupId,
-                    groupName,
-                    _identityKeyPair.PublicKey!,
-                    true); // Creator is admin
-
-                if (!groupCreated)
-                {
-                    throw new InvalidOperationException($"Failed to create group {options.GroupId}");
-                }
-
-                // Initialize group key
-                byte[] initialChainKey = keyManager.GenerateInitialChainKey();
-                keyManager.InitializeSenderState(options.GroupId, initialChainKey);
-
-                // Create the session
+                // Create the consolidated GroupSession directly
                 var groupSession = new GroupSession(
                     options.GroupId,
+                    options.GroupName,
                     _identityKeyPair,
-                    keyManager,
-                    memberManager,
-                    messageCrypto,
-                    distributionManager,
-                    options.RotationStrategy);
+                    options.RotationStrategy,
+                    _identityKeyPair.PublicKey); // Creator is this device
+
+                // Add the creator as the first member (owner/admin)
+                await groupSession.AddMemberAsync(_identityKeyPair.PublicKey);
 
                 // Activate the session
                 await groupSession.ActivateAsync();
@@ -427,6 +408,8 @@ namespace LibEmiddle.Sessions
 
                 // Persist the session
                 await _persistenceManager.SaveGroupSessionAsync(groupSession);
+
+                LoggingManager.LogInformation("SessionManager", $"Successfully created group session {groupSession.SessionId}");
 
                 return groupSession;
             }
@@ -456,7 +439,7 @@ namespace LibEmiddle.Sessions
         }
 
         /// <summary>
-        /// Loads a group session from persistent storage.
+        /// Loads a group session from persistent storage using the new consolidated GroupSession.
         /// </summary>
         /// <param name="sessionId">The ID of the session to load.</param>
         /// <returns>The loaded group session, or null if not found.</returns>
@@ -465,21 +448,36 @@ namespace LibEmiddle.Sessions
             try
             {
                 // Extract the group ID from the session ID
-                string groupId = sessionId.Split('-')[1]; // Assumes format "group-{groupId}-{guid}"
+                var parts = sessionId.Split('-');
+                if (parts.Length < 2)
+                {
+                    LoggingManager.LogError("SessionManager", $"Invalid group session ID format: {sessionId}");
+                    return null;
+                }
 
-                // Create required components
-                var keyManager = new GroupKeyManager();
-                var memberManager = new GroupMemberManager();
-                var messageCrypto = new GroupMessageCrypto();
-                var distributionManager = new SenderKeyDistribution(keyManager);
+                string groupId = parts[1]; // Assumes format "group-{groupId}-{guid}"
 
-                return await _persistenceManager.LoadGroupSessionAsync(
-                    sessionId,
+                // Create a new GroupSession instance
+                var groupSession = new GroupSession(
+                    groupId,
+                    parts[2],
                     _identityKeyPair,
-                    keyManager,
-                    memberManager,
-                    messageCrypto,
-                    distributionManager);
+                    KeyRotationStrategy.Standard); // Default strategy, will be restored from state
+
+                // Load and restore the serialized state
+                var serializedState = await _persistenceManager.LoadGroupSessionStateAsync(sessionId);
+                if (!string.IsNullOrEmpty(serializedState))
+                {
+                    bool restored = await groupSession.RestoreSerializedStateAsync(serializedState);
+                    if (restored)
+                    {
+                        LoggingManager.LogInformation("SessionManager", $"Successfully loaded group session {sessionId}");
+                        return groupSession;
+                    }
+                }
+
+                LoggingManager.LogWarning("SessionManager", $"Failed to restore group session state for {sessionId}");
+                return null;
             }
             catch (Exception ex)
             {
@@ -572,6 +570,7 @@ namespace LibEmiddle.Sessions
                 }
 
                 _activeSessions.Clear();
+                _persistenceManager?.Dispose();
             }
 
             _disposed = true;

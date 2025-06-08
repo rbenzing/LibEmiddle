@@ -4,191 +4,209 @@ using LibEmiddle.Abstractions;
 using LibEmiddle.Domain;
 using LibEmiddle.Core;
 
-namespace LibEmiddle.Messaging.Transport
+namespace LibEmiddle.Messaging.Transport;
+
+/// <summary>
+/// Implementation of the mailbox transport using HTTP for remote communications.
+/// </summary>
+public sealed class HttpMailboxTransport : BaseMailboxTransport
 {
+    private readonly HttpClient _httpClient;
+    private readonly string _baseUrl;
+    private readonly bool _ownsHttpClient;
+    private CancellationTokenSource? _pollingCts;
+    private readonly JsonSerializerOptions _jsonOptions;
+
     /// <summary>
-    /// Implementation of the mailbox transport using HTTP for remote communications.
+    /// Initializes a new instance of the HttpMailboxTransport class.
     /// </summary>
-    public class HttpMailboxTransport : BaseMailboxTransport
+    /// <param name="cryptoProvider">Crypto provider for encryption operations.</param>
+    /// <param name="httpClient">HTTP client for making API requests.</param>
+    /// <param name="baseUrl">Base URL of the mailbox API.</param>
+    /// <param name="ownsHttpClient">Whether this instance owns the HttpClient and should dispose it.</param>
+    /// <exception cref="ArgumentNullException">Thrown if any required parameters are null.</exception>
+    public HttpMailboxTransport(
+        ICryptoProvider cryptoProvider,
+        HttpClient httpClient,
+        string baseUrl,
+        bool ownsHttpClient = false)
+        : base(cryptoProvider)
     {
-        private readonly HttpClient _httpClient;
-        private readonly string _baseUrl;
-        private CancellationTokenSource? _pollingCts;
-        private readonly JsonSerializerOptions _jsonOptions;
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _baseUrl = baseUrl ?? throw new ArgumentNullException(nameof(baseUrl));
+        _ownsHttpClient = ownsHttpClient;
 
-        /// <summary>
-        /// Initializes a new instance of the HttpMailboxTransport class.
-        /// </summary>
-        /// <param name="cryptoProvider">Crypto provider for encryption operations.</param>
-        /// <param name="httpClient">HTTP client for making API requests.</param>
-        /// <param name="baseUrl">Base URL of the mailbox API.</param>
-        /// <exception cref="ArgumentNullException">Thrown if any required parameters are null.</exception>
-        public HttpMailboxTransport(
-            ICryptoProvider cryptoProvider,
-            HttpClient httpClient,
-            string baseUrl)
-            : base(cryptoProvider)
+        if (string.IsNullOrEmpty(_baseUrl))
         {
-            _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-            _baseUrl = baseUrl ?? throw new ArgumentNullException(nameof(baseUrl));
-
-            if (string.IsNullOrEmpty(_baseUrl))
-            {
-                throw new ArgumentException("Base URL cannot be empty.", nameof(baseUrl));
-            }
-
-            // Configure JSON serialization options
-            _jsonOptions = new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                PropertyNameCaseInsensitive = true
-            };
+            throw new ArgumentException("Base URL cannot be empty.", nameof(baseUrl));
         }
 
-        /// <inheritdoc/>
-        protected override async Task<bool> SendMessageInternalAsync(MailboxMessage message)
+        // Configure JSON serialization options
+        _jsonOptions = new JsonSerializerOptions
         {
-            try
-            {
-                var response = await _httpClient.PostAsJsonAsync(
-                    $"{_baseUrl}/messages",
-                    message,
-                    _jsonOptions);
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true
+        };
+    }
 
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    LoggingManager.LogError(nameof(HttpMailboxTransport), $"Failed to send message {message.Id}. Status: {response.StatusCode}, Error: {errorContent}");
-                    return false;
-                }
+    /// <inheritdoc/>
+    protected override async Task<bool> SendMessageInternalAsync(MailboxMessage message)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync(
+                $"{_baseUrl}/messages",
+                message,
+                _jsonOptions);
 
-                return true;
-            }
-            catch (Exception ex)
+            if (!response.IsSuccessStatusCode)
             {
-                LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while sending message {message.Id}", ex);
+                var errorContent = await response.Content.ReadAsStringAsync();
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"Failed to send message {message.Id}. Status: {response.StatusCode}, Error: {errorContent}");
                 return false;
             }
+
+            return true;
         }
-
-        /// <inheritdoc/>
-        protected override async Task<List<MailboxMessage>> FetchMessagesInternalAsync(byte[] recipientKey, CancellationToken cancellationToken)
+        catch (Exception ex)
         {
-            try
+            LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while sending message {message.Id}", ex);
+            return false;
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override async Task<List<MailboxMessage>> FetchMessagesInternalAsync(byte[] recipientKey, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Convert recipient key to Base64 for URL
+            var recipientKeyBase64 = Convert.ToBase64String(recipientKey)
+                .Replace('+', '-')
+                .Replace('/', '_')
+                .Replace("=", "");
+
+            var response = await _httpClient.GetAsync(
+                $"{_baseUrl}/messages/{recipientKeyBase64}",
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
             {
-                // Convert recipient key to Base64 for URL
-                var recipientKeyBase64 = Convert.ToBase64String(recipientKey)
-                    .Replace('+', '-')
-                    .Replace('/', '_')
-                    .Replace("=", "");
-
-                var response = await _httpClient.GetAsync(
-                    $"{_baseUrl}/messages/{recipientKeyBase64}",
-                    cancellationToken);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                    LoggingManager.LogError(nameof(HttpMailboxTransport), $"Failed to fetch messages. Status: {response.StatusCode}, Error: {errorContent}");
-                    return [];
-                }
-
-                var messages = await response.Content.ReadFromJsonAsync<List<MailboxMessage>>(
-                    _jsonOptions,
-                    cancellationToken) ?? [];
-
-                return messages;
-            }
-            catch (TaskCanceledException)
-            {
-                // Operation was cancelled, don't log as an error
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                LoggingManager.LogError(nameof(HttpMailboxTransport), $"Failed to fetch messages. Status: {response.StatusCode}, Error: {errorContent}");
                 return [];
             }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(HttpMailboxTransport), "HTTP exception while fetching messages", ex);
-                return [];
-            }
-        }
 
-        /// <inheritdoc/>
-        protected override async Task<bool> DeleteMessageInternalAsync(string messageId)
+            var messages = await response.Content.ReadFromJsonAsync<List<MailboxMessage>>(
+                _jsonOptions,
+                cancellationToken) ?? [];
+
+            return messages;
+        }
+        catch (TaskCanceledException)
+        {
+            // Operation was cancelled, don't log as an error
+            return [];
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(HttpMailboxTransport), "HTTP exception while fetching messages", ex);
+            return [];
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override async Task<bool> DeleteMessageInternalAsync(string messageId)
+    {
+        try
+        {
+            var response = await _httpClient.DeleteAsync($"{_baseUrl}/messages/{messageId}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                LoggingManager.LogError(nameof(HttpMailboxTransport),
+                    $"Failed to delete message {messageId}. Status: {response.StatusCode}, Error: {errorContent}");
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while deleting message {messageId}", ex);
+            return false;
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override async Task<bool> MarkMessageAsReadInternalAsync(string messageId)
+    {
+        try
+        {
+            var content = new StringContent(string.Empty);
+            var response = await _httpClient.PatchAsync($"{_baseUrl}/messages/{messageId}/read", content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                LoggingManager.LogError(nameof(HttpMailboxTransport),
+                    $"Failed to mark message {messageId} as read. Status: {response.StatusCode}, Error: {errorContent}");
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while marking message {messageId} as read", ex);
+            return false;
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override async Task StartListeningInternalAsync(byte[] localIdentityKey, int pollingInterval, CancellationToken cancellationToken)
+    {
+        await StopListeningInternalAsync();
+
+        _pollingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var linkedToken = _pollingCts.Token;
+
+        // Start polling task
+        _ = Task.Run(async () =>
         {
             try
             {
-                var response = await _httpClient.DeleteAsync($"{_baseUrl}/messages/{messageId}");
-
-                if (!response.IsSuccessStatusCode)
+                while (!linkedToken.IsCancellationRequested)
                 {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    LoggingManager.LogError(nameof(HttpMailboxTransport), 
-                        $"Failed to delete message {messageId}. Status: {response.StatusCode}, Error: {errorContent}");
-                    return false;
-                }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while deleting message {messageId}", ex);
-                return false;
-            }
-        }
-
-        /// <inheritdoc/>
-        protected override async Task<bool> MarkMessageAsReadInternalAsync(string messageId)
-        {
-            try
-            {
-                var content = new StringContent(string.Empty);
-                var response = await _httpClient.PatchAsync($"{_baseUrl}/messages/{messageId}/read", content);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    LoggingManager.LogError(nameof(HttpMailboxTransport), 
-                        $"Failed to mark message {messageId} as read. Status: {response.StatusCode}, Error: {errorContent}");
-                    return false;
-                }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while marking message {messageId} as read", ex);
-                return false;
-            }
-        }
-
-        /// <inheritdoc/>
-        protected override async Task StartListeningInternalAsync(byte[] localIdentityKey, int pollingInterval, CancellationToken cancellationToken)
-        {
-            await StopListeningInternalAsync();
-
-            _pollingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var linkedToken = _pollingCts.Token;
-
-            // Start polling task
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    while (!linkedToken.IsCancellationRequested)
+                    try
                     {
+                        var messages = await FetchMessagesAsync(localIdentityKey, linkedToken);
+
+                        foreach (var message in messages)
+                        {
+                            // Notify listeners about new message
+                            OnMessageReceived(message);
+
+                            // Mark message as read to prevent refetching
+                            await MarkMessageAsReadAsync(message.Id);
+                        }
+
+                        // Wait for the specified polling interval
+                        await Task.Delay(pollingInterval, linkedToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Normal cancellation, break the loop
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggingManager.LogError(nameof(HttpMailboxTransport), "Error during message polling", ex);
+
+                        // Continue polling even after errors
                         try
                         {
-                            var messages = await FetchMessagesAsync(localIdentityKey, linkedToken);
-
-                            foreach (var message in messages)
-                            {
-                                // Notify listeners about new message
-                                OnMessageReceived(message);
-
-                                // Mark message as read to prevent refetching
-                                await MarkMessageAsReadAsync(message.Id);
-                            }
-
-                            // Wait for the specified polling interval
                             await Task.Delay(pollingInterval, linkedToken);
                         }
                         catch (OperationCanceledException)
@@ -196,92 +214,95 @@ namespace LibEmiddle.Messaging.Transport
                             // Normal cancellation, break the loop
                             break;
                         }
-                        catch (Exception ex)
-                        {
-                            LoggingManager.LogError(nameof(HttpMailboxTransport), "Error during message polling", ex);
-
-                            // Continue polling even after errors
-                            try
-                            {
-                                await Task.Delay(pollingInterval, linkedToken);
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                // Normal cancellation, break the loop
-                                break;
-                            }
-                        }
                     }
                 }
-                catch (Exception ex)
-                {
-                    LoggingManager.LogError(nameof(HttpMailboxTransport), "Fatal error in polling loop", ex);
-                }
-
-                LoggingManager.LogInformation(nameof(HttpMailboxTransport), "Message polling stopped");
-            }, linkedToken);
-
-            LoggingManager.LogInformation(nameof(HttpMailboxTransport), "Started HTTP mailbox polling");
-        }
-
-        /// <inheritdoc/>
-        protected override Task StopListeningInternalAsync()
-        {
-            if (_pollingCts != null)
-            {
-                if (!_pollingCts.IsCancellationRequested)
-                {
-                    _pollingCts.Cancel();
-                }
-
-                _pollingCts.Dispose();
-                _pollingCts = null;
-
-                LoggingManager.LogInformation(nameof(HttpMailboxTransport), "Stopped HTTP mailbox polling");
-            }
-
-            return Task.CompletedTask;
-        }
-
-        /// <inheritdoc/>
-        protected override async Task<bool> UpdateDeliveryStatusInternalAsync(string messageId, bool isDelivered)
-        {
-            try
-            {
-                var content = new StringContent(JsonSerializer.Serialize(
-                    new { isDelivered },
-                    _jsonOptions));
-
-                content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
-
-                var response = await _httpClient.PatchAsync(
-                    $"{_baseUrl}/messages/{messageId}/delivery-status",
-                    content);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    LoggingManager.LogError(nameof(HttpMailboxTransport), 
-                        $"Failed to update delivery status for message {messageId}. Status: {response.StatusCode}, Error: {errorContent}");
-                    return false;
-                }
-
-                return true;
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while updating delivery status for message {messageId}", ex);
-                return false;
+                LoggingManager.LogError(nameof(HttpMailboxTransport), "Fatal error in polling loop", ex);
             }
+
+            LoggingManager.LogInformation(nameof(HttpMailboxTransport), "Message polling stopped");
+        }, linkedToken);
+
+        LoggingManager.LogInformation(nameof(HttpMailboxTransport), "Started HTTP mailbox polling");
+    }
+
+    /// <inheritdoc/>
+    protected override Task StopListeningInternalAsync()
+    {
+        if (_pollingCts != null)
+        {
+            if (!_pollingCts.IsCancellationRequested)
+            {
+                _pollingCts.Cancel();
+            }
+
+            _pollingCts.Dispose();
+            _pollingCts = null;
+
+            LoggingManager.LogInformation(nameof(HttpMailboxTransport), "Stopped HTTP mailbox polling");
         }
 
-        /// <summary>
-        /// Disposes resources used by the transport.
-        /// </summary>
-        public void Dispose()
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    protected override async Task<bool> UpdateDeliveryStatusInternalAsync(string messageId, bool isDelivered)
+    {
+        try
         {
-            StopListeningAsync().GetAwaiter().GetResult();
-            _pollingCts?.Dispose();
+            var content = new StringContent(JsonSerializer.Serialize(
+                new { isDelivered },
+                _jsonOptions));
+
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+            var response = await _httpClient.PatchAsync(
+                $"{_baseUrl}/messages/{messageId}/delivery-status",
+                content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                LoggingManager.LogError(nameof(HttpMailboxTransport),
+                    $"Failed to update delivery status for message {messageId}. Status: {response.StatusCode}, Error: {errorContent}");
+                return false;
+            }
+
+            return true;
         }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(HttpMailboxTransport), $"HTTP exception while updating delivery status for message {messageId}", ex);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Releases the managed resources used by the HttpMailboxTransport.
+    /// </summary>
+    protected override void DisposeManagedResources()
+    {
+        try
+        {
+            // Stop listening operations first
+            StopListeningInternalAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(HttpMailboxTransport), "Error stopping listening during disposal", ex);
+        }
+
+        // Dispose the cancellation token source
+        _pollingCts?.Dispose();
+
+        // Only dispose HttpClient if we own it
+        if (_ownsHttpClient)
+        {
+            _httpClient?.Dispose();
+        }
+
+        LoggingManager.LogDebug(nameof(HttpMailboxTransport), "HttpMailboxTransport disposed");
     }
 }

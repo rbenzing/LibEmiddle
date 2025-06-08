@@ -6,17 +6,13 @@ namespace LibEmiddle.Messaging.Transport
     /// <summary>
     /// Standard implementation of IWebSocketClient using System.Net.WebSockets.ClientWebSocket
     /// </summary>
-    public class StandardWebSocketClient : IWebSocketClient
+    /// <remarks>
+    /// Initializes a new instance of the StandardWebSocketClient class
+    /// </remarks>
+    public class StandardWebSocketClient(Uri endpoint) : IWebSocketClient
     {
-        private readonly ClientWebSocket _clientWebSocket;
-
-        /// <summary>
-        /// Initializes a new instance of the StandardWebSocketClient class
-        /// </summary>
-        public StandardWebSocketClient()
-        {
-            _clientWebSocket = new ClientWebSocket();
-        }
+        private readonly ClientWebSocket _clientWebSocket = new();
+        private Uri _endpoint = endpoint;
 
         /// <summary>
         /// Gets the current state of the WebSocket connection
@@ -26,12 +22,11 @@ namespace LibEmiddle.Messaging.Transport
         /// <summary>
         /// Connects to a WebSocket server as an asynchronous operation
         /// </summary>
-        /// <param name="uri">The URI of the WebSocket server to connect to</param>
         /// <param name="cancellationToken">A cancellation token used to propagate notification that the operation should be canceled</param>
         /// <returns>A task that represents the asynchronous operation</returns>
-        public Task ConnectAsync(Uri uri, CancellationToken cancellationToken)
+        public Task ConnectAsync(CancellationToken cancellationToken)
         {
-            return _clientWebSocket.ConnectAsync(uri, cancellationToken);
+            return _clientWebSocket.ConnectAsync(_endpoint, cancellationToken);
         }
 
         /// <summary>

@@ -12,13 +12,13 @@
         /// Sender's (Alice's) public Identity Key (Ed25519, 32 bytes).
         /// Needed by Bob for DH calculation and potentially verification.
         /// </summary>
-        public byte[] SenderIdentityKeyPublic { get; set; } = Array.Empty<byte>(); // Initialize to avoid null ref warnings
+        public byte[] SenderIdentityKeyPublic { get; set; } = []; // Initialize to avoid null ref warnings
 
         /// <summary>
         /// Sender's (Alice's) public Ephemeral Key (X25519, 32 bytes), generated for this session initiation.
         /// Needed by Bob for DH calculation.
         /// </summary>
-        public byte[] SenderEphemeralKeyPublic { get; set; } = Array.Empty<byte>(); // Initialize
+        public byte[] SenderEphemeralKeyPublic { get; set; } = []; // Initialize
 
         /// <summary>
         /// The ID of the recipient's (Bob's) Signed PreKey (SPK) that the sender (Alice) used

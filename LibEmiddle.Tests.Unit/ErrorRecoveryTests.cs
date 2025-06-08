@@ -16,6 +16,7 @@ using LibEmiddle.Messaging.Transport;
 using LibEmiddle.Messaging.Group;
 using LibEmiddle.Crypto;
 using LibEmiddle.Protocol;
+using LibEmiddle.Sessions;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -160,7 +161,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Mock a WebSocket connection error
             mockWebSocket
-                .Setup(ws => ws.ConnectAsync(It.IsAny<Uri>(), It.IsAny<CancellationToken>()))
+                .Setup(ws => ws.ConnectAsync(It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new System.Net.WebSockets.WebSocketException("Connection refused"));
 
             // Create client
@@ -326,55 +327,259 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void GroupChatManager_HandleMissingGroup_ShouldFailGracefully()
+        public async Task GroupChatManager_HandleMissingGroup_ShouldFailGracefully()
         {
             // Arrange
             var identityKeyPair = Sodium.GenerateEd25519KeyPair();
-            var keyManager = new GroupKeyManager();
-            var memberManager = new GroupMemberManager();
-            var securityValidator = new GroupSecurityValidator(memberManager);
-
             string nonExistentGroupId = "test-group-123";
+            string groupName = Guid.NewGuid().ToString();
+            // Create a GroupSession for testing (this represents our consolidated approach)
+            var testGroupSession = new GroupSession(
+                "existing-group-456", // Different group ID
+                groupName,
+                identityKeyPair,
+                KeyRotationStrategy.Standard);
 
             // Act & Assert
-            // 1. Attempt to get a non-existent group session
             try
             {
-                // This is a simplified test since we don't have direct access to GroupChatManager
-                Assert.IsFalse(memberManager.IsMember(nonExistentGroupId, identityKeyPair.PublicKey),
-                    "User should not be a member of non-existent group");
+                // 1. Test that a user is not a member of a non-existent group
+                // Since we're using the consolidated GroupSession, we test through the actual session
 
-                // The group shouldn't exist and has no members
-                var members = memberManager.GetMembers(nonExistentGroupId);
-                Assert.AreEqual(0, members.Count, "Non-existent group should have no members");
+                // Create an encrypted message for a non-existent group
+                var encryptedMessage = new EncryptedGroupMessage
+                {
+                    GroupId = nonExistentGroupId, // Different from our session's group
+                    SenderIdentityKey = identityKeyPair.PublicKey,
+                    Ciphertext = new byte[64],
+                    Nonce = new byte[Constants.NONCE_SIZE],
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    MessageId = Guid.NewGuid().ToString(),
+                    RotationEpoch = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    Signature = new byte[64] // Mock signature
+                };
+
+                // 2. Attempt to decrypt a message for wrong group - should throw ArgumentException
+                try
+                {
+                    await testGroupSession.DecryptMessageAsync(encryptedMessage);
+                    Assert.Fail("Should throw ArgumentException for wrong group ID");
+                }
+                catch (ArgumentException ex)
+                {
+                    Assert.IsTrue(ex.Message.Contains("different group"),
+                        "Should indicate group ID mismatch");
+                }
+
+                // 3. Test with SessionManager trying to get non-existent session
+                var cryptoProvider = new CryptoProvider();
+                var x3dhProtocol = new X3DHProtocol(cryptoProvider);
+                var doubleRatchetProtocol = new DoubleRatchetProtocol();
+
+                var sessionManager = new SessionManager(
+                    cryptoProvider,
+                    x3dhProtocol,
+                    doubleRatchetProtocol,
+                    identityKeyPair);
+
+                try
+                {
+                    await sessionManager.GetSessionAsync($"group-{nonExistentGroupId}-12345");
+                    Assert.Fail("Should throw KeyNotFoundException for non-existent session");
+                }
+                catch (KeyNotFoundException)
+                {
+                    // Expected behavior - this is correct
+                }
+
+                // 4. Test that GroupSession validates group ID correctly
+                var wrongGroupMessage = new EncryptedGroupMessage
+                {
+                    GroupId = "completely-different-group",
+                    SenderIdentityKey = identityKeyPair.PublicKey,
+                    Ciphertext = Sodium.GenerateRandomBytes(32),
+                    Nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE),
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    MessageId = Guid.NewGuid().ToString(),
+                    RotationEpoch = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    Signature = new byte[64]
+                };
+
+                // Should throw ArgumentException due to group mismatch
+                await Assert.ThrowsExceptionAsync<ArgumentException>(async () =>
+                {
+                    await testGroupSession.DecryptMessageAsync(wrongGroupMessage);
+                });
+
+                // 5. Test creation of distribution message on empty group
+                var distributionMessage = testGroupSession.CreateDistributionMessage();
+                Assert.IsNotNull(distributionMessage, "Should be able to create distribution message");
+                Assert.AreEqual("existing-group-456", distributionMessage.GroupId, "Distribution should have correct group ID");
+
+                // 6. Test ProcessDistributionMessage with wrong group
+                var wrongGroupDistribution = new SenderKeyDistributionMessage
+                {
+                    GroupId = nonExistentGroupId, // Wrong group
+                    ChainKey = Sodium.GenerateRandomBytes(Constants.CHAIN_KEY_SIZE),
+                    Iteration = 0,
+                    SenderIdentityKey = identityKeyPair.PublicKey,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    Signature = new byte[64]
+                };
+
+                bool distributionResult = testGroupSession.ProcessDistributionMessage(wrongGroupDistribution);
+                Assert.IsFalse(distributionResult, "Should reject distribution message for wrong group");
+
             }
             catch (Exception ex)
             {
-                Assert.Fail($"Should handle missing group gracefully: {ex.Message}");
+                Assert.Fail($"Should handle missing/wrong group gracefully without unexpected exceptions: {ex.Message}");
             }
-
-            // 2. Attempt to encrypt for non-existent group
-            var senderState = keyManager.GetSenderState(nonExistentGroupId);
-            Assert.IsNull(senderState, "Sender state should be null for non-existent group");
-
-            // 3. Attempt to decrypt a message for a non-existent group
-            var encryptedMessage = new EncryptedGroupMessage
+            finally
             {
-                GroupId = nonExistentGroupId,
-                SenderIdentityKey = identityKeyPair.PublicKey,
-                Ciphertext = new byte[64],
-                Nonce = new byte[Constants.NONCE_SIZE],
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                MessageId = Guid.NewGuid().ToString()
-            };
+                // Clean up
+                testGroupSession?.Dispose();
+            }
+        }
 
-            // Should validate as false without throwing an exception
-            bool isValid = securityValidator.ValidateGroupMessage(encryptedMessage);
-            Assert.IsFalse(isValid, "Message for non-existent group should fail validation");
+        [TestMethod]
+        public async Task GroupSession_HandleNonMember_ShouldFailGracefully()
+        {
+            // Arrange
+            var adminKeyPair = Sodium.GenerateEd25519KeyPair();
+            var nonMemberKeyPair = Sodium.GenerateEd25519KeyPair();
+            string groupId = $"test-non-member-{Guid.NewGuid()}";
+            string groupName = "Test Group Name";
 
-            // Attempt to decrypt (should return null without throwing)
-            var senderKey = keyManager.GetSenderKey(nonExistentGroupId, identityKeyPair.PublicKey);
-            Assert.IsNull(senderKey, "Should return null sender key for non-existent group");
+            var groupSession = new GroupSession(groupId, groupName, adminKeyPair, KeyRotationStrategy.Standard);
+            await groupSession.ActivateAsync();
+
+            // Act & Assert
+            try
+            {
+                // 1. Non-member tries to create a message for the group
+                var nonMemberSession = new GroupSession(groupId, groupName, nonMemberKeyPair, KeyRotationStrategy.Standard);
+                await nonMemberSession.ActivateAsync();
+
+                // This should work (encryption) but the message won't be valid for decryption by others
+                var encryptedMessage = await nonMemberSession.EncryptMessageAsync("Unauthorized message");
+                Assert.IsNotNull(encryptedMessage, "Encryption should work even for non-members");
+
+                // 2. Admin tries to decrypt message from non-member (should fail validation)
+                string decryptedMessage = await groupSession.DecryptMessageAsync(encryptedMessage);
+                Assert.IsNull(decryptedMessage, "Should not be able to decrypt message from non-member");
+
+                // 3. Non-member tries to add themselves (should fail)
+                try
+                {
+                    await nonMemberSession.AddMemberAsync(nonMemberKeyPair.PublicKey);
+                    Assert.Fail("Non-member should not be able to add themselves");
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Expected - non-members can't add members
+                }
+
+                // 4. Non-member tries to rotate keys (should fail)
+                try
+                {
+                    await nonMemberSession.RotateKeyAsync();
+                    Assert.Fail("Non-member should not be able to rotate keys");
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Expected - non-members can't rotate keys
+                }
+
+                // 5. Test distribution message from non-member
+                var nonMemberDistribution = nonMemberSession.CreateDistributionMessage();
+                bool distributionAccepted = groupSession.ProcessDistributionMessage(nonMemberDistribution);
+                Assert.IsFalse(distributionAccepted, "Should reject distribution from non-member");
+
+            }
+            catch (Exception ex)
+            {
+                Assert.Fail($"Should handle non-member operations gracefully: {ex.Message}");
+            }
+            finally
+            {
+                // Clean up
+                groupSession?.Dispose();
+            }
+        }
+
+        [TestMethod]
+        public async Task GroupSession_HandleCorruptedData_ShouldFailGracefully()
+        {
+            // Arrange
+            var identityKeyPair = Sodium.GenerateEd25519KeyPair();
+            string groupId = $"test-corrupted-{Guid.NewGuid()}";
+            string groupName = "Test group name";
+
+            var groupSession = new GroupSession(groupId, groupName, identityKeyPair, KeyRotationStrategy.Standard);
+            await groupSession.ActivateAsync();
+
+            // Act & Assert
+            try
+            {
+                // 1. Test with corrupted encrypted message
+                var corruptedMessage = new EncryptedGroupMessage
+                {
+                    GroupId = groupId,
+                    SenderIdentityKey = identityKeyPair.PublicKey,
+                    Ciphertext = new byte[0], // Empty ciphertext
+                    Nonce = new byte[0], // Empty nonce
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    MessageId = Guid.NewGuid().ToString(),
+                    RotationEpoch = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+
+                string result1 = await groupSession.DecryptMessageAsync(corruptedMessage);
+                Assert.IsNull(result1, "Should return null for corrupted message (empty arrays)");
+
+                // 2. Test with null fields
+                var nullFieldMessage = new EncryptedGroupMessage
+                {
+                    GroupId = groupId,
+                    SenderIdentityKey = null!, // Null sender
+                    Ciphertext = null!,
+                    Nonce = null!,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    MessageId = Guid.NewGuid().ToString()
+                };
+
+                string result2 = await groupSession.DecryptMessageAsync(nullFieldMessage);
+                Assert.IsNull(result2, "Should return null for message with null fields");
+
+                // 3. Test with corrupted distribution message
+                var corruptedDistribution = new SenderKeyDistributionMessage
+                {
+                    GroupId = groupId,
+                    ChainKey = null!, // Null chain key
+                    SenderIdentityKey = null!,
+                    Signature = null!
+                };
+
+                bool distributionResult = groupSession.ProcessDistributionMessage(corruptedDistribution);
+                Assert.IsFalse(distributionResult, "Should reject corrupted distribution message");
+
+                // 4. Test with invalid serialized state
+                bool restoreResult = await groupSession.RestoreSerializedStateAsync("");
+                Assert.IsFalse(restoreResult, "Should reject empty serialized state");
+
+                bool restoreResult2 = await groupSession.RestoreSerializedStateAsync("invalid json");
+                Assert.IsFalse(restoreResult2, "Should reject invalid JSON serialized state");
+
+            }
+            catch (Exception ex)
+            {
+                Assert.Fail($"Should handle corrupted data gracefully without throwing: {ex.Message}");
+            }
+            finally
+            {
+                // Clean up
+                groupSession?.Dispose();
+            }
         }
 
         [TestMethod]

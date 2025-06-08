@@ -19,13 +19,7 @@ LibEmiddle/
 │   │   │   ├── Chat/
 │   │   │   │   └── ChatSession.cs
 │   │   │   ├── Group/
-│   │   │   │   ├── GroupChatManager.cs
-│   │   │   │   ├── GroupKeyManager.cs
-│   │   │   │   ├── GroupMemberManager.cs
-│   │   │   │   ├── GroupMessageCrypto.cs
-│   │   │   │   ├── GroupSecurityValidator.cs
-│   │   │   │   ├── GroupSession.cs
-│   │   │   │   └── SenderKeyDistribution.cs
+│   │   │   │   └── GroupSession.cs
 │   │   │   └── Transport/
 │   │   │       ├── BaseMailboxTransport.cs
 │   │   │       ├── HttpMailboxTransport.cs
@@ -52,14 +46,11 @@ LibEmiddle/
 │   │   ├── IDeviceLinkingService.cs
 │   │   ├── IDeviceManager.cs
 │   │   ├── IDoubleRatchetProtocol.cs
-│   │   ├── IGroupKeyManager.cs
-│   │   ├── IGroupMemberManager.cs
-│   │   ├── IGroupMessageCrypto.cs
 │   │   ├── IGroupSession.cs
 │   │   ├── IKeyManager.cs
 │   │   ├── IMailboxTransport.cs
 │   │   ├── ISenderKeyDistribution.cs
-│   │   ├── ISesion.cs
+│   │   ├── ISession.cs
 │   │   ├── ISessionManager.cs
 │   │   ├── IStorageProvider.cs
 │   │   ├── ISyncMessageValidator.cs
@@ -73,7 +64,6 @@ LibEmiddle/
 │   │   ├── DTO/
 │   │   │   ├── DoubleRatchetSessionDto.cs
 │   │   │   ├── GroupSenderStateDto.cs
-│   │   │   ├── GroupSessionDto.cs
 │   │   │   ├── KeyPairDto.cs
 │   │   │   ├── MailboxMessageDto.cs
 │   │   │   ├── SerializableSessionData.cs

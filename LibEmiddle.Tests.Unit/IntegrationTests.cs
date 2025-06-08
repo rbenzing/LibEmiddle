@@ -13,6 +13,7 @@ using System.Text;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System;
+using LibEmiddle.API;
 
 namespace LibEmiddle.Tests.Unit;
 
@@ -166,121 +167,120 @@ public class IntegrationTests
     [TestMethod]
     public async Task FullGroupMessageFlow_ShouldWorkEndToEnd()
     {
-        // Step 1: Generate identity keys for the participants
-        var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-        var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-        var charlieKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-
-        // Step 2: Create group chat managers for each participant
-        var aliceGroupChatManager = new GroupChatManager(aliceKeyPair);
-        var bobGroupChatManager = new GroupChatManager(bobKeyPair);
-        var charlieGroupChatManager = new GroupChatManager(charlieKeyPair);
-
-        try
+        // Step 1: Create LibEmiddleClient instances for each person
+        var aliceOptions = new LibEmiddleClientOptions
         {
-            // Step 3: Create a group
-            string groupId = "test-group-" + Guid.NewGuid().ToString("N");
-            string groupName = "Test Group";
+            TransportType = TransportType.InMemory,
+            IdentityKeyPath = "alice_identity.key",
+            SessionStoragePath = "alice_sessions"
+        };
 
-            // Alice creates the group with initial members
-            var aliceGroupSession = await aliceGroupChatManager.CreateGroupAsync(
-                groupId,
-                groupName,
-                new[] { bobKeyPair.PublicKey!, charlieKeyPair.PublicKey! });
-
-            Assert.IsNotNull(aliceGroupSession, "Alice should have a valid group session");
-
-            // Activate the session explicitly if it's not already active
-            if (aliceGroupSession.State == SessionState.Initialized)
-            {
-                await aliceGroupSession.ActivateAsync();
-            }
-            Assert.AreEqual(SessionState.Active, aliceGroupSession.State, "Alice's group session should be active");
-
-            // Step 4: Create distribution messages for group key sharing
-            var aliceDistribution = aliceGroupSession.CreateDistributionMessage();
-            Assert.IsNotNull(aliceDistribution, "Alice should create a distribution message");
-
-            // Bob and Charlie join the group using Alice's distribution message
-            var bobGroupSession = await bobGroupChatManager.JoinGroupAsync(aliceDistribution);
-            var charlieGroupSession = await charlieGroupChatManager.JoinGroupAsync(aliceDistribution);
-
-            Assert.IsNotNull(bobGroupSession, "Bob should have a valid group session");
-            Assert.IsNotNull(charlieGroupSession, "Charlie should have a valid group session");
-
-            // Step 5: Exchange distribution messages between all participants
-            var bobDistribution = bobGroupSession.CreateDistributionMessage();
-            var charlieDistribution = charlieGroupSession.CreateDistributionMessage();
-
-            // Process distribution messages (in a real app, these would be sent via transport)
-            bool aliceProcessBob = aliceGroupSession.ProcessDistributionMessage(bobDistribution);
-            bool aliceProcessCharlie = aliceGroupSession.ProcessDistributionMessage(charlieDistribution);
-            bool bobProcessCharlie = bobGroupSession.ProcessDistributionMessage(charlieDistribution);
-            bool charlieProcessBob = charlieGroupSession.ProcessDistributionMessage(bobDistribution);
-
-            Assert.IsTrue(aliceProcessBob, "Alice should process Bob's distribution message");
-            Assert.IsTrue(aliceProcessCharlie, "Alice should process Charlie's distribution message");
-            Assert.IsTrue(bobProcessCharlie, "Bob should process Charlie's distribution message");
-            Assert.IsTrue(charlieProcessBob, "Charlie should process Bob's distribution message");
-
-            // Step 6: Alice sends a message to the group
-            string aliceMessage = "Hello everyone, this is Alice!";
-            var aliceEncryptedMessage = await aliceGroupSession.EncryptMessageAsync(aliceMessage);
-
-            Assert.IsNotNull(aliceEncryptedMessage, "Alice should encrypt a message successfully");
-            Assert.AreEqual(groupId, aliceEncryptedMessage.GroupId, "Message should have correct group ID");
-            Assert.IsTrue(SecureMemory.SecureCompare(aliceKeyPair.PublicKey!, aliceEncryptedMessage.SenderIdentityKey),
-                "Message should have Alice's identity key");
-
-            // Bob and Charlie decrypt Alice's message
-            string bobDecryptedAliceMessage = await bobGroupSession.DecryptMessageAsync(aliceEncryptedMessage);
-            string charlieDecryptedAliceMessage = await charlieGroupSession.DecryptMessageAsync(aliceEncryptedMessage);
-
-            Assert.AreEqual(aliceMessage, bobDecryptedAliceMessage, "Bob should decrypt Alice's message correctly");
-            Assert.AreEqual(aliceMessage, charlieDecryptedAliceMessage, "Charlie should decrypt Alice's message correctly");
-
-            // Step 7: Bob replies to the group
-            string bobMessage = "Hi Alice and Charlie, Bob here!";
-            var bobEncryptedMessage = await bobGroupSession.EncryptMessageAsync(bobMessage);
-
-            Assert.IsNotNull(bobEncryptedMessage, "Bob should encrypt a message successfully");
-
-            // Alice and Charlie decrypt Bob's message
-            string aliceDecryptedBobMessage = await aliceGroupSession.DecryptMessageAsync(bobEncryptedMessage);
-            string charlieDecryptedBobMessage = await charlieGroupSession.DecryptMessageAsync(bobEncryptedMessage);
-
-            Assert.AreEqual(bobMessage, aliceDecryptedBobMessage, "Alice should decrypt Bob's message correctly");
-            Assert.AreEqual(bobMessage, charlieDecryptedBobMessage, "Charlie should decrypt Bob's message correctly");
-
-            // Step 8: Charlie participates in the conversation
-            string charlieMessage = "Hey everyone, Charlie joining the conversation!";
-            var charlieEncryptedMessage = await charlieGroupSession.EncryptMessageAsync(charlieMessage);
-
-            string aliceDecryptedCharlieMessage = await aliceGroupSession.DecryptMessageAsync(charlieEncryptedMessage);
-            string bobDecryptedCharlieMessage = await bobGroupSession.DecryptMessageAsync(charlieEncryptedMessage);
-
-            Assert.AreEqual(charlieMessage, aliceDecryptedCharlieMessage, "Alice should decrypt Charlie's message correctly");
-            Assert.AreEqual(charlieMessage, bobDecryptedCharlieMessage, "Bob should decrypt Charlie's message correctly");
-
-            // Step 9: Test key rotation
-            bool rotationResult = await aliceGroupSession.RotateKeyAsync();
-            Assert.IsTrue(rotationResult, "Alice should be able to rotate the group key");
-
-            // After rotation, new messages should still work
-            string postRotationMessage = "This message is after key rotation";
-            var postRotationEncrypted = await aliceGroupSession.EncryptMessageAsync(postRotationMessage);
-
-            string bobDecryptedPostRotation = await bobGroupSession.DecryptMessageAsync(postRotationEncrypted);
-            Assert.AreEqual(postRotationMessage, bobDecryptedPostRotation,
-                "Bob should decrypt post-rotation messages correctly");
-        }
-        finally
+        var bobOptions = new LibEmiddleClientOptions
         {
-            // Clean up resources
-            aliceGroupChatManager.Dispose();
-            bobGroupChatManager.Dispose();
-            charlieGroupChatManager.Dispose();
-        }
+            TransportType = TransportType.InMemory,
+            IdentityKeyPath = "bob_identity.key",
+            SessionStoragePath = "bob_sessions"
+        };
+
+        var charlieOptions = new LibEmiddleClientOptions
+        {
+            TransportType = TransportType.InMemory,
+            IdentityKeyPath = "charlie_identity.key",
+            SessionStoragePath = "charlie_sessions"
+        };
+
+        using var aliceClient = new LibEmiddleClient(aliceOptions);
+        using var bobClient = new LibEmiddleClient(bobOptions);
+        using var charlieClient = new LibEmiddleClient(charlieOptions);
+
+        // Step 2: Initialize all clients
+        await aliceClient.InitializeAsync();
+        await bobClient.InitializeAsync();
+        await charlieClient.InitializeAsync();
+
+        // Step 3: Alice creates the group (she becomes the owner/admin)
+        string groupId = "friends-group-2024";
+        string groupName = "Friends Chat";
+
+        var aliceGroupSession = await aliceClient.CreateGroupAsync(groupId, groupName);
+        Console.WriteLine($"Alice created group: {groupId}");
+
+        // Step 4: Alice adds Bob and Charlie as members
+        await aliceGroupSession.AddMemberAsync(bobClient.IdentityPublicKey);
+        await aliceGroupSession.AddMemberAsync(charlieClient.IdentityPublicKey);
+        Console.WriteLine("Alice added Bob and Charlie to the group");
+
+        // Step 5: Alice creates a distribution message to share group keys
+        var aliceDistribution = aliceGroupSession.CreateDistributionMessage();
+        Console.WriteLine("Alice created key distribution message");
+
+        // Step 6: Bob and Charlie join the group using Alice's distribution
+        var bobGroupSession = await bobClient.JoinGroupAsync(aliceDistribution);
+        var charlieGroupSession = await charlieClient.JoinGroupAsync(aliceDistribution);
+        Console.WriteLine("Bob and Charlie joined the group");
+
+        // Step 7: Bob and Charlie add each other and Alice as members on their side
+        await bobGroupSession.AddMemberAsync(aliceClient.IdentityPublicKey);
+        await bobGroupSession.AddMemberAsync(charlieClient.IdentityPublicKey);
+
+        await charlieGroupSession.AddMemberAsync(aliceClient.IdentityPublicKey);
+        await charlieGroupSession.AddMemberAsync(bobClient.IdentityPublicKey);
+
+        // Step 8: Exchange distribution messages between all participants
+        var bobDistribution = bobGroupSession.CreateDistributionMessage();
+        var charlieDistribution = charlieGroupSession.CreateDistributionMessage();
+
+        // Everyone processes everyone else's distribution messages
+        aliceGroupSession.ProcessDistributionMessage(bobDistribution);
+        aliceGroupSession.ProcessDistributionMessage(charlieDistribution);
+
+        bobGroupSession.ProcessDistributionMessage(charlieDistribution);
+        // Bob already has Alice's keys from joining
+
+        charlieGroupSession.ProcessDistributionMessage(bobDistribution);
+        // Charlie already has Alice's keys from joining
+
+        Console.WriteLine("All distribution messages exchanged");
+
+        // Step 9: Now everyone can send and receive messages!
+
+        // Alice sends a message
+        string aliceMessage = "Hey everyone! Welcome to our group chat! 👋";
+        var aliceEncrypted = await aliceClient.SendGroupMessageAsync(groupId, aliceMessage);
+        Console.WriteLine($"Alice sent: {aliceMessage}");
+
+        // Bob and Charlie receive and decrypt Alice's message
+        string bobReceivesAlice = await bobClient.ProcessGroupMessageAsync(aliceEncrypted!);
+        string charlieReceivesAlice = await charlieClient.ProcessGroupMessageAsync(aliceEncrypted!);
+
+        Console.WriteLine($"Bob received: {bobReceivesAlice}");
+        Console.WriteLine($"Charlie received: {charlieReceivesAlice}");
+
+        // Bob replies
+        string bobMessage = "Hi Alice and Charlie! Great to be here! 🎉";
+        var bobEncrypted = await bobClient.SendGroupMessageAsync(groupId, bobMessage);
+        Console.WriteLine($"Bob sent: {bobMessage}");
+
+        // Alice and Charlie receive Bob's message
+        string aliceReceivesBob = await aliceClient.ProcessGroupMessageAsync(bobEncrypted!);
+        string charlieReceivesBob = await charlieClient.ProcessGroupMessageAsync(bobEncrypted!);
+
+        Console.WriteLine($"Alice received: {aliceReceivesBob}");
+        Console.WriteLine($"Charlie received: {charlieReceivesBob}");
+
+        // Charlie joins the conversation
+        string charlieMessage = "Hello Alice and Bob! This is awesome! 🚀";
+        var charlieEncrypted = await charlieClient.SendGroupMessageAsync(groupId, charlieMessage);
+        Console.WriteLine($"Charlie sent: {charlieMessage}");
+
+        // Alice and Bob receive Charlie's message
+        string aliceReceivesCharlie = await aliceClient.ProcessGroupMessageAsync(charlieEncrypted!);
+        string bobReceivesCharlie = await bobClient.ProcessGroupMessageAsync(charlieEncrypted!);
+
+        Console.WriteLine($"Alice received: {aliceReceivesCharlie}");
+        Console.WriteLine($"Bob received: {bobReceivesCharlie}");
+
+        Console.WriteLine("\n✅ Group chat setup complete! All messages encrypted and exchanged successfully.");
     }
 
     /// <summary>

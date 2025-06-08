@@ -15,10 +15,9 @@ namespace LibEmiddle.Abstractions
         /// <summary>
         /// Connects to a WebSocket server as an asynchronous operation
         /// </summary>
-        /// <param name="uri">The URI of the WebSocket server to connect to</param>
         /// <param name="cancellationToken">A cancellation token used to propagate notification that the operation should be canceled</param>
         /// <returns>A task that represents the asynchronous operation</returns>
-        Task ConnectAsync(Uri uri, CancellationToken cancellationToken);
+        Task ConnectAsync(CancellationToken cancellationToken);
 
         /// <summary>
         /// Sends data over the WebSocket connection as an asynchronous operation

@@ -14,38 +14,29 @@ namespace LibEmiddle.Messaging.Transport
     /// <summary>
     /// Secure WebSocket client for encrypted communications that properly manages resources
     /// </summary>
-    public class SecureWebSocketClient : IDisposable
+    /// <remarks>
+    /// Creates a new secure WebSocket client with a provided WebSocket instance
+    /// </remarks>
+    /// <param name="serverUrl">Server URL</param>
+    /// <param name="webSocket">WebSocket client to use</param>
+    public class SecureWebSocketClient(string serverUrl, IWebSocketClient webSocket) : IDisposable
     {
-        private readonly IWebSocketClient _webSocket;
-        private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
-        private readonly ICryptoProvider _cryptoProvider;
+        private readonly IWebSocketClient _webSocket = webSocket ?? throw new ArgumentNullException(nameof(webSocket));
+        private readonly DoubleRatchetProtocol _doubleRatchetProtocol = new();
+        private readonly ICryptoProvider _cryptoProvider = new CryptoProvider();
 
-        private readonly Uri _serverUri;
+        private readonly Uri _serverUri = new(serverUrl);
         private DoubleRatchetSession? _session = null;
         private bool _disposed = false;
-        private readonly SemaphoreSlim _connectionLock = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
         /// <summary>
         /// Creates a new secure WebSocket client
         /// </summary>
         /// <param name="serverUrl">Server URL</param>
         public SecureWebSocketClient(string serverUrl)
-            : this(serverUrl, new StandardWebSocketClient())
+            : this(serverUrl, new StandardWebSocketClient(new Uri(serverUrl)))
         {
-        }
-
-        /// <summary>
-        /// Creates a new secure WebSocket client with a provided WebSocket instance
-        /// </summary>
-        /// <param name="serverUrl">Server URL</param>
-        /// <param name="webSocket">WebSocket client to use</param>
-        public SecureWebSocketClient(string serverUrl, IWebSocketClient webSocket)
-        {
-            _serverUri = new Uri(serverUrl);
-            _webSocket = webSocket ?? throw new ArgumentNullException(nameof(webSocket));
-
-            _cryptoProvider = new CryptoProvider();
-            _doubleRatchetProtocol = new DoubleRatchetProtocol();
         }
 
         /// <summary>
@@ -71,7 +62,7 @@ namespace LibEmiddle.Messaging.Transport
                 if (_webSocket.State != WebSocketState.None && _webSocket.State != WebSocketState.Closed)
                     throw new InvalidOperationException($"Cannot connect when WebSocket is in state {_webSocket.State}");
 
-                await _webSocket.ConnectAsync(_serverUri, cancellationToken).ConfigureAwait(false);
+                await _webSocket.ConnectAsync(cancellationToken).ConfigureAwait(false);
             }
             finally
             {

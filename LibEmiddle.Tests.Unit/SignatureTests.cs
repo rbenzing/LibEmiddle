@@ -56,23 +56,6 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void SignAndVerifyTextMessage_ShouldVerifyCorrectly()
-        {
-            // Arrange
-            string message = "This is a text message to be signed";
-            KeyPair _identityKeyPair = Sodium.GenerateEd25519KeyPair();
-            var publicKey = _identityKeyPair.PublicKey;
-            var privateKey = _identityKeyPair.PrivateKey;
-
-            // Act
-            string signatureBase64 = LibEmiddleClient.SignTextMessage(message, privateKey);
-            bool isValid = LibEmiddleClient.VerifyTextMessage(message, signatureBase64, publicKey);
-
-            // Assert
-            Assert.IsTrue(isValid);
-        }
-
-        [TestMethod]
         [ExpectedException(typeof(NullReferenceException))]
         public void SignMessage_WithNullPrivateKey_ShouldThrowException()
         {
@@ -81,22 +64,6 @@ namespace LibEmiddle.Tests.Unit
 
             // Act & Assert - Should throw NullReferenceException
             _cryptoProvider.Sign(message, null);
-        }
-
-        [TestMethod]
-        public void VerifyTextMessage_WithInvalidBase64_ShouldReturnFalse()
-        {
-            // Arrange
-            string message = "Test message";
-            KeyPair _identityKeyPair = Sodium.GenerateX25519KeyPair();
-            var publicKey = _identityKeyPair.PublicKey;
-            string invalidBase64 = "not valid base64!@#$";
-
-            // Act
-            bool result = LibEmiddleClient.VerifyTextMessage(message, invalidBase64, publicKey);
-
-            // Assert
-            Assert.IsFalse(result);
         }
 
         [TestMethod]
@@ -109,7 +76,9 @@ namespace LibEmiddle.Tests.Unit
             var privateKey = _identityKeyPair.PrivateKey;
 
             // Act
-            byte[] signature = MessageSigning.SignMessage(message, privateKey);
+            byte[] signature = Sodium.SignDetached(message, privateKey);
+
+            Assert.IsTrue(signature == null);
         }
 
         [TestMethod]

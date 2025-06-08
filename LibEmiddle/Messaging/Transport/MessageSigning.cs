@@ -64,7 +64,7 @@ namespace LibEmiddle.Messaging.Transport
             ArgumentNullException.ThrowIfNull(privateKey.ToArray(), nameof(privateKey));
 
             ReadOnlySpan<byte> messageBytes = Encoding.Default.GetBytes(message);
-            ReadOnlySpan<byte> signature = SignMessage(messageBytes, privateKey);
+            ReadOnlySpan<byte> signature = Sodium.SignDetached(messageBytes, privateKey);
             return Convert.ToBase64String(signature);
         }
 
@@ -85,7 +85,7 @@ namespace LibEmiddle.Messaging.Transport
             {
                 byte[] messageBytes = Encoding.Default.GetBytes(message);
                 byte[] signature = Convert.FromBase64String(signatureBase64);
-                return VerifySignature(messageBytes, signature, publicKey);
+                return Sodium.SignVerifyDetached(signature, messageBytes, publicKey);
             }
             catch (FormatException)
             {
@@ -126,7 +126,7 @@ namespace LibEmiddle.Messaging.Transport
 
             // Verify the signature against the canonical representation
             byte[] messageBytes = Encoding.Default.GetBytes(json);
-            return VerifySignature(messageBytes, signature, publicKey);
+            return Sodium.SignVerifyDetached(messageBytes, signature, publicKey);
         }
     }
 }

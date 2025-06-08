@@ -1,686 +1,835 @@
-﻿using LibEmiddle.Core;
+﻿using System.Collections.Concurrent;
+using System.Text;
+using LibEmiddle.Abstractions;
+using LibEmiddle.Core;
+using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
-using LibEmiddle.Abstractions;
-using LibEmiddle.Crypto;
 
-namespace LibEmiddle.Messaging.Group
+namespace LibEmiddle.Messaging.Group;
+
+/// <summary>
+/// Enhanced GroupSession that consolidates all group chat functionality into a single class,
+/// implementing the IGroupSession interface while leveraging existing infrastructure.
+/// Provides end-to-end encrypted group messaging with member management, key rotation,
+/// and security validation using the Signal protocol.
+/// </summary>
+public sealed class GroupSession : IGroupSession, ISession, IDisposable
 {
+    private readonly SemaphoreSlim _sessionLock = new(1, 1);
+    private readonly string _groupId;
+    private readonly KeyPair _identityKeyPair;
+    private bool _disposed;
+
+    // Group member management using existing domain objects
+    private readonly ConcurrentDictionary<string, GroupMember> _members = new();
+    private readonly ConcurrentDictionary<string, long> _removedMembers = new();
+    private GroupInfo? _groupInfo;
+
+    // Group key state management
+    private byte[] _currentChainKey = Array.Empty<byte>();
+    private uint _currentIteration;
+    private long _lastRotationTimestamp;
+    private readonly ConcurrentDictionary<string, byte[]> _senderKeys = new(); // senderId -> chainKey
+
+    // Message tracking for replay protection
+    private readonly ConcurrentDictionary<string, long> _lastSeenSequence = new();
+    private readonly ConcurrentDictionary<string, long> _joinTimestamps = new();
+
+    // ISession interface properties
+    public string SessionId { get; }
+    public SessionType Type => SessionType.Group;
+    public SessionState State { get; private set; }
+    public DateTime CreatedAt { get; }
+
+    // IGroupSession interface properties
+    public string GroupId => _groupId;
+    public byte[] ChainKey => _currentChainKey.ToArray();
+    public uint Iteration => _currentIteration;
+    public KeyRotationStrategy RotationStrategy { get; set; }
+    public byte[] CreatorPublicKey { get; }
+    public byte[] CreatorIdentityKey => CreatorPublicKey;
+    public DateTime KeyEstablishmentTimestamp => DateTimeOffset.FromUnixTimeMilliseconds(_lastRotationTimestamp).UtcDateTime;
+    public IReadOnlyDictionary<string, string>? Metadata { get; private set; }
+
+    // Events
+    public event EventHandler<SessionStateChangedEventArgs>? StateChanged;
+
     /// <summary>
-    /// Implements the IGroupSession interface, providing the main entry point
-    /// for group chat functionality with end-to-end encryption.
+    /// Initializes a new GroupSession with the specified parameters.
     /// </summary>
-    public class GroupSession : IGroupSession, ISession, IDisposable
+    /// <param name="groupId">Unique identifier for the group</param>
+    /// <param name="groupName">The group name shown to the users</param>
+    /// <param name="identityKeyPair">User's identity key pair</param>
+    /// <param name="rotationStrategy">Key rotation strategy to use</param>
+    /// <param name="creatorPublicKey">Public key of the group creator</param>
+    public GroupSession(
+        string groupId,
+        string groupName,
+        KeyPair identityKeyPair,
+        KeyRotationStrategy rotationStrategy = KeyRotationStrategy.Standard,
+        byte[]? creatorPublicKey = null)
     {
-        private readonly SemaphoreSlim _sessionLock = new(1, 1);
-        private readonly string _groupId;
-        private readonly KeyPair _identityKeyPair;
-        private readonly IGroupKeyManager _keyManager;
-        private readonly IGroupMemberManager _memberManager;
-        private readonly IGroupMessageCrypto _messageCrypto;
-        private readonly ISenderKeyDistribution _distributionManager;
-        private readonly GroupSecurityValidator _securityValidator;
-        private bool _disposed;
+        _groupId = groupId ?? throw new ArgumentNullException(nameof(groupId));
+        _identityKeyPair = identityKeyPair;
+        RotationStrategy = rotationStrategy;
+        CreatorPublicKey = creatorPublicKey ?? identityKeyPair.PublicKey;
 
-        // Required properties from interface
-        public string SessionId { get; }
-        public SessionType Type => SessionType.Group;
-        public SessionState State { get; private set; }
-        public string GroupId => _groupId;
-        public byte[] ChainKey => _keyManager.GetSenderState(_groupId)?.ChainKey ?? [];
-        public uint Iteration => _keyManager.GetSenderState(_groupId)?.Iteration ?? 0;
-        public IReadOnlyDictionary<string, string>? Metadata;
+        SessionId = $"group-{groupId}-{Guid.NewGuid():N}";
+        CreatedAt = DateTime.UtcNow;
+        State = SessionState.Initialized;
+        _lastRotationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        // Additional properties
-        public DateTime CreatedAt { get; }
-        public DateTime CreationTimestamp => CreatedAt;
-
-        public KeyRotationStrategy RotationStrategy { get; set; }
-        public byte[] CreatorPublicKey { get; }
-        public byte[] CreatorIdentityKey => CreatorPublicKey;
-        public DateTime KeyEstablishmentTimestamp => DateTimeOffset.FromUnixTimeSeconds(_keyManager.GetLastRotationTimestamp(_groupId)).UtcDateTime;
-
-        // Events
-        public event EventHandler<SessionStateChangedEventArgs>? StateChanged;
-
-        /// <summary>
-        /// Initializes a new instance of the GroupSession class.
-        /// </summary>
-        /// <param name="groupId">The unique identifier for the group.</param>
-        /// <param name="identityKeyPair">The user's identity key pair.</param>
-        /// <param name="keyManager">The group key manager.</param>
-        /// <param name="memberManager">The group member manager.</param>
-        /// <param name="messageCrypto">The group message crypto provider.</param>
-        /// <param name="distributionManager">The sender key distribution manager.</param>
-        /// <param name="rotationStrategy">The key rotation strategy to use.</param>
-        public GroupSession(
-            string groupId,
-            KeyPair identityKeyPair,
-            IGroupKeyManager keyManager,
-            IGroupMemberManager memberManager,
-            IGroupMessageCrypto messageCrypto,
-            ISenderKeyDistribution distributionManager,
-            KeyRotationStrategy rotationStrategy = KeyRotationStrategy.Standard)
+        // Initialize group info
+        _groupInfo = new GroupInfo
         {
-            _groupId = groupId ?? throw new ArgumentNullException(nameof(groupId));
-            _identityKeyPair = identityKeyPair.Equals(null) ? throw new ArgumentNullException(nameof(identityKeyPair)) : identityKeyPair;
-            _keyManager = keyManager ?? throw new ArgumentNullException(nameof(keyManager));
-            _memberManager = memberManager ?? throw new ArgumentNullException(nameof(memberManager));
-            _messageCrypto = messageCrypto ?? throw new ArgumentNullException(nameof(messageCrypto));
-            _distributionManager = distributionManager ?? throw new ArgumentNullException(nameof(distributionManager));
-            _securityValidator = new GroupSecurityValidator(memberManager);
+            GroupId = groupId,
+            GroupName = groupName,
+            CreatedAt = _lastRotationTimestamp,
+            CreatorPublicKey = CreatorPublicKey
+        };
 
-            SessionId = $"group-{groupId}-{Guid.NewGuid()}";
-            CreatedAt = DateTime.UtcNow;
-            State = SessionState.Initialized;
-            RotationStrategy = rotationStrategy;
+        // Record our join time
+        RecordJoinTime(_identityKeyPair.PublicKey);
+    }
 
-            // Get creator public key from group info
-            var groupInfo = _memberManager.GetGroupInfo(groupId);
-            CreatorPublicKey = groupInfo?.CreatorPublicKey ?? identityKeyPair.PublicKey;
+    #region ISession Implementation
 
-            // Record group join time
-            _messageCrypto.RecordGroupJoin(groupId, identityKeyPair);
+    public async Task<bool> ActivateAsync()
+    {
+        ThrowIfDisposed();
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot activate a terminated session.");
+            if (State == SessionState.Active)
+                return false;
+
+            var previousState = State;
+            State = SessionState.Active;
+            OnStateChanged(previousState, State);
+            return true;
         }
-
-        /// <summary>
-        /// Activates the session, enabling it to send and receive messages.
-        /// </summary>
-        /// <returns>True if the session was activated, false if it was already active.</returns>
-        public async Task<bool> ActivateAsync()
+        finally
         {
-            ThrowIfDisposed();
-            await _sessionLock.WaitAsync();
-            try
+            _sessionLock.Release();
+        }
+    }
+
+    public async Task<bool> SuspendAsync(string? reason = null)
+    {
+        ThrowIfDisposed();
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot suspend a terminated session.");
+            if (State == SessionState.Suspended)
+                return false;
+
+            var previousState = State;
+            State = SessionState.Suspended;
+            OnStateChanged(previousState, State);
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    public async Task<bool> TerminateAsync()
+    {
+        ThrowIfDisposed();
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                return false;
+
+            var previousState = State;
+            State = SessionState.Terminated;
+
+            // Clear sensitive data
+            SecureMemory.SecureClear(_currentChainKey);
+            foreach (var key in _senderKeys.Values)
             {
-                if (State == SessionState.Terminated)
-                    throw new InvalidOperationException("Cannot activate a terminated session.");
-                if (State == SessionState.Active)
+                SecureMemory.SecureClear(key);
+            }
+            _senderKeys.Clear();
+
+            OnStateChanged(previousState, State);
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    #endregion
+
+    #region Group Member Management
+
+    public async Task<bool> AddMemberAsync(byte[] memberPublicKey)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(memberPublicKey);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot add member: Session is terminated.");
+
+            // Check permissions
+            if (!HasPermission(GroupOperation.AddMember))
+                throw new UnauthorizedAccessException("You don't have permission to add members to this group.");
+
+            string memberId = GetMemberId(memberPublicKey);
+
+            // Check if already a member
+            if (_members.ContainsKey(memberId))
+                return false;
+
+            var member = new GroupMember
+            {
+                PublicKey = memberPublicKey.ToArray(),
+                JoinedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                IsAdmin = false,
+                IsOwner = false
+            };
+
+            bool added = _members.TryAdd(memberId, member);
+            if (added)
+            {
+                _removedMembers.TryRemove(memberId, out _);
+                RecordJoinTime(memberPublicKey);
+            }
+
+            return added;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    public async Task<bool> RemoveMemberAsync(byte[] memberPublicKey)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(memberPublicKey);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot remove member: Session is terminated.");
+
+            if (!HasPermission(GroupOperation.RemoveMember))
+                throw new UnauthorizedAccessException("You don't have permission to remove members from this group.");
+
+            string memberId = GetMemberId(memberPublicKey);
+
+            if (_members.TryGetValue(memberId, out var member))
+            {
+                // Can't remove the owner
+                if (member.IsOwner)
                     return false;
 
-                var previousState = State;
-                State = SessionState.Active;
-                OnStateChanged(previousState, State);
-                return true;
-            }
-            finally
-            {
-                _sessionLock.Release();
-            }
-        }
-
-        /// <summary>
-        /// Suspends the session, temporarily preventing it from sending and receiving messages.
-        /// </summary>
-        /// <param name="reason">Optional reason for suspension.</param>
-        /// <returns>True if the session was suspended, false if it was already suspended.</returns>
-        public async Task<bool> SuspendAsync(string? reason = null)
-        {
-            ThrowIfDisposed();
-            await _sessionLock.WaitAsync();
-            try
-            {
-                if (State == SessionState.Terminated)
-                    throw new InvalidOperationException("Cannot suspend a terminated session.");
-                if (State == SessionState.Suspended)
-                    return false;
-
-                var previousState = State;
-                State = SessionState.Suspended;
-                OnStateChanged(previousState, State);
-                return true;
-            }
-            finally
-            {
-                _sessionLock.Release();
-            }
-        }
-
-        /// <summary>
-        /// Terminates the session permanently, preventing any further communication.
-        /// </summary>
-        /// <returns>True if the session was terminated, false if it was already terminated.</returns>
-        public async Task<bool> TerminateAsync()
-        {
-            ThrowIfDisposed();
-            await _sessionLock.WaitAsync();
-            try
-            {
-                if (State == SessionState.Terminated)
-                    return false;
-
-                var previousState = State;
-                State = SessionState.Terminated;
-
-                // Clean up resources
-                _keyManager.ClearSenderState(_groupId);
-                _distributionManager.DeleteGroupDistributions(_groupId);
-
-                OnStateChanged(previousState, State);
-                return true;
-            }
-            finally
-            {
-                _sessionLock.Release();
-            }
-        }
-
-        /// <summary>
-        /// Adds a member to the group.
-        /// </summary>
-        /// <param name="memberPublicKey">The public key of the member to add.</param>
-        /// <returns>True if the member was added successfully.</returns>
-        public async Task<bool> AddMemberAsync(byte[] memberPublicKey)
-        {
-            ThrowIfDisposed();
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
-
-            await _sessionLock.WaitAsync();
-            try
-            {
-                if (State == SessionState.Terminated)
-                    throw new InvalidOperationException("Cannot add member: Session is terminated.");
-
-                // Check if the current user has permission
-                if (!_securityValidator.ValidateGroupOperation(_groupId, _identityKeyPair.PublicKey, GroupOperation.AddMember))
+                if (_members.TryRemove(memberId, out _))
                 {
-                    throw new UnauthorizedAccessException("You don't have permission to add members to this group.");
-                }
+                    _removedMembers[memberId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-                // Add the member
-                return _memberManager.AddMember(_groupId, memberPublicKey);
-            }
-            finally
-            {
-                _sessionLock.Release();
-            }
-        }
-
-        /// <summary>
-        /// Removes a member from the group.
-        /// </summary>
-        /// <param name="memberPublicKey">The public key of the member to remove.</param>
-        /// <returns>True if the member was removed successfully.</returns>
-        public async Task<bool> RemoveMemberAsync(byte[] memberPublicKey)
-        {
-            ThrowIfDisposed();
-            ArgumentNullException.ThrowIfNull(memberPublicKey, nameof(memberPublicKey));
-
-            await _sessionLock.WaitAsync();
-            try
-            {
-                if (State == SessionState.Terminated)
-                    throw new InvalidOperationException("Cannot remove member: Session is terminated.");
-
-                // Check if the current user has permission
-                if (!_securityValidator.ValidateGroupOperation(_groupId, _identityKeyPair.PublicKey, GroupOperation.RemoveMember))
-                {
-                    throw new UnauthorizedAccessException("You don't have permission to remove members from this group.");
-                }
-
-                // Check if user being removed was an admin or owner
-                bool wasAdmin = _memberManager.WasAdmin(_groupId, memberPublicKey);
-
-                // Remove the member
-                bool result = _memberManager.RemoveMember(_groupId, memberPublicKey);
-
-                // If member was successfully removed, rotate the key
-                if (result)
-                {
+                    // Rotate key after removing member for forward secrecy
                     await RotateKeyAsync();
+                    return true;
                 }
+            }
 
-                return result;
-            }
-            finally
-            {
-                _sessionLock.Release();
-            }
+            return false;
         }
-
-        /// <summary>
-        /// Encrypts a message for the group.
-        /// </summary>
-        /// <param name="message">The plaintext message to encrypt.</param>
-        /// <returns>The encrypted group message.</returns>
-        public async Task<EncryptedGroupMessage?> EncryptMessageAsync(string message)
+        finally
         {
-            ThrowIfDisposed();
-            ArgumentException.ThrowIfNullOrEmpty(message, nameof(message));
+            _sessionLock.Release();
+        }
+    }
 
-            await _sessionLock.WaitAsync();
+    #endregion
+
+    #region Message Encryption/Decryption
+
+    public async Task<EncryptedGroupMessage?> EncryptMessageAsync(string message)
+    {
+        ThrowIfDisposed();
+        ArgumentException.ThrowIfNullOrEmpty(message);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot encrypt: Session is terminated.");
+            if (State == SessionState.Suspended)
+                throw new InvalidOperationException("Cannot encrypt: Session is suspended.");
+
+            // Auto-activate if needed
+            if (State == SessionState.Initialized)
+            {
+                State = SessionState.Active;
+                OnStateChanged(SessionState.Initialized, State);
+            }
+
+            // Check permissions
+            if (!HasPermission(GroupOperation.Send))
+                throw new UnauthorizedAccessException("You don't have permission to send messages in this group.");
+
+            // Check if key rotation is needed
+            await CheckAndRotateKeyIfNeededAsync();
+
+            // Ensure we have a chain key
+            if (_currentChainKey.Length == 0)
+            {
+                _currentChainKey = Sodium.GenerateRandomBytes(Constants.CHAIN_KEY_SIZE);
+                _currentIteration = 0;
+            }
+
+            // Derive message key and advance chain
+            byte[] messageKey = Sodium.DeriveMessageKey(_currentChainKey);
+            _currentChainKey = Sodium.AdvanceChainKey(_currentChainKey);
+            uint messageIteration = _currentIteration++;
+
             try
             {
-                if (State == SessionState.Terminated)
-                    throw new InvalidOperationException("Cannot encrypt: Session is terminated.");
-                if (State == SessionState.Suspended)
-                    throw new InvalidOperationException("Cannot encrypt: Session is suspended.");
+                // Encrypt the message using AES
+                byte[] plaintext = Encoding.UTF8.GetBytes(message);
+                byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
+                byte[] associatedData = Encoding.UTF8.GetBytes($"{_groupId}:{_lastRotationTimestamp}");
+                byte[] ciphertext = AES.AESEncrypt(plaintext, messageKey, nonce, associatedData);
 
-                // Auto-activate if needed
-                if (State == SessionState.Initialized)
+                var encryptedMessage = new EncryptedGroupMessage
                 {
-                    State = SessionState.Active;
-                    OnStateChanged(SessionState.Initialized, State);
-                }
-
-                // Check if the current user has permission to send messages
-                if (!_securityValidator.ValidateGroupOperation(_groupId, _identityKeyPair.PublicKey, GroupOperation.Send))
-                {
-                    throw new UnauthorizedAccessException("You don't have permission to send messages in this group.");
-                }
-
-                // Check if key rotation is needed based on strategy
-                if (RotationStrategy != KeyRotationStrategy.Standard)
-                {
-                    await CheckAndRotateKeyIfNeededAsync();
-                }
-
-                // Get the current group state
-                var groupState = _keyManager.GetSenderState(_groupId);
-                if (groupState == null)
-                {
-                    throw new InvalidOperationException($"Group {_groupId} does not exist or sender key not found");
-                }
-
-                // Encrypt the message
-                var (messageKey, iteration) = _keyManager.GetSenderMessageKey(_groupId);
-                try
-                {
-                    // Get last rotation timestamp
-                    long rotationTimestamp = _keyManager.GetLastRotationTimestamp(_groupId);
-
-                    // Encrypt the message
-                    var encryptedMessage = _messageCrypto.EncryptMessage(
-                        _groupId, message, messageKey, _identityKeyPair, rotationTimestamp);
-
-                    // Append iteration information to the message ID
-                    string originalMessageId = encryptedMessage.MessageId ?? Guid.NewGuid().ToString("N");
-                    encryptedMessage.MessageId = $"iter:{iteration}:{originalMessageId}";
-
-                    return encryptedMessage;
-                }
-                finally
-                {
-                    SecureMemory.SecureClear(messageKey);
-                }
-            }
-            finally
-            {
-                _sessionLock.Release();
-            }
-        }
-
-        /// <summary>
-        /// Decrypts a group message.
-        /// </summary>
-        /// <param name="encryptedMessage">The encrypted group message to decrypt.</param>
-        /// <returns>The decrypted message content.</returns>
-        public async Task<string?> DecryptMessageAsync(EncryptedGroupMessage encryptedMessage)
-        {
-            ThrowIfDisposed();
-            ArgumentNullException.ThrowIfNull(encryptedMessage, nameof(encryptedMessage));
-
-            if (encryptedMessage.GroupId != _groupId)
-                throw new ArgumentException($"Message is for group {encryptedMessage.GroupId}, but this session is for group {_groupId}");
-
-            await _sessionLock.WaitAsync();
-            try
-            {
-                // Validate the encrypted message
-                if (!_securityValidator.ValidateGroupMessage(encryptedMessage))
-                    return null;
-
-                // State validation
-                if (State == SessionState.Terminated)
-                    throw new InvalidOperationException("Cannot decrypt: Session is terminated.");
-
-                // Auto-activate if needed
-                if (State == SessionState.Initialized)
-                {
-                    State = SessionState.Active;
-                    OnStateChanged(SessionState.Initialized, State);
-                }
-
-                // Check membership
-                if (!_memberManager.IsMember(_groupId, _identityKeyPair.PublicKey))
-                {
-                    LoggingManager.LogWarning(nameof(GroupSession), $"Rejecting message: user is not a member of group {_groupId}");
-                    return null;
-                }
-
-                // Check if user was removed before message was created
-                if (_memberManager.WasRemovedBeforeTimestamp(_groupId, _identityKeyPair.PublicKey, encryptedMessage.Timestamp))
-                {
-                    LoggingManager.LogWarning(nameof(GroupSession), $"Rejecting message: message was created after user was removed from group {_groupId}");
-                    return null;
-                }
-
-                // Get the sender key
-                var senderKey = _distributionManager.GetSenderKeyForMessage(encryptedMessage);
-                if (senderKey == null)
-                    return null;
-
-                try
-                {
-                    // Decrypt the message
-                    return _messageCrypto.DecryptMessage(encryptedMessage, senderKey);
-                }
-                finally
-                {
-                    SecureMemory.SecureClear(senderKey);
-                }
-            }
-            finally
-            {
-                _sessionLock.Release();
-            }
-        }
-
-        /// <summary>
-        /// Rotates the group key for enhanced security.
-        /// </summary>
-        /// <returns>True if the key was rotated successfully.</returns>
-        public async Task<bool> RotateKeyAsync()
-        {
-            ThrowIfDisposed();
-
-            await _sessionLock.WaitAsync();
-            try
-            {
-                if (State == SessionState.Terminated)
-                    throw new InvalidOperationException("Cannot rotate key: Session is terminated.");
-
-                // Check if the current user has permission
-                if (!_securityValidator.ValidateGroupOperation(_groupId, _identityKeyPair.PublicKey, GroupOperation.RotateKey))
-                {
-                    throw new UnauthorizedAccessException("You don't have permission to rotate the group key");
-                }
-
-                // Generate a new chain key
-                byte[] newKey = _keyManager.GenerateInitialChainKey();
-
-                // Reinitialize the sender state
-                _keyManager.InitializeSenderState(_groupId, newKey);
-
-                // Update the last rotation timestamp
-                long currentTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                _keyManager.UpdateLastRotationTimestamp(_groupId, currentTimestamp);
-
-                // Remove outdated distribution messages
-                _distributionManager.DeleteGroupDistributions(_groupId);
-
-                // Create and process a new distribution message
-                var distribution = CreateDistributionMessage();
-                bool result = ProcessDistributionMessage(distribution);
-
-                return result;
-            }
-            finally
-            {
-                _sessionLock.Release();
-            }
-        }
-
-        /// <summary>
-        /// Creates a distribution message for this group session.
-        /// </summary>
-        /// <returns>The sender key distribution message.</returns>
-        public SenderKeyDistributionMessage CreateDistributionMessage()
-        {
-            ThrowIfDisposed();
-
-            // Get the current chain key and iteration
-            var senderState = _keyManager.GetSenderState(_groupId);
-            if (senderState == null)
-                throw new InvalidOperationException($"Group {_groupId} does not exist or has been deleted");
-
-            return _distributionManager.CreateDistributionMessage(
-                _groupId,
-                senderState.ChainKey,
-                senderState.Iteration,
-                _identityKeyPair);
-        }
-
-        /// <summary>
-        /// Processes a received distribution message to update the session's keys.
-        /// </summary>
-        /// <param name="distribution">The distribution message to process.</param>
-        /// <returns>True if the message was processed successfully.</returns>
-        public bool ProcessDistributionMessage(SenderKeyDistributionMessage distribution)
-        {
-            ThrowIfDisposed();
-
-            // Validate the distribution message
-            if (!_securityValidator.ValidateDistributionMessage(distribution))
-                return false;
-
-            // Check if this is for our group
-            if (distribution.GroupId != _groupId)
-                return false;
-
-            // Check membership
-            if (!_memberManager.IsMember(_groupId, _identityKeyPair.PublicKey))
-                return false;
-
-            // Record group join time if not already recorded
-            _messageCrypto.RecordGroupJoin(_groupId, _identityKeyPair);
-
-            // Process the distribution message
-            return _distributionManager.ProcessDistributionMessage(distribution);
-        }
-
-        /// <summary>
-        /// Gets the serialized state of this session for persistence.
-        /// </summary>
-        /// <returns>The serialized session state.</returns>
-        public async Task<string> GetSerializedStateAsync()
-        {
-            ThrowIfDisposed();
-
-            await _sessionLock.WaitAsync();
-            try
-            {
-                // Get key state
-                var keyState = await _keyManager.ExportKeyStateAsync(_groupId);
-
-                // Get group info
-                var groupInfo = _memberManager.GetGroupInfo(_groupId);
-
-                // Create the session state
-                var sessionState = new GroupSessionState
-                {
-                    SessionId = SessionId,
                     GroupId = _groupId,
-                    State = State,
-                    CreatedAt = CreatedAt,
-                    RotationStrategy = RotationStrategy,
-                    KeyState = keyState,
-                    GroupInfo = groupInfo
+                    SenderIdentityKey = _identityKeyPair.PublicKey,
+                    Ciphertext = ciphertext,
+                    Nonce = nonce,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    RotationEpoch = _lastRotationTimestamp,
+                    MessageId = $"iter:{messageIteration}:{Guid.NewGuid():N}"
                 };
 
-                // Serialize the state
-                return JsonSerialization.Serialize(sessionState);
+                // Sign the message
+                byte[] dataToSign = GetMessageDataToSign(encryptedMessage);
+                encryptedMessage.Signature = Sodium.SignDetached(dataToSign, _identityKeyPair.PrivateKey);
+
+                return encryptedMessage;
             }
             finally
             {
-                _sessionLock.Release();
+                SecureMemory.SecureClear(messageKey);
+            }
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    public async Task<string?> DecryptMessageAsync(EncryptedGroupMessage encryptedMessage)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(encryptedMessage);
+
+        if (encryptedMessage.GroupId != _groupId)
+            throw new ArgumentException($"Message is for group {encryptedMessage.GroupId}, but this session is for group {_groupId}");
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            // Validate message
+            if (!ValidateGroupMessage(encryptedMessage))
+                return null;
+
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot decrypt: Session is terminated.");
+
+            // Auto-activate if needed
+            if (State == SessionState.Initialized)
+            {
+                State = SessionState.Active;
+                OnStateChanged(SessionState.Initialized, State);
+            }
+
+            // Check membership and timing
+            if (!IsMember(_identityKeyPair.PublicKey))
+                return null;
+
+            if (WasRemovedBeforeTimestamp(_identityKeyPair.PublicKey, encryptedMessage.Timestamp))
+                return null;
+
+            // Get sender key
+            string senderId = GetMemberId(encryptedMessage.SenderIdentityKey);
+            if (!_senderKeys.TryGetValue(senderId, out byte[]? senderKey))
+                return null;
+
+            try
+            {
+                // Decrypt the message
+                byte[] associatedData = Encoding.UTF8.GetBytes($"{_groupId}:{encryptedMessage.RotationEpoch}");
+                byte[] decrypted = AES.AESDecrypt(
+                    encryptedMessage.Ciphertext,
+                    senderKey,
+                    encryptedMessage.Nonce,
+                    associatedData);
+
+                return Encoding.UTF8.GetString(decrypted);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    #endregion
+
+    #region Key Management
+
+    public async Task<bool> RotateKeyAsync()
+    {
+        ThrowIfDisposed();
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot rotate key: Session is terminated.");
+
+            if (!HasPermission(GroupOperation.RotateKey))
+                throw new UnauthorizedAccessException("You don't have permission to rotate the group key.");
+
+            // Generate new chain key
+            byte[] newChainKey = Sodium.GenerateRandomBytes(Constants.CHAIN_KEY_SIZE);
+
+            // Clear old key securely
+            SecureMemory.SecureClear(_currentChainKey);
+
+            // Update state
+            _currentChainKey = newChainKey;
+            _currentIteration = 0;
+            _lastRotationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // Clear old sender keys
+            foreach (var key in _senderKeys.Values)
+            {
+                SecureMemory.SecureClear(key);
+            }
+            _senderKeys.Clear();
+
+            // Create and process distribution message
+            var distribution = CreateDistributionMessage();
+            ProcessDistributionMessage(distribution);
+
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    public SenderKeyDistributionMessage CreateDistributionMessage()
+    {
+        ThrowIfDisposed();
+
+        var distribution = new SenderKeyDistributionMessage
+        {
+            GroupId = _groupId,
+            ChainKey = _currentChainKey.ToArray(),
+            Iteration = _currentIteration,
+            SenderIdentityKey = _identityKeyPair.PublicKey,
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        // Sign the distribution message
+        byte[] dataToSign = GetDistributionDataToSign(distribution);
+        distribution.Signature = Sodium.SignDetached(dataToSign, _identityKeyPair.PrivateKey);
+
+        return distribution;
+    }
+
+    public bool ProcessDistributionMessage(SenderKeyDistributionMessage distribution)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(distribution);
+
+        if (distribution.GroupId != _groupId)
+            return false;
+
+        if (distribution.SenderIdentityKey == null || distribution.ChainKey == null)
+            return false;
+
+        // Validate signature
+        if (distribution.Signature != null)
+        {
+            byte[] dataToSign = GetDistributionDataToSign(distribution);
+            if (!Sodium.SignVerifyDetached(distribution.Signature, dataToSign, distribution.SenderIdentityKey))
+                return false;
+        }
+
+        // Check if sender is a member
+        string senderId = GetMemberId(distribution.SenderIdentityKey);
+        if (!_members.ContainsKey(senderId))
+            return false;
+
+        // Store the sender key
+        _senderKeys[senderId] = distribution.ChainKey.ToArray();
+
+        // Record join time if not already recorded
+        RecordJoinTime(distribution.SenderIdentityKey);
+
+        return true;
+    }
+
+    #endregion
+
+    #region Security Validation
+
+    private bool ValidateGroupMessage(EncryptedGroupMessage message)
+    {
+        // Basic validation
+        if (message.Ciphertext?.Length == 0 || message.Nonce?.Length != Constants.NONCE_SIZE)
+            return false;
+
+        if (message.SenderIdentityKey == null || message.SenderIdentityKey?.Length == 0 || message.Timestamp <= 0)
+            return false;
+
+        // Check if sender is a member
+        if (!IsMember(message.SenderIdentityKey!))
+            return false;
+
+        // Verify signature
+        if (message.Signature != null)
+        {
+            byte[] dataToSign = GetMessageDataToSign(message);
+            if (!Sodium.SignVerifyDetached(message.Signature, dataToSign, message.SenderIdentityKey))
+                return false;
+        }
+
+        // Validate message sequence for replay protection
+        return ValidateMessageSequence(message.SenderIdentityKey!, message.RotationEpoch, message.Timestamp);
+    }
+
+    private bool ValidateMessageSequence(byte[] senderKey, long sequence, long timestamp)
+    {
+        string senderId = GetMemberId(senderKey);
+
+        if (_lastSeenSequence.TryGetValue(senderId, out long lastSeen))
+        {
+            if (sequence <= lastSeen)
+            {
+                LoggingManager.LogSecurityEvent(nameof(GroupSession), "Sequence replay detected", isAlert: true);
+                return false;
             }
         }
 
-        /// <summary>
-        /// Restores the session state from a serialized representation.
-        /// </summary>
-        /// <param name="serializedState">The serialized session state.</param>
-        /// <returns>True if the state was restored successfully.</returns>
-        public async Task<bool> RestoreSerializedStateAsync(string serializedState)
+        _lastSeenSequence[senderId] = sequence;
+        return ValidateMessageTimestamp(senderKey, timestamp);
+    }
+
+    private bool ValidateMessageTimestamp(byte[] senderKey, long messageTimestamp)
+    {
+        string senderId = GetMemberId(senderKey);
+
+        if (_joinTimestamps.TryGetValue(senderId, out long joinTimestamp))
         {
-            ThrowIfDisposed();
+            const long CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000; // 5 minutes
 
-            if (string.IsNullOrEmpty(serializedState))
-                throw new ArgumentException("Serialized state cannot be null or empty.", nameof(serializedState));
+            if (messageTimestamp < joinTimestamp - CLOCK_SKEW_TOLERANCE_MS)
+                return false;
 
-            await _sessionLock.WaitAsync();
-            try
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (messageTimestamp > now + CLOCK_SKEW_TOLERANCE_MS)
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool HasPermission(GroupOperation operation)
+    {
+        string userId = GetMemberId(_identityKeyPair.PublicKey);
+
+        if (!_members.TryGetValue(userId, out var member))
+            return false;
+
+        return operation switch
+        {
+            GroupOperation.Send => true, // All members can send
+            GroupOperation.AddMember or GroupOperation.RemoveMember or
+            GroupOperation.PromoteAdmin or GroupOperation.DemoteAdmin => member.IsAdmin || member.IsOwner,
+            GroupOperation.RotateKey => member.IsAdmin || member.IsOwner,
+            GroupOperation.DeleteGroup => member.IsOwner,
+            _ => false
+        };
+    }
+
+    #endregion
+
+    #region State Management and Serialization
+
+    public async Task<string> GetSerializedStateAsync()
+    {
+        ThrowIfDisposed();
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            var keyState = new GroupKeyState
             {
-                // Deserialize the state
-                var sessionState = JsonSerialization.Deserialize<GroupSessionState>(serializedState);
-                if (sessionState == null)
-                    throw new ArgumentException("Failed to deserialize session state.", nameof(serializedState));
-
-                // Validate the state
-                if (sessionState.GroupId != _groupId)
-                    throw new ArgumentException($"Session state is for group {sessionState.GroupId}, but this session is for group {_groupId}");
-
-                // Import key state
-                if (sessionState.KeyState != null)
+                GroupId = _groupId,
+                LastRotationTimestamp = _lastRotationTimestamp,
+                SenderState = new GroupSenderStateDto
                 {
-                    await _keyManager.ImportKeyStateAsync(sessionState.KeyState);
+                    ChainKey = Convert.ToBase64String(_currentChainKey),
+                    Iteration = _currentIteration,
+                    CreationTimestamp = _lastRotationTimestamp
+                },
+                ReceiverStates = _senderKeys.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => Convert.ToBase64String(kvp.Value))
+            };
+
+            var sessionState = new GroupSessionState
+            {
+                SessionId = SessionId,
+                GroupId = _groupId,
+                State = State,
+                CreatedAt = CreatedAt,
+                RotationStrategy = RotationStrategy,
+                KeyState = keyState,
+                GroupInfo = _groupInfo
+            };
+
+            return JsonSerialization.Serialize(sessionState);
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    public async Task<bool> RestoreSerializedStateAsync(string serializedState)
+    {
+        ThrowIfDisposed();
+        ArgumentException.ThrowIfNullOrEmpty(serializedState);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            var sessionState = JsonSerialization.Deserialize<GroupSessionState>(serializedState);
+            if (sessionState?.GroupId != _groupId)
+                return false;
+
+            // Restore key state
+            if (sessionState.KeyState?.SenderState != null)
+            {
+                _currentChainKey = Convert.FromBase64String(sessionState.KeyState.SenderState.ChainKey);
+                _currentIteration = sessionState.KeyState.SenderState.Iteration;
+                _lastRotationTimestamp = sessionState.KeyState.LastRotationTimestamp;
+
+                // Restore receiver states
+                foreach (var kvp in sessionState.KeyState.ReceiverStates)
+                {
+                    _senderKeys[kvp.Key] = Convert.FromBase64String(kvp.Value);
+                }
+            }
+
+            // Restore session state
+            State = sessionState.State;
+            RotationStrategy = sessionState.RotationStrategy;
+
+            // Restore group info and members
+            if (sessionState.GroupInfo != null)
+            {
+                _groupInfo = sessionState.GroupInfo;
+
+                foreach (var member in sessionState.GroupInfo.Members)
+                {
+                    _members[member.Key] = member.Value;
                 }
 
-                // Update session state
-                State = sessionState.State;
-                RotationStrategy = sessionState.RotationStrategy;
+                foreach (var removed in sessionState.GroupInfo.RemovedMembers)
+                {
+                    _removedMembers[removed.Key] = removed.Value;
+                }
+            }
 
-                return true;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(GroupSession), $"Failed to restore session state: {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    private async Task CheckAndRotateKeyIfNeededAsync()
+    {
+        long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        TimeSpan elapsed = TimeSpan.FromMilliseconds(currentTime - _lastRotationTimestamp);
+
+        bool shouldRotate = RotationStrategy switch
+        {
+            KeyRotationStrategy.Hourly => elapsed >= TimeSpan.FromHours(1),
+            KeyRotationStrategy.Daily => elapsed >= TimeSpan.FromDays(1),
+            KeyRotationStrategy.Weekly => elapsed >= TimeSpan.FromDays(7),
+            KeyRotationStrategy.Standard => elapsed >= TimeSpan.FromDays(7),
+            KeyRotationStrategy.AfterEveryMessage => true,
+            _ => false
+        };
+
+        if (shouldRotate && HasPermission(GroupOperation.RotateKey))
+        {
+            try
+            {
+                await RotateKeyAsync();
             }
             catch (Exception ex)
             {
-                LoggingManager.LogError(nameof(GroupSession), $"Failed to restore session state: {ex.Message}");
-                return false;
-            }
-            finally
-            {
-                _sessionLock.Release();
+                LoggingManager.LogError(nameof(GroupSession), $"Failed to rotate group key: {ex.Message}");
             }
         }
+    }
 
-        // Helper methods
-        private async Task CheckAndRotateKeyIfNeededAsync()
+    private void RecordJoinTime(byte[] publicKey)
+    {
+        string userId = GetMemberId(publicKey);
+        _joinTimestamps[userId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    }
+
+    private bool IsMember(byte[] publicKey)
+    {
+        string userId = GetMemberId(publicKey);
+        return _members.ContainsKey(userId);
+    }
+
+    private bool WasRemovedBeforeTimestamp(byte[] publicKey, long timestamp)
+    {
+        string userId = GetMemberId(publicKey);
+        return _removedMembers.TryGetValue(userId, out long removalTime) && removalTime < timestamp;
+    }
+
+    private static string GetMemberId(byte[] publicKey) => Convert.ToBase64String(publicKey);
+
+    private static byte[] GetMessageDataToSign(EncryptedGroupMessage message)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+
+        writer.Write(Encoding.UTF8.GetBytes(message.GroupId));
+        writer.Write(message.SenderIdentityKey);
+        writer.Write(message.Ciphertext);
+        writer.Write(message.Nonce);
+        writer.Write(message.Timestamp);
+        writer.Write(message.RotationEpoch);
+        writer.Write(Encoding.UTF8.GetBytes(message.MessageId ?? string.Empty));
+
+        return ms.ToArray();
+    }
+
+    private static byte[] GetDistributionDataToSign(SenderKeyDistributionMessage distribution)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+
+        writer.Write(Encoding.UTF8.GetBytes(distribution.GroupId!));
+        writer.Write(distribution.ChainKey!);
+        writer.Write(distribution.Iteration);
+        writer.Write(distribution.Timestamp);
+        if (distribution.SenderIdentityKey != null)
         {
-            // Get current time
-            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-            // Get last rotation time
-            long lastRotationTime = _keyManager.GetLastRotationTimestamp(_groupId);
-
-            // Calculate elapsed time
-            TimeSpan elapsed = TimeSpan.FromMilliseconds(currentTime - lastRotationTime);
-
-            // Determine if rotation is needed based on strategy
-            bool shouldRotate = RotationStrategy switch
-            {
-                KeyRotationStrategy.Hourly => elapsed >= TimeSpan.FromHours(1),
-                KeyRotationStrategy.Daily => elapsed >= TimeSpan.FromDays(1),
-                KeyRotationStrategy.Weekly => elapsed >= TimeSpan.FromDays(7),
-                KeyRotationStrategy.Standard => elapsed >= TimeSpan.FromDays(7), // Default to weekly rotation
-                KeyRotationStrategy.AfterEveryMessage => true,
-                _ => false
-            };
-
-            if (shouldRotate && _memberManager.HasKeyRotationPermission(_groupId, _identityKeyPair.PublicKey))
-            {
-                try
-                {
-                    await RotateKeyAsync();
-                }
-                catch (Exception ex)
-                {
-                    LoggingManager.LogError(nameof(GroupSession),
-                        $"Failed to rotate group key for {_groupId}: {ex.Message}");
-                }
-            }
+            writer.Write(distribution.SenderIdentityKey);
         }
 
-        // IDisposable implementation
-        protected virtual void Dispose(bool disposing)
+        return ms.ToArray();
+    }
+
+    private void OnStateChanged(SessionState previousState, SessionState newState)
+    {
+        Task.Run(() => StateChanged?.Invoke(this, new SessionStateChangedEventArgs(previousState, newState)));
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(GroupSession));
+    }
+
+    #endregion
+
+    #region IDisposable Implementation
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _sessionLock.Wait();
+        try
         {
-            if (_disposed) return;
+            if (_disposed)
+                return;
 
-            if (disposing)
+            // Clear sensitive data
+            SecureMemory.SecureClear(_currentChainKey);
+            foreach (var key in _senderKeys.Values)
             {
-                _sessionLock.Wait();
-                try
-                {
-                    if (_disposed) return;
+                SecureMemory.SecureClear(key);
+            }
+            _senderKeys.Clear();
 
-                    // Clean up resources
-                    _keyManager.ClearSenderState(_groupId);
-                    _sessionLock.Dispose();
-
-                    var previousState = State;
-                    State = SessionState.Terminated;
-                    if (previousState != SessionState.Terminated)
-                    {
-                        // Don't raise event from Dispose if possible
-                    }
-
-                    _disposed = true;
-                }
-                finally
-                {
-                    _sessionLock.Release();
-                }
+            var previousState = State;
+            State = SessionState.Terminated;
+            if (previousState != SessionState.Terminated)
+            {
+                OnStateChanged(previousState, State);
             }
 
             _disposed = true;
         }
-
-        public void Dispose()
+        finally
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        private void ThrowIfDisposed()
-        {
-            if (_disposed) throw new ObjectDisposedException(nameof(GroupSession));
-        }
-
-        protected virtual void OnStateChanged(SessionState previousState, SessionState newState)
-        {
-            // Ensure event handlers don't block lock if called from within lock
-            Task.Run(() => StateChanged?.Invoke(this, new SessionStateChangedEventArgs(previousState, newState)));
+            _sessionLock.Release();
+            _sessionLock.Dispose();
         }
     }
 
-    /// <summary>
-    /// Represents the serializable state of a group session.
-    /// </summary>
-    public class GroupSessionState
-    {
-        /// <summary>
-        /// Gets or sets the session identifier.
-        /// </summary>
-        public string SessionId { get; set; } = string.Empty;
+    #endregion
+}
 
-        /// <summary>
-        /// Gets or sets the group identifier.
-        /// </summary>
-        public string GroupId { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Gets or sets the session state.
-        /// </summary>
-        public SessionState State { get; set; }
-
-        /// <summary>
-        /// Gets or sets when the session was created.
-        /// </summary>
-        public DateTime CreatedAt { get; set; }
-
-        /// <summary>
-        /// Gets or sets the key rotation strategy.
-        /// </summary>
-        public KeyRotationStrategy RotationStrategy { get; set; }
-
-        /// <summary>
-        /// Gets or sets the key state.
-        /// </summary>
-        public GroupKeyState? KeyState { get; set; }
-
-        /// <summary>
-        /// Gets or sets the group information.
-        /// </summary>
-        public GroupInfo? GroupInfo { get; set; }
-    }
+/// <summary>
+/// Represents the serializable state of a group session.
+/// </summary>
+public class GroupSessionState
+{
+    public string SessionId { get; set; } = string.Empty;
+    public string GroupId { get; set; } = string.Empty;
+    public SessionState State { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public KeyRotationStrategy RotationStrategy { get; set; }
+    public GroupKeyState? KeyState { get; set; }
+    public GroupInfo? GroupInfo { get; set; }
 }

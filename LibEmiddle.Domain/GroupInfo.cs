@@ -10,12 +10,12 @@ namespace LibEmiddle.Domain
         /// <summary>
         /// Gets or sets the group identifier.
         /// </summary>
-        public string GroupId { get; set; } = string.Empty;
+        public string GroupId { get; set; } = new Guid().ToString();
 
         /// <summary>
         /// Gets or sets the group name.
         /// </summary>
-        public string GroupName { get; set; } = string.Empty;
+        public string GroupName { get; set; } = "Untitled";
 
         /// <summary>
         /// Gets or sets when the group was created (milliseconds since Unix epoch).

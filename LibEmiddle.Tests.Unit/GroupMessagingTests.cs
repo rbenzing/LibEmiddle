@@ -15,15 +15,12 @@ namespace LibEmiddle.Tests.Unit
     [TestClass]
     public class GroupMessagingTests
     {
-        private ICryptoProvider _cryptoProvider;
-        private KeyPair _defaultKeyPair;
+        private CryptoProvider _cryptoProvider;
 
         [TestInitialize]
         public void Setup()
         {
             _cryptoProvider = new CryptoProvider();
-            // Generate a default key pair for tests that don't specify identity
-            _defaultKeyPair = Sodium.GenerateEd25519KeyPair();
         }
 
         [TestMethod]
@@ -32,41 +29,31 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var adminKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var groupManager = new GroupChatManager(adminKeyPair);
             string groupId = $"test-authorization-{Guid.NewGuid()}";
-            string groupName = "Test Authorization Group";
+            string groupName = "Test Group Name";
 
-            // Create group
-            var session = await groupManager.CreateGroupAsync(groupId, groupName);
+            // Create group using new consolidated GroupSession
+            var session = new GroupSession(groupId, groupName, adminKeyPair);
+            await session.ActivateAsync();
 
             // Act
             bool result = await session.AddMemberAsync(memberKeyPair.PublicKey);
 
-            // Get the member manager directly from the session
-            bool isMember = await Task.Run(() => {
-                var memberManager = typeof(GroupSession)
-                    .GetField("_memberManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                    .GetValue(session) as GroupMemberManager;
-
-                return memberManager.IsMember(groupId, memberKeyPair.PublicKey);
-            });
-
             // Assert
             Assert.IsTrue(result);
-            Assert.IsTrue(isMember);
         }
-        
+
         [TestMethod]
         public async Task DecryptGroupMessage_ShouldRejectReplayedMessage()
         {
             // Arrange
             var keyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var groupManager = new GroupChatManager(keyPair);
             string groupId = $"test-replay-protection-{Guid.NewGuid()}";
-            string groupName = "Test Replay Protection Group";
+            string groupName = "Test Group Name";
 
-            // Create the group
-            var session = await groupManager.CreateGroupAsync(groupId, groupName);
+            // Create the group session
+            var session = new GroupSession(groupId, groupName, keyPair);
+            await session.ActivateAsync();
 
             // Create and encrypt a message
             string originalMessage = "Hello, secure group!";
@@ -74,26 +61,19 @@ namespace LibEmiddle.Tests.Unit
 
             // Log details to help diagnose the issue
             Trace.TraceWarning($"Group ID: {groupId}");
-            Trace.TraceWarning($"Message ID: {encryptedMessage.MessageId}");
-            Trace.TraceWarning($"Sender Identity Key Length: {encryptedMessage.SenderIdentityKey?.Length ?? 0}");
-            Trace.TraceWarning($"Ciphertext Length: {encryptedMessage.Ciphertext?.Length ?? 0}");
-            Trace.TraceWarning($"Nonce Length: {encryptedMessage.Nonce?.Length ?? 0}");
+            Trace.TraceWarning($"Message ID: {encryptedMessage?.MessageId}");
+            Trace.TraceWarning($"Sender Identity Key Length: {encryptedMessage?.SenderIdentityKey?.Length ?? 0}");
+            Trace.TraceWarning($"Ciphertext Length: {encryptedMessage?.Ciphertext?.Length ?? 0}");
+            Trace.TraceWarning($"Nonce Length: {encryptedMessage?.Nonce?.Length ?? 0}");
 
-            // Act & Assert - First decryption with detailed logging
+            Assert.IsNotNull(encryptedMessage, "Message encryption should succeed");
+
+            // Act & Assert - First decryption
             string firstDecryption = await session.DecryptMessageAsync(encryptedMessage);
 
-            // If firstDecryption is null, log additional details to help diagnose
             if (firstDecryption == null)
             {
                 Trace.TraceWarning("First decryption FAILED - returned null");
-
-                // Try direct decryption via the underlying components to isolate the issue
-                var messageCrypto = typeof(GroupSession)
-                    .GetField("_messageCrypto", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                    .GetValue(session) as GroupMessageCrypto;
-
-                var directDecrypt = messageCrypto.DecryptMessage(encryptedMessage, session.ChainKey);
-                Trace.TraceWarning($"Direct decryption via GroupMessageCrypto: {(directDecrypt != null ? "SUCCESS" : "FAILED")}");
             }
             else
             {
@@ -115,62 +95,59 @@ namespace LibEmiddle.Tests.Unit
             var adminKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var adminManager = new GroupChatManager(adminKeyPair);
-            var memberManager = new GroupChatManager(memberKeyPair);
-
             string groupId = $"test-forward-secrecy-{Guid.NewGuid()}";
-            string groupName = "Test Forward Secrecy Group";
+            string groupName = "Test Group Name";
 
             // 1. Admin creates the group
-            var adminSession = await adminManager.CreateGroupAsync(groupId, groupName);
+            var adminSession = new GroupSession(groupId, groupName, adminKeyPair);
+            await adminSession.ActivateAsync();
 
-            // 2. Admin authorizes member
+            // 2. Member creates their session
+            var memberSession = new GroupSession(groupId, groupName, memberKeyPair);
+            await memberSession.ActivateAsync();
+
+            // 3. Admin authorizes member
             await adminSession.AddMemberAsync(memberKeyPair.PublicKey);
-
-            // 3. Create and exchange distribution messages
-            var adminDistribution = adminSession.CreateDistributionMessage();
-            adminDistribution.GroupId = groupId;
-
-            // 4. Member joins group
-            var memberSession = await memberManager.JoinGroupAsync(
-                adminDistribution,
-                KeyRotationStrategy.Standard);
-
-            // Add the admin to member's list
             await memberSession.AddMemberAsync(adminKeyPair.PublicKey);
 
-            // 5. Member processes admin's distribution
-            bool memberProcessResult = await memberSession.ActivateAsync();
-            Assert.IsTrue(memberProcessResult, "Member should be able to process admin's distribution");
+            // 4. Exchange distribution messages
+            var adminDistribution = adminSession.CreateDistributionMessage();
+            var memberDistribution = memberSession.CreateDistributionMessage();
 
-            // 6. Test communication before revocation
+            bool memberProcessResult = memberSession.ProcessDistributionMessage(adminDistribution);
+            bool adminProcessResult = adminSession.ProcessDistributionMessage(memberDistribution);
+
+            Assert.IsTrue(memberProcessResult, "Member should be able to process admin's distribution");
+            Assert.IsTrue(adminProcessResult, "Admin should be able to process member's distribution");
+
+            // 5. Test communication before revocation
             string message1 = "Message before revocation";
             var encrypted1 = await adminSession.EncryptMessageAsync(message1);
             string decrypted1 = await memberSession.DecryptMessageAsync(encrypted1);
 
-            // 7. Now revoke member
+            Assert.IsNotNull(decrypted1);
+            Assert.AreEqual(message1, decrypted1);
+
+            // 6. Now revoke member (this triggers key rotation)
             await adminSession.RemoveMemberAsync(memberKeyPair.PublicKey);
 
-            // 8. IMPORTANT: Create a new member manager to simulate restarting the app
-            // This ensures we're testing real forward secrecy where membership is enforced
-            // on each message, not just based on in-memory state
-            var memberManager2 = new GroupChatManager(memberKeyPair);
-            var memberSession2 = await memberManager2.JoinGroupAsync(adminDistribution,
-                KeyRotationStrategy.Standard); // Try to join the group again
-
+            // 7. Create a new member session to simulate restarting the app
+            var memberSession2 = new GroupSession(groupId, groupName, memberKeyPair);
+            await memberSession2.ActivateAsync();
             await memberSession2.AddMemberAsync(adminKeyPair.PublicKey);
 
-            // 9. Send a new message after revocation
+            // Try to process the old distribution (should work)
+            memberSession2.ProcessDistributionMessage(adminDistribution);
+
+            // 8. Send a new message after revocation
             string message2 = "Message after revocation";
             var encrypted2 = await adminSession.EncryptMessageAsync(message2);
 
-            // 10. Act - member tries to decrypt post-revocation message with fresh manager
+            // 9. Act - member tries to decrypt post-revocation message
             string decrypted2 = await memberSession2.DecryptMessageAsync(encrypted2);
 
-            // Assert
-            Assert.IsNotNull(decrypted1);
-            Assert.AreEqual(message1, decrypted1);
-            Assert.IsNull(decrypted2); // Should not be able to decrypt after revocation
+            // Assert - Should not be able to decrypt after revocation
+            Assert.IsNull(decrypted2, "Should not be able to decrypt after revocation due to key rotation");
         }
 
         [TestMethod]
@@ -181,38 +158,33 @@ namespace LibEmiddle.Tests.Unit
             var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var untrustedKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var adminManager = new GroupChatManager(adminKeyPair);
-            var memberManager = new GroupChatManager(memberKeyPair);
-            var untrustedManager = new GroupChatManager(untrustedKeyPair);
-
             string groupId = $"test-untrusted-rejection-{Guid.NewGuid()}";
-            string groupName = "Test Untrusted Rejection Group";
+            string groupName = "Test Group Name";
 
-            // Create groups for all participants
-            var adminSession = await adminManager.CreateGroupAsync(groupId, groupName);
-            var memberSession = await memberManager.CreateGroupAsync(groupId, groupName);
-            var untrustedSession = await untrustedManager.CreateGroupAsync(groupId, groupName);
+            // Create sessions for all participants
+            var adminSession = new GroupSession(groupId, groupName, adminKeyPair);
+            var memberSession = new GroupSession(groupId, groupName, memberKeyPair);
+            var untrustedSession = new GroupSession(groupId, groupName, untrustedKeyPair);
+
+            await adminSession.ActivateAsync();
+            await memberSession.ActivateAsync();
+            await untrustedSession.ActivateAsync();
 
             // Add trusted members to each other's groups, but NOT the untrusted user
             await adminSession.AddMemberAsync(memberKeyPair.PublicKey);
             await memberSession.AddMemberAsync(adminKeyPair.PublicKey);
+            // Note: untrusted user is NOT added to either session
 
             // Exchange distribution messages between trusted participants
             var adminDistribution = adminSession.CreateDistributionMessage();
-            adminDistribution.GroupId = groupId;
-           
-            // Member joins the group
-            await memberManager.JoinGroupAsync(adminDistribution);
-
-            // Member processes admin's distribution
-            bool memberProcessResult = memberSession.ProcessDistributionMessage(adminDistribution);
-            Assert.IsTrue(memberProcessResult, "Member should be able to process admin's distribution");
-
             var memberDistribution = memberSession.CreateDistributionMessage();
 
-            // Admin processes members's distribution
+            // Process distributions between trusted members
+            bool memberProcessResult = memberSession.ProcessDistributionMessage(adminDistribution);
             bool adminProcessResult = adminSession.ProcessDistributionMessage(memberDistribution);
-            Assert.IsTrue(adminProcessResult, "Admin should be able to process members's distribution");
+
+            Assert.IsTrue(memberProcessResult, "Member should be able to process admin's distribution");
+            Assert.IsTrue(adminProcessResult, "Admin should be able to process member's distribution");
 
             // Verify trusted communication works
             string testMessage = "Test message between trusted members";
@@ -224,25 +196,26 @@ namespace LibEmiddle.Tests.Unit
             var untrustedDistribution = untrustedSession.CreateDistributionMessage();
 
             // The member attempts to process the distribution message from the untrusted user
-            // Note: The security validator should verify that the sender is a member of the group
+            // This should fail because the untrusted user is not in the member list
             bool distributionAccepted = memberSession.ProcessDistributionMessage(untrustedDistribution);
 
             // Now test if the member can decrypt a message from the untrusted sender
             string untrustedMessage = "Message from untrusted sender";
             var untrustedEncrypted = await untrustedSession.EncryptMessageAsync(untrustedMessage);
 
-            // This should fail - even if distribution is accepted, the message should be rejected
+            // This should fail - the message should be rejected due to sender not being a member
             string untrustedDecrypted = await memberSession.DecryptMessageAsync(untrustedEncrypted);
 
             // Assert
-            Assert.IsNull(untrustedDecrypted, $"Member should not be able to decrypt message from untrusted sender");
+            Assert.IsFalse(distributionAccepted, "Distribution from untrusted sender should be rejected");
+            Assert.IsNull(untrustedDecrypted, "Member should not be able to decrypt message from untrusted sender");
         }
 
         [TestMethod]
         public void GenerateSenderKey_ShouldReturnValidKey()
         {
             // Act
-            byte[] senderKey = SecureMemory.CreateSecureBuffer(Constants.AES_KEY_SIZE);
+            byte[] senderKey = Sodium.GenerateRandomBytes(Constants.AES_KEY_SIZE);
 
             // Assert
             Assert.IsNotNull(senderKey);
@@ -255,27 +228,18 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             string message = "This is a group message";
             string groupId = $"test-group-{Guid.NewGuid()}";
-
-            // Create identity key pair for signing
+            string groupName = "Test Group Name";
             var identityKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            // Create an instance of GroupMessageCrypto
-            var messageCrypto = new GroupMessageCrypto();
-            var keyManager = new GroupKeyManager();
-
-            // Initialize sender state with new chain key
-            byte[] initialChainKey = keyManager.GenerateInitialChainKey();
-            keyManager.InitializeSenderState(groupId, initialChainKey);
-
-            // Get message key and iteration
-            var (messageKey, iteration) = keyManager.GetSenderMessageKey(groupId);
-
-            // Get last rotation timestamp
-            long rotationTimestamp = keyManager.GetLastRotationTimestamp(groupId);
+            // Create group session
+            var session = new GroupSession(groupId, groupName, identityKeyPair);
+            await session.ActivateAsync();
 
             // Act
-            var encryptedMessage = messageCrypto.EncryptMessage(groupId, message, messageKey, identityKeyPair, rotationTimestamp);
-            var decryptedMessage = messageCrypto.DecryptMessage(encryptedMessage, messageKey);
+            var encryptedMessage = await session.EncryptMessageAsync(message);
+            Assert.IsNotNull(encryptedMessage, "Message encryption should succeed");
+
+            var decryptedMessage = await session.DecryptMessageAsync(encryptedMessage);
 
             // Assert
             Assert.AreEqual(message, decryptedMessage);
@@ -286,15 +250,13 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             string groupId = $"test-group-{Guid.NewGuid()}";
-            string groupName = "Test Group";
+            string groupName = "Test Group Name";
             string message = "This is my test message";
             var senderKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            // Create an instance of GroupChatManager
-            var groupChatManager = new GroupChatManager(senderKeyPair);
-
-            // Create the group
-            var session = await groupChatManager.CreateGroupAsync(groupId, groupName);
+            // Create group session
+            var session = new GroupSession(groupId, groupName, senderKeyPair);
+            await session.ActivateAsync();
 
             // Act - Create distribution and send a message
             var distributionMessage = session.CreateDistributionMessage();
@@ -308,37 +270,34 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task GroupChatManager_ShouldHandleMessageExchange()
+        public async Task GroupSession_ShouldHandleMessageExchange()
         {
             // Arrange
             var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var aliceManager = new GroupChatManager(aliceKeyPair);
-            var bobManager = new GroupChatManager(bobKeyPair);
-
             string groupId = $"test-group-{Guid.NewGuid()}";
-            string groupName = "Test Message Exchange Group";
+            string groupName = "Test Group Name";
             string message = "Hello group members!";
 
+            // Create group sessions
+            var aliceSession = new GroupSession(groupId, groupName, aliceKeyPair);
+            var bobSession = new GroupSession(groupId, groupName, bobKeyPair);
+
+            await aliceSession.ActivateAsync();
+            await bobSession.ActivateAsync();
+
             // Act
-            // Alice creates a group
-            var aliceSession = await aliceManager.CreateGroupAsync(groupId, groupName);
-
-            // Alice authorizes Bob
+            // Alice and Bob authorize each other
             await aliceSession.AddMemberAsync(bobKeyPair.PublicKey);
-
-            // Bob creates/joins group
-            var bobSession = await bobManager.CreateGroupAsync(groupId, groupName);
-
-            // Bob authorizes Alice
             await bobSession.AddMemberAsync(aliceKeyPair.PublicKey);
 
-            // Alice creates a distribution message
-            var distributionMessage = aliceSession.CreateDistributionMessage();
+            // Exchange distribution messages
+            var aliceDistribution = aliceSession.CreateDistributionMessage();
+            var bobDistribution = bobSession.CreateDistributionMessage();
 
-            // Bob processes the distribution message
-            bool processingResult = bobSession.ProcessDistributionMessage(distributionMessage);
+            bool bobProcessResult = bobSession.ProcessDistributionMessage(aliceDistribution);
+            bool aliceProcessResult = aliceSession.ProcessDistributionMessage(bobDistribution);
 
             // Alice sends a message
             var encryptedMessage = await aliceSession.EncryptMessageAsync(message);
@@ -347,47 +306,25 @@ namespace LibEmiddle.Tests.Unit
             string decryptedMessage = await bobSession.DecryptMessageAsync(encryptedMessage);
 
             // Assert
-            Assert.IsTrue(processingResult);
+            Assert.IsTrue(bobProcessResult);
+            Assert.IsTrue(aliceProcessResult);
             Assert.AreEqual(message, decryptedMessage);
         }
 
         [TestMethod]
         [ExpectedException(typeof(InvalidOperationException))]
-        public async Task GroupChatManager_CreateDistribution_WithNonExistentGroup_ShouldThrowException()
+        public void GroupSession_CreateDistribution_WithoutInitialization_ShouldThrowException()
         {
             // Arrange
-            var keyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
-            var groupManager = new GroupChatManager(keyPair);
+            var keyPair = Sodium.GenerateEd25519KeyPair();
+            string groupId = "non-existent-group";
+            string groupName = "Test Group Name";
 
-            // Create a non-existent session directly - this will throw because we don't create the group first
-            var badOptions = new GroupSessionOptions { GroupId = "non-existent-group" };
-
-            // Using reflection to create a session directly without proper initialization
-            var constructor = typeof(GroupSession).GetConstructor(
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public,
-                null,
-                new Type[] {
-                    typeof(string),
-                    typeof(KeyPair),
-                    typeof(GroupKeyManager),
-                    typeof(GroupMemberManager),
-                    typeof(GroupMessageCrypto),
-                    typeof(SenderKeyDistribution)
-                },
-                null);
-
-            // This will create an invalid session that will throw when used
-            var invalidSession = constructor.Invoke(new object[] {
-                "non-existent-group",
-                keyPair,
-                new GroupKeyManager(),
-                new GroupMemberManager(),
-                new GroupMessageCrypto(),
-                new SenderKeyDistribution(new GroupKeyManager())
-            }) as GroupSession;
+            // Create session but don't activate it or initialize keys
+            var session = new GroupSession(groupId, groupName, keyPair);
 
             // Act & Assert - Should throw InvalidOperationException
-            invalidSession.CreateDistributionMessage(); // This should throw
+            session.CreateDistributionMessage(); // This should throw
         }
 
         [TestMethod]
@@ -398,28 +335,22 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var charlieKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var aliceManager = new GroupChatManager(aliceKeyPair);
-            var bobManager = new GroupChatManager(bobKeyPair);
-            var charlieManager = new GroupChatManager(charlieKeyPair);
-
-            // Setup the group - Alice is the admin/creator
             string groupId = $"test-multiple-senders-{Guid.NewGuid()}";
-            string groupName = "Test Multiple Senders Group";
+            string groupName = "Test Group Name";
 
-            var aliceSession = await aliceManager.CreateGroupAsync(groupId, groupName);
-            var bobSession = await bobManager.CreateGroupAsync(groupId, groupName);
-            var charlieSession = await charlieManager.CreateGroupAsync(groupId, groupName);
+            var aliceSession = new GroupSession(groupId, groupName, aliceKeyPair);
+            var bobSession = new GroupSession(groupId, groupName, bobKeyPair);
+            var charlieSession = new GroupSession(groupId, groupName, charlieKeyPair);
 
-            // Add members both ways
-            // Alice adds Bob and Charlie
+            await aliceSession.ActivateAsync();
+            await bobSession.ActivateAsync();
+            await charlieSession.ActivateAsync();
+
+            // Add members to all sessions
             await aliceSession.AddMemberAsync(bobKeyPair.PublicKey);
             await aliceSession.AddMemberAsync(charlieKeyPair.PublicKey);
-
-            // Bob adds Alice and Charlie
             await bobSession.AddMemberAsync(aliceKeyPair.PublicKey);
             await bobSession.AddMemberAsync(charlieKeyPair.PublicKey);
-
-            // Charlie adds Alice and Bob
             await charlieSession.AddMemberAsync(aliceKeyPair.PublicKey);
             await charlieSession.AddMemberAsync(bobKeyPair.PublicKey);
 
@@ -471,64 +402,58 @@ namespace LibEmiddle.Tests.Unit
         {
             // Create a unique group ID to prevent test interference
             string groupId = $"member-addition-test-group-{Guid.NewGuid()}";
-            string groupName = "Member Addition Test Group";
+            string groupName = "Test Group Name";
 
             // Create test participants
             var aliceKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var daveKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var aliceManager = new GroupChatManager(aliceKeyPair);
-            var bobManager = new GroupChatManager(bobKeyPair);
-            var daveManager = new GroupChatManager(daveKeyPair);
+            // 1. Alice and Bob create group sessions
+            var aliceSession = new GroupSession(groupId, groupName, aliceKeyPair);
+            var bobSession = new GroupSession(groupId, groupName, bobKeyPair);
 
-            // 1. Alice creates the group
-            var aliceSession = await aliceManager.CreateGroupAsync(groupId, groupName, null,
-                new GroupSessionOptions { RotationStrategy = KeyRotationStrategy.Standard });
+            await aliceSession.ActivateAsync();
+            await bobSession.ActivateAsync();
 
-            // 2. Bob creates his group
-            var bobSession = await bobManager.CreateGroupAsync(groupId, groupName, null,
-                new GroupSessionOptions { RotationStrategy = KeyRotationStrategy.Standard });
-
-            // 3. Alice and Bob add each other to their member lists
+            // 2. Alice and Bob add each other to their member lists
             await aliceSession.AddMemberAsync(bobKeyPair.PublicKey);
             await bobSession.AddMemberAsync(aliceKeyPair.PublicKey);
 
-            // 4. Exchange distribution messages
+            // 3. Exchange distribution messages
             var aliceDistribution = aliceSession.CreateDistributionMessage();
             var bobDistribution = bobSession.CreateDistributionMessage();
 
             aliceSession.ProcessDistributionMessage(bobDistribution);
             bobSession.ProcessDistributionMessage(aliceDistribution);
 
-            // 5. Send initial message before Dave joins
+            // 4. Send initial message before Dave joins
             string initialMessage = "Initial message before Dave joins";
             var initialEncrypted = await aliceSession.EncryptMessageAsync(initialMessage);
             string bobDecryptsInitial = await bobSession.DecryptMessageAsync(initialEncrypted);
             Assert.AreEqual(initialMessage, bobDecryptsInitial, "Bob should be able to decrypt the initial message");
 
-            // 6. Dave joins the group
+            // 5. Dave joins the group
             Thread.Sleep(100); // Ensure timestamp separation for clarity
-            var daveSession = await daveManager.CreateGroupAsync(groupId, groupName, null,
-                new GroupSessionOptions { RotationStrategy = KeyRotationStrategy.Standard });
+            var daveSession = new GroupSession(groupId, groupName, daveKeyPair);
+            await daveSession.ActivateAsync();
 
-            // 7. Add Dave to member lists
+            // 6. Add Dave to member lists
             await aliceSession.AddMemberAsync(daveKeyPair.PublicKey);
             await bobSession.AddMemberAsync(daveKeyPair.PublicKey);
             await daveSession.AddMemberAsync(aliceKeyPair.PublicKey);
             await daveSession.AddMemberAsync(bobKeyPair.PublicKey);
 
-            // 8. Create a completely new chat session after adding the member
-            // This is the key fix - we need to rotate keys after membership changes
+            // 7. Rotate keys after membership changes (happens automatically in RemoveMemberAsync but we need to do it manually for AddMemberAsync)
             await aliceSession.RotateKeyAsync();
             await bobSession.RotateKeyAsync();
 
-            // 9. Create all-new distribution messages
+            // 8. Create new distribution messages after key rotation
             var aliceDistributionNew = aliceSession.CreateDistributionMessage();
             var bobDistributionNew = bobSession.CreateDistributionMessage();
             var daveDistribution = daveSession.CreateDistributionMessage();
 
-            // 10. Process the new distribution messages
+            // 9. Process the new distribution messages
             aliceSession.ProcessDistributionMessage(bobDistributionNew);
             aliceSession.ProcessDistributionMessage(daveDistribution);
 
@@ -538,7 +463,7 @@ namespace LibEmiddle.Tests.Unit
             daveSession.ProcessDistributionMessage(aliceDistributionNew);
             daveSession.ProcessDistributionMessage(bobDistributionNew);
 
-            // 11. Send new messages
+            // 10. Send new messages
             Thread.Sleep(100); // Ensure timestamp separation
 
             string aliceMessage = "Message from Alice after Dave joined";
@@ -549,7 +474,7 @@ namespace LibEmiddle.Tests.Unit
             var bobEncrypted = await bobSession.EncryptMessageAsync(bobMessage);
             var daveEncrypted = await daveSession.EncryptMessageAsync(daveMessage);
 
-            // 12. Verify everyone can decrypt the new messages
+            // 11. Verify everyone can decrypt the new messages
             string bobDecryptsAlice = await bobSession.DecryptMessageAsync(aliceEncrypted);
             string bobDecryptsDave = await bobSession.DecryptMessageAsync(daveEncrypted);
             string aliceDecryptsBob = await aliceSession.DecryptMessageAsync(bobEncrypted);
@@ -557,10 +482,10 @@ namespace LibEmiddle.Tests.Unit
             string daveDecryptsAlice = await daveSession.DecryptMessageAsync(aliceEncrypted);
             string daveDecryptsBob = await daveSession.DecryptMessageAsync(bobEncrypted);
 
-            // 13. Dave attempts to decrypt the initial message (should fail for security)
+            // 12. Dave attempts to decrypt the initial message (should fail for security)
             string daveDecryptsInitial = await daveSession.DecryptMessageAsync(initialEncrypted);
 
-            // 14. Assert results
+            // 13. Assert results
             Assert.AreEqual(aliceMessage, bobDecryptsAlice, "Bob should be able to decrypt Alice's message");
             Assert.AreEqual(daveMessage, bobDecryptsDave, "Bob should be able to decrypt Dave's message");
             Assert.AreEqual(bobMessage, aliceDecryptsBob, "Alice should be able to decrypt Bob's message");
@@ -582,20 +507,19 @@ namespace LibEmiddle.Tests.Unit
             var bobKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var charlieKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            // Step 2: Create group chat managers for each participant
-            var aliceManager = new GroupChatManager(aliceKeyPair);
-            var bobManager = new GroupChatManager(bobKeyPair);
-            var charlieManager = new GroupChatManager(charlieKeyPair);
-
-            // Step 3: Each participant creates the group
+            // Step 2: Create group sessions for each participant
             string groupId = $"test-friends-{Guid.NewGuid()}";
-            string groupName = "Test Friends Group";
+            string groupName = "Test Group Name";
 
-            var aliceSession = await aliceManager.CreateGroupAsync(groupId, groupName);
-            var bobSession = await bobManager.CreateGroupAsync(groupId, groupName);
-            var charlieSession = await charlieManager.CreateGroupAsync(groupId, groupName);
+            var aliceSession = new GroupSession(groupId, groupName, aliceKeyPair);
+            var bobSession = new GroupSession(groupId, groupName, bobKeyPair);
+            var charlieSession = new GroupSession(groupId, groupName, charlieKeyPair);
 
-            // Step 4: Each participant authorizes all others
+            await aliceSession.ActivateAsync();
+            await bobSession.ActivateAsync();
+            await charlieSession.ActivateAsync();
+
+            // Step 3: Each participant authorizes all others
             // Alice authorizes Bob and Charlie
             await aliceSession.AddMemberAsync(bobKeyPair.PublicKey);
             await aliceSession.AddMemberAsync(charlieKeyPair.PublicKey);
@@ -608,12 +532,12 @@ namespace LibEmiddle.Tests.Unit
             await charlieSession.AddMemberAsync(aliceKeyPair.PublicKey);
             await charlieSession.AddMemberAsync(bobKeyPair.PublicKey);
 
-            // Step 5: Each participant creates their distribution message
+            // Step 4: Each participant creates their distribution message
             var aliceDistribution = aliceSession.CreateDistributionMessage();
             var bobDistribution = bobSession.CreateDistributionMessage();
             var charlieDistribution = charlieSession.CreateDistributionMessage();
 
-            // Step 6: Everyone processes everyone else's distribution
+            // Step 5: Everyone processes everyone else's distribution
             // Bob and Charlie process Alice's distribution
             bool bobProcessAliceResult = bobSession.ProcessDistributionMessage(aliceDistribution);
             bool charlieProcessAliceResult = charlieSession.ProcessDistributionMessage(aliceDistribution);
@@ -626,7 +550,7 @@ namespace LibEmiddle.Tests.Unit
             bool aliceProcessCharlieResult = aliceSession.ProcessDistributionMessage(charlieDistribution);
             bool bobProcessCharlieResult = bobSession.ProcessDistributionMessage(charlieDistribution);
 
-            // Step 7: Alice sends a message to the group
+            // Step 6: Alice sends a message to the group
             string aliceMessage = "Hello everyone, this is Alice!";
             var aliceEncryptedMessage = await aliceSession.EncryptMessageAsync(aliceMessage);
 
@@ -634,7 +558,7 @@ namespace LibEmiddle.Tests.Unit
             string bobDecryptedAliceMessage = await bobSession.DecryptMessageAsync(aliceEncryptedMessage);
             string charlieDecryptedAliceMessage = await charlieSession.DecryptMessageAsync(aliceEncryptedMessage);
 
-            // Step 8: Bob replies to the group
+            // Step 7: Bob replies to the group
             string bobMessage = "Hi Alice and Charlie, Bob here!";
             var bobEncryptedMessage = await bobSession.EncryptMessageAsync(bobMessage);
 
@@ -657,55 +581,34 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public async Task DeleteGroup_ShouldWorkCorrectly()
+        public async Task TerminateSession_ShouldWorkCorrectly()
         {
             // Arrange
             var adminKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var memberKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
 
-            var groupManager = new GroupChatManager(adminKeyPair);
-            string groupId = $"test-delete-{Guid.NewGuid()}";
-            string groupName = "Test Delete Group";
+            string groupId = $"test-terminate-{Guid.NewGuid()}";
+            string groupName = "Test Group Name";
 
-            // Create group and add a member
-            var session = await groupManager.CreateGroupAsync(groupId, groupName);
+            // Create group session and add a member
+            var session = new GroupSession(groupId, groupName, adminKeyPair);
+            await session.ActivateAsync();
             await session.AddMemberAsync(memberKeyPair.PublicKey);
 
-            // Get the GroupChatManager instance to verify group exists
-            bool groupExistsBefore = await Task.Run(() => {
-                try
-                {
-                    // Attempt to get the session (will throw if not exists)
-                    groupManager.GetGroupAsync(groupId).GetAwaiter().GetResult();
-                    return true;
-                }
-                catch
-                {
-                    return false;
-                }
-            });
+            // Verify session is active
+            Assert.AreEqual(SessionState.Active, session.State, "Session should be active");
 
             // Act
-            bool result = await groupManager.LeaveGroupAsync(groupId);
-
-            // Verify the group no longer exists
-            bool groupExistsAfter = await Task.Run(() => {
-                try
-                {
-                    // Attempt to get the session (will throw if not exists)
-                    groupManager.GetGroupAsync(groupId).GetAwaiter().GetResult();
-                    return true;
-                }
-                catch
-                {
-                    return false;
-                }
-            });
+            bool result = await session.TerminateAsync();
 
             // Assert
-            Assert.IsTrue(groupExistsBefore, "Group should exist before deletion");
-            Assert.IsTrue(result, "Delete operation should return true");
-            Assert.IsFalse(groupExistsAfter, "Group should not exist after deletion");
+            Assert.IsTrue(result, "Terminate operation should return true");
+            Assert.AreEqual(SessionState.Terminated, session.State, "Session should be terminated");
+
+            // Verify we can't send messages after termination
+            await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+                async () => await session.EncryptMessageAsync("This should fail"),
+                "Should not be able to encrypt messages after termination");
         }
     }
 }
