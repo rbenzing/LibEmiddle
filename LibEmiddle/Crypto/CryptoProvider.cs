@@ -243,10 +243,14 @@ namespace LibEmiddle.Crypto
             if (length <= 0 || length > 64)
                 throw new ArgumentOutOfRangeException(nameof(length), "Length must be between 1 and 64 bytes.");
 
+            // Create a copy to avoid destroying caller's data
+            byte[] inputCopy = new byte[inputKeyMaterial.Length];
+            Array.Copy(inputKeyMaterial, inputCopy, inputKeyMaterial.Length);
+
             try
             {
                 // Use Signal-compliant HKDF from Sodium (much simpler!)
-                return Sodium.HkdfDerive(inputKeyMaterial, salt, info, length);
+                return Sodium.HkdfDerive(inputCopy, salt, info, length);
             }
             catch (Exception ex)
             {
@@ -255,7 +259,8 @@ namespace LibEmiddle.Crypto
             }
             finally
             {
-                SecureMemory.SecureClear(inputKeyMaterial);
+                // Only clear our copy, not the caller's original data
+                SecureMemory.SecureClear(inputCopy);
             }
         }
 

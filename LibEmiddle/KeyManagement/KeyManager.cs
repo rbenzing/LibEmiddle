@@ -14,10 +14,49 @@ namespace LibEmiddle.KeyManagement
     {
         private readonly ICryptoProvider _cryptoProvider;
         private readonly KeyStorage _keyStorage;
-        private readonly ConcurrentDictionary<string, byte[]> _keyCache = new();
-        //private readonly TimeSpan _cacheExpiration = TimeSpan.FromMinutes(10);
+        private readonly ConcurrentDictionary<string, CachedKey> _keyCache = new();
+        private readonly TimeSpan _cacheExpiration = TimeSpan.FromMinutes(10);
         private readonly Timer _cacheCleanupTimer;
+        private readonly object _cacheLock = new object();
         private bool _disposed;
+
+        /// <summary>
+        /// Represents a cached key with expiration time
+        /// </summary>
+        private sealed class CachedKey : IDisposable
+        {
+            public byte[] Key { get; private set; }
+            public DateTime ExpirationTime { get; }
+            private bool _disposed;
+
+            public CachedKey(byte[] key, TimeSpan expiration)
+            {
+                Key = new byte[key.Length];
+                Array.Copy(key, Key, key.Length);
+                ExpirationTime = DateTime.UtcNow.Add(expiration);
+            }
+
+            public byte[] GetKeyCopy()
+            {
+                if (_disposed)
+                    throw new ObjectDisposedException(nameof(CachedKey));
+
+                var copy = new byte[Key.Length];
+                Array.Copy(Key, copy, Key.Length);
+                return copy;
+            }
+
+            public bool IsExpired => DateTime.UtcNow > ExpirationTime;
+
+            public void Dispose()
+            {
+                if (!_disposed)
+                {
+                    SecureMemory.SecureClear(Key);
+                    _disposed = true;
+                }
+            }
+        }
 
         /// <summary>
         /// Initializes a new instance of the KeyManager class.
@@ -68,10 +107,22 @@ namespace LibEmiddle.KeyManagement
 
             try
             {
-                // Check the cache first
-                if (_keyCache.TryGetValue(keyId, out byte[]? cachedKey))
+                // Check the cache first with secure handling
+                lock (_cacheLock)
                 {
-                    return cachedKey.ToArray(); // Return a copy
+                    if (_keyCache.TryGetValue(keyId, out CachedKey? cachedKey))
+                    {
+                        if (!cachedKey.IsExpired)
+                        {
+                            return cachedKey.GetKeyCopy(); // Return a secure copy
+                        }
+                        else
+                        {
+                            // Remove expired key
+                            _keyCache.TryRemove(keyId, out _);
+                            cachedKey.Dispose();
+                        }
+                    }
                 }
 
                 // Not in cache, retrieve from storage
@@ -110,8 +161,14 @@ namespace LibEmiddle.KeyManagement
 
             try
             {
-                // Remove from cache
-                _keyCache.TryRemove(keyId, out _);
+                // Remove from cache with secure disposal
+                lock (_cacheLock)
+                {
+                    if (_keyCache.TryRemove(keyId, out CachedKey? cachedKey))
+                    {
+                        cachedKey.Dispose();
+                    }
+                }
 
                 // Delete from storage
                 return await _cryptoProvider.DeleteKeyAsync(keyId);
@@ -253,14 +310,23 @@ namespace LibEmiddle.KeyManagement
         }
 
         /// <summary>
-        /// Caches a key for faster access.
+        /// Caches a key for faster access with secure handling.
         /// </summary>
         /// <param name="keyId">The identifier for the key.</param>
         /// <param name="key">The key to cache.</param>
         private void CacheKey(string keyId, byte[] key)
         {
-            // Store a copy in the cache
-            _keyCache[keyId] = key.ToArray();
+            lock (_cacheLock)
+            {
+                // Remove existing cached key if present
+                if (_keyCache.TryRemove(keyId, out CachedKey? existingKey))
+                {
+                    existingKey.Dispose();
+                }
+
+                // Store new cached key with expiration
+                _keyCache[keyId] = new CachedKey(key, _cacheExpiration);
+            }
         }
 
         /// <summary>
@@ -270,8 +336,28 @@ namespace LibEmiddle.KeyManagement
         {
             try
             {
-                // For now, just clear the entire cache
-                _keyCache.Clear();
+                lock (_cacheLock)
+                {
+                    var expiredKeys = new List<string>();
+
+                    // Find expired keys
+                    foreach (var kvp in _keyCache)
+                    {
+                        if (kvp.Value.IsExpired)
+                        {
+                            expiredKeys.Add(kvp.Key);
+                        }
+                    }
+
+                    // Remove and dispose expired keys
+                    foreach (var keyId in expiredKeys)
+                    {
+                        if (_keyCache.TryRemove(keyId, out CachedKey? cachedKey))
+                        {
+                            cachedKey.Dispose();
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -301,12 +387,15 @@ namespace LibEmiddle.KeyManagement
             {
                 _cacheCleanupTimer.Dispose();
 
-                // Clear and dispose the key cache
-                foreach (var key in _keyCache.Values)
+                // Clear and dispose the key cache securely
+                lock (_cacheLock)
                 {
-                    SecureMemory.SecureClear(key);
+                    foreach (var cachedKey in _keyCache.Values)
+                    {
+                        cachedKey.Dispose();
+                    }
+                    _keyCache.Clear();
                 }
-                _keyCache.Clear();
 
                 // Dispose the key storage
                 _keyStorage.Dispose();

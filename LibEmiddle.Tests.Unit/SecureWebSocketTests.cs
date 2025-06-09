@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Security;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -294,5 +295,168 @@ namespace LibEmiddle.Tests.Unit
             // Act & Assert: OperationCanceledException is expected when cancellation is requested.
             await Assert.ThrowsExceptionAsync<OperationCanceledException>(() => client.ReceiveEncryptedMessageAsync(cts.Token));
         }
+
+        #region Security Vulnerability Tests
+
+        /// <summary>
+        /// Tests that replay attacks are properly detected and prevented
+        /// </summary>
+        [TestMethod]
+        public async Task ReceiveEncryptedMessage_ReplayAttack_ShouldBeDetected()
+        {
+            // Arrange: Create a message with a timestamp that's too old for the reduced window
+            var messageData = new Dictionary<string, object>
+            {
+                { "ciphertext", Convert.ToBase64String(new byte[]{1,2,3}) },
+                { "nonce", Convert.ToBase64String(new byte[]{4,5,6}) },
+                { "messageNumber", 1 },
+                { "senderDHKey", Convert.ToBase64String(new byte[]{7,8,9}) },
+                { "sessionId", "test-session" },
+                { "messageId", Guid.NewGuid().ToString() },
+                // Message older than 30 seconds (our reduced replay window)
+                { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 35000 }
+            };
+
+            string json = JsonSerializer.Serialize(messageData);
+            byte[] jsonBytes = Encoding.Default.GetBytes(json);
+            var receiveResult = new WebSocketReceiveResult(jsonBytes.Length, WebSocketMessageType.Text, true);
+
+            _mockWebSocket.Setup(ws => ws.State).Returns(WebSocketState.Open);
+            _mockWebSocket.Setup(ws => ws.ReceiveAsync(It.IsAny<ArraySegment<byte>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(receiveResult)
+                .Callback<ArraySegment<byte>, CancellationToken>((buffer, token) =>
+                {
+                    Array.Copy(jsonBytes, 0, buffer.Array, buffer.Offset, jsonBytes.Length);
+                });
+
+            var client = new SecureWebSocketClient(_serverUrl, _mockWebSocket.Object);
+            client.SetSession(_testSession);
+
+            // Act & Assert: Old message should be rejected as potential replay attack
+            // Note: The actual exception might be SecurityException or CryptographicException depending on where the validation occurs
+            try
+            {
+                await client.ReceiveEncryptedMessageAsync();
+                Assert.Fail("Expected an exception to be thrown for replay attack");
+            }
+            catch (Exception ex) when (ex is SecurityException || ex is CryptographicException)
+            {
+                // Expected - replay attack was detected
+                Assert.IsTrue(true, "Replay attack was properly detected");
+            }
+        }
+
+        /// <summary>
+        /// Tests that messages with future timestamps are rejected
+        /// </summary>
+        [TestMethod]
+        public async Task ReceiveEncryptedMessage_FutureTimestamp_ShouldBeRejected()
+        {
+            // Arrange: Create a message with a timestamp too far in the future
+            var messageData = new Dictionary<string, object>
+            {
+                { "ciphertext", Convert.ToBase64String(new byte[]{1,2,3}) },
+                { "nonce", Convert.ToBase64String(new byte[]{4,5,6}) },
+                { "messageNumber", 1 },
+                { "senderDHKey", Convert.ToBase64String(new byte[]{7,8,9}) },
+                { "sessionId", "test-session" },
+                { "messageId", Guid.NewGuid().ToString() },
+                // Message from 10 minutes in the future
+                { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 600000 }
+            };
+
+            string json = JsonSerializer.Serialize(messageData);
+            byte[] jsonBytes = Encoding.Default.GetBytes(json);
+            var receiveResult = new WebSocketReceiveResult(jsonBytes.Length, WebSocketMessageType.Text, true);
+
+            _mockWebSocket.Setup(ws => ws.State).Returns(WebSocketState.Open);
+            _mockWebSocket.Setup(ws => ws.ReceiveAsync(It.IsAny<ArraySegment<byte>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(receiveResult)
+                .Callback<ArraySegment<byte>, CancellationToken>((buffer, token) =>
+                {
+                    Array.Copy(jsonBytes, 0, buffer.Array, buffer.Offset, jsonBytes.Length);
+                });
+
+            var client = new SecureWebSocketClient(_serverUrl, _mockWebSocket.Object);
+            client.SetSession(_testSession);
+
+            // Act & Assert: Future message should be rejected
+            // Note: The actual exception might be SecurityException or CryptographicException depending on where the validation occurs
+            try
+            {
+                await client.ReceiveEncryptedMessageAsync();
+                Assert.Fail("Expected an exception to be thrown for future timestamp");
+            }
+            catch (Exception ex) when (ex is SecurityException || ex is CryptographicException)
+            {
+                // Expected - future timestamp was detected
+                Assert.IsTrue(true, "Future timestamp was properly detected");
+            }
+        }
+
+        /// <summary>
+        /// Tests that messages without session ID are rejected
+        /// </summary>
+        [TestMethod]
+        public async Task ReceiveEncryptedMessage_MissingSessionId_ShouldBeRejected()
+        {
+            // Arrange: Create a message without session ID
+            var messageData = new Dictionary<string, object>
+            {
+                { "ciphertext", Convert.ToBase64String(new byte[]{1,2,3}) },
+                { "nonce", Convert.ToBase64String(new byte[]{4,5,6}) },
+                { "messageNumber", 1 },
+                { "senderDHKey", Convert.ToBase64String(new byte[]{7,8,9}) },
+                { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }
+                // Missing sessionId
+            };
+
+            string json = JsonSerializer.Serialize(messageData);
+            byte[] jsonBytes = Encoding.Default.GetBytes(json);
+            var receiveResult = new WebSocketReceiveResult(jsonBytes.Length, WebSocketMessageType.Text, true);
+
+            _mockWebSocket.Setup(ws => ws.State).Returns(WebSocketState.Open);
+            _mockWebSocket.Setup(ws => ws.ReceiveAsync(It.IsAny<ArraySegment<byte>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(receiveResult)
+                .Callback<ArraySegment<byte>, CancellationToken>((buffer, token) =>
+                {
+                    Array.Copy(jsonBytes, 0, buffer.Array, buffer.Offset, jsonBytes.Length);
+                });
+
+            var client = new SecureWebSocketClient(_serverUrl, _mockWebSocket.Object);
+            client.SetSession(_testSession);
+
+            // Act & Assert: Message without session ID should be rejected
+            // Note: The exception might be wrapped in a generic Exception
+            await Assert.ThrowsExceptionAsync<Exception>(() => client.ReceiveEncryptedMessageAsync());
+        }
+
+        /// <summary>
+        /// Tests that malformed JSON is properly handled
+        /// </summary>
+        [TestMethod]
+        public async Task ReceiveEncryptedMessage_MalformedJson_ShouldThrowFormatException()
+        {
+            // Arrange: Create malformed JSON
+            string malformedJson = "{ \"ciphertext\": \"invalid json structure";
+            byte[] jsonBytes = Encoding.Default.GetBytes(malformedJson);
+            var receiveResult = new WebSocketReceiveResult(jsonBytes.Length, WebSocketMessageType.Text, true);
+
+            _mockWebSocket.Setup(ws => ws.State).Returns(WebSocketState.Open);
+            _mockWebSocket.Setup(ws => ws.ReceiveAsync(It.IsAny<ArraySegment<byte>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(receiveResult)
+                .Callback<ArraySegment<byte>, CancellationToken>((buffer, token) =>
+                {
+                    Array.Copy(jsonBytes, 0, buffer.Array, buffer.Offset, jsonBytes.Length);
+                });
+
+            var client = new SecureWebSocketClient(_serverUrl, _mockWebSocket.Object);
+            client.SetSession(_testSession);
+
+            // Act & Assert: Malformed JSON should throw FormatException
+            await Assert.ThrowsExceptionAsync<FormatException>(() => client.ReceiveEncryptedMessageAsync());
+        }
+
+        #endregion
     }
 }

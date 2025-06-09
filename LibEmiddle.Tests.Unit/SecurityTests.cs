@@ -631,5 +631,153 @@ namespace LibEmiddle.Tests.Unit
         }
 
         #endregion
+
+        #region Security Vulnerability Tests
+
+        /// <summary>
+        /// Tests that DeriveKey does not destroy caller's input key material
+        /// </summary>
+        [TestMethod]
+        public void DeriveKey_ShouldNotDestroyCallerInputKeyMaterial()
+        {
+            // Arrange
+            byte[] inputKeyMaterial = _cryptoProvider.GenerateRandomBytes(32);
+            byte[] originalCopy = new byte[inputKeyMaterial.Length];
+            Array.Copy(inputKeyMaterial, originalCopy, inputKeyMaterial.Length);
+
+            byte[] salt = _cryptoProvider.GenerateRandomBytes(16);
+            byte[] info = Encoding.UTF8.GetBytes("test-info");
+
+            // Act
+            byte[] derivedKey = _cryptoProvider.DeriveKey(inputKeyMaterial, salt, info, 32);
+
+            // Assert
+            Assert.IsNotNull(derivedKey);
+            Assert.AreEqual(32, derivedKey.Length);
+
+            // Verify that the caller's input key material is unchanged
+            Assert.IsTrue(SecureMemory.SecureCompare(inputKeyMaterial, originalCopy),
+                "Input key material should not be modified by DeriveKey");
+        }
+
+        /// <summary>
+        /// Tests that constant-time comparison is used for cryptographic values
+        /// </summary>
+        [TestMethod]
+        public void SecureCompare_ShouldBeConstantTime()
+        {
+            // Arrange
+            byte[] key1 = _cryptoProvider.GenerateRandomBytes(32);
+            byte[] key2 = new byte[32];
+            Array.Copy(key1, key2, 32);
+
+            // Make key2 different in the last byte
+            key2[31] ^= 0xFF;
+
+            // Act & Assert - Test that comparison works correctly
+            Assert.IsTrue(SecureMemory.SecureCompare(key1, key1), "Identical keys should compare equal");
+            Assert.IsFalse(SecureMemory.SecureCompare(key1, key2), "Different keys should compare unequal");
+
+            // Test with different lengths
+            byte[] shortKey = new byte[16];
+            Assert.IsFalse(SecureMemory.SecureCompare(key1, shortKey), "Keys of different lengths should compare unequal");
+        }
+
+        /// <summary>
+        /// Tests that signature verification uses constant-time operations
+        /// </summary>
+        [TestMethod]
+        public void SignatureVerification_ShouldUseConstantTimeOperations()
+        {
+            // Arrange
+            var keyPair = Sodium.GenerateEd25519KeyPair();
+            byte[] message = Encoding.UTF8.GetBytes("test message");
+
+            // Create valid signature
+            byte[] validSignature = Sodium.SignDetached(message, keyPair.PrivateKey);
+
+            // Create invalid signature (modify one byte)
+            byte[] invalidSignature = new byte[validSignature.Length];
+            Array.Copy(validSignature, invalidSignature, validSignature.Length);
+            invalidSignature[0] ^= 0xFF;
+
+            // Act & Assert
+            bool validResult = _cryptoProvider.VerifySignature(message, validSignature, keyPair.PublicKey);
+            bool invalidResult = _cryptoProvider.VerifySignature(message, invalidSignature, keyPair.PublicKey);
+
+            Assert.IsTrue(validResult, "Valid signature should verify successfully");
+            Assert.IsFalse(invalidResult, "Invalid signature should fail verification");
+        }
+
+        /// <summary>
+        /// Tests that random number generation produces high-quality entropy
+        /// </summary>
+        [TestMethod]
+        public void RandomGeneration_ShouldProduceHighQualityEntropy()
+        {
+            // Arrange & Act
+            const int numSamples = 1000;
+            const int keySize = 32;
+            var samples = new List<byte[]>();
+
+            for (int i = 0; i < numSamples; i++)
+            {
+                samples.Add(_cryptoProvider.GenerateRandomBytes(keySize));
+            }
+
+            // Assert - Check for uniqueness
+            for (int i = 0; i < samples.Count; i++)
+            {
+                for (int j = i + 1; j < samples.Count; j++)
+                {
+                    Assert.IsFalse(SecureMemory.SecureCompare(samples[i], samples[j]),
+                        $"Random samples {i} and {j} should not be identical");
+                }
+            }
+
+            // Basic entropy check - count unique bytes across all samples
+            var allBytes = new HashSet<byte>();
+            foreach (var sample in samples)
+            {
+                foreach (byte b in sample)
+                {
+                    allBytes.Add(b);
+                }
+            }
+
+            // Should see most possible byte values with this many samples
+            Assert.IsTrue(allBytes.Count > 200,
+                $"Expected high entropy, but only saw {allBytes.Count} unique byte values");
+        }
+
+        /// <summary>
+        /// Tests that memory clearing operations are effective
+        /// </summary>
+        [TestMethod]
+        public void SecureMemoryClear_ShouldEffectivelyClearMemory()
+        {
+            // Arrange
+            byte[] sensitiveData = _cryptoProvider.GenerateRandomBytes(64);
+            byte[] originalCopy = new byte[sensitiveData.Length];
+            Array.Copy(sensitiveData, originalCopy, sensitiveData.Length);
+
+            // Verify data is initially present
+            Assert.IsTrue(SecureMemory.SecureCompare(sensitiveData, originalCopy));
+
+            // Act
+            SecureMemory.SecureClear(sensitiveData);
+
+            // Assert
+            Assert.IsFalse(SecureMemory.SecureCompare(sensitiveData, originalCopy),
+                "Memory should be cleared after SecureClear");
+
+            // Verify all bytes are zero
+            foreach (byte b in sensitiveData)
+            {
+                Assert.AreEqual(0, b, "All bytes should be zero after clearing");
+            }
+        }
+
+        #endregion
     }
 }

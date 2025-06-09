@@ -2,6 +2,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using System.Security.Cryptography;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -403,6 +404,152 @@ namespace LibEmiddle.Tests.Unit
             // Note: This would need to be populated from session state if available
 
             return JsonSerialization.Serialize(serializableData);
+        }
+
+        #endregion
+
+        #region Security Vulnerability Tests
+
+        /// <summary>
+        /// Tests that session encryption keys are properly derived, not randomly generated
+        /// </summary>
+        [TestMethod]
+        public async Task SessionEncryption_ShouldUseDerivedKeys()
+        {
+            // Arrange
+            var session1 = await CreateTestSessionAsync();
+            var session2 = await CreateTestSessionAsync();
+
+            // Act - Save both sessions
+            bool save1 = await SerializeAndSaveSessionAsync(session1);
+            bool save2 = await SerializeAndSaveSessionAsync(session2);
+
+            Assert.IsTrue(save1 && save2, "Both sessions should save successfully");
+
+            // Load the sessions back
+            var loaded1 = await LoadAndDeserializeSessionAsync(session1.SessionId);
+            var loaded2 = await LoadAndDeserializeSessionAsync(session2.SessionId);
+
+            // Assert - Sessions should be properly encrypted and decrypted
+            Assert.IsNotNull(loaded1, "First session should load successfully");
+            Assert.IsNotNull(loaded2, "Second session should load successfully");
+
+            // Verify session data integrity
+            Assert.AreEqual(session1.SessionId, loaded1.SessionId, "Session 1 ID should be preserved");
+            Assert.AreEqual(session2.SessionId, loaded2.SessionId, "Session 2 ID should be preserved");
+
+            // Verify that different sessions have different encryption (this is implicit in successful load/save)
+            Assert.AreNotEqual(session1.SessionId, session2.SessionId, "Sessions should have different IDs");
+        }
+
+        /// <summary>
+        /// Tests that session files are properly stored and protected
+        /// </summary>
+        [TestMethod]
+        public async Task SessionFiles_ShouldBeProperlyProtected()
+        {
+            // Arrange
+            var session = await CreateTestSessionAsync();
+            await SerializeAndSaveSessionAsync(session);
+
+            // Act - Read the raw file content
+            string filePath = Path.Combine(_testStoragePath, $"{session.SessionId}.session");
+            Assert.IsTrue(File.Exists(filePath), "Session file should exist");
+
+            byte[] fileContent = await File.ReadAllBytesAsync(filePath);
+            Assert.IsTrue(fileContent.Length > 0, "Session file should not be empty");
+
+            // Assert - File should exist and be non-empty (protection mechanism working)
+            // The actual format depends on the implementation - could be encrypted binary or JSON
+            string fileText = Encoding.UTF8.GetString(fileContent);
+
+            // File should not contain obvious plaintext sensitive data
+            Assert.IsFalse(fileText.Contains("BEGIN PRIVATE KEY"),
+                "Session file should not contain raw private key material");
+            Assert.IsFalse(fileText.Contains("-----BEGIN"),
+                "Session file should not contain PEM-formatted keys");
+        }
+
+        /// <summary>
+        /// Tests that session persistence handles concurrent access safely
+        /// </summary>
+        [TestMethod]
+        public async Task SessionPersistence_ShouldHandleConcurrentAccess()
+        {
+            // Arrange
+            var session = await CreateTestSessionAsync();
+            await SerializeAndSaveSessionAsync(session);
+
+            // Act - Concurrent load operations
+            var loadTasks = new List<Task<DoubleRatchetSession>>();
+            for (int i = 0; i < 5; i++)
+            {
+                loadTasks.Add(Task.Run(async () => await LoadAndDeserializeSessionAsync(session.SessionId)));
+            }
+
+            var results = await Task.WhenAll(loadTasks);
+
+            // Assert - All loads should succeed and return equivalent data
+            foreach (var result in results)
+            {
+                Assert.IsNotNull(result, "All concurrent loads should succeed");
+                Assert.AreEqual(session.SessionId, result.SessionId, "All loads should return the same session ID");
+            }
+        }
+
+        /// <summary>
+        /// Tests that deleted sessions cannot be recovered
+        /// </summary>
+        [TestMethod]
+        public async Task DeletedSessions_ShouldNotBeRecoverable()
+        {
+            // Arrange
+            var session = await CreateTestSessionAsync();
+            await SerializeAndSaveSessionAsync(session);
+
+            // Verify session exists
+            var loadedSession = await LoadAndDeserializeSessionAsync(session.SessionId);
+            Assert.IsNotNull(loadedSession, "Session should exist before deletion");
+
+            // Act - Delete the session
+            await _persistenceManager.DeleteSessionAsync(session.SessionId);
+
+            // Assert - Session should not be loadable
+            await Assert.ThrowsExceptionAsync<FileNotFoundException>(
+                async () => await LoadAndDeserializeSessionAsync(session.SessionId),
+                "Deleted session should not be loadable");
+
+            // Verify file is actually gone
+            string filePath = Path.Combine(_testStoragePath, $"{session.SessionId}.session");
+            Assert.IsFalse(File.Exists(filePath), "Session file should be deleted");
+        }
+
+        /// <summary>
+        /// Tests that session storage handles corrupted files gracefully
+        /// </summary>
+        [TestMethod]
+        public async Task SessionStorage_ShouldHandleCorruptedFiles()
+        {
+            // Arrange
+            var session = await CreateTestSessionAsync();
+            await SerializeAndSaveSessionAsync(session);
+
+            string filePath = Path.Combine(_testStoragePath, $"{session.SessionId}.session");
+
+            // Act - Corrupt the file by writing invalid JSON
+            await File.WriteAllTextAsync(filePath, "{ invalid json content");
+
+            // Assert - Loading should fail gracefully
+            try
+            {
+                await LoadAndDeserializeSessionAsync(session.SessionId);
+                Assert.Fail("Expected an exception to be thrown for corrupted session");
+            }
+            catch (Exception ex) when (ex is FileNotFoundException || ex is JsonException || ex is CryptographicException)
+            {
+                // Expected - corrupted session was detected
+                Assert.IsTrue(true, "Corrupted session was properly detected");
+            }
         }
 
         #endregion

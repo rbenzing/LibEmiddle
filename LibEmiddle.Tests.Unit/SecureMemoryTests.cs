@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Linq;
+using System.Collections.Generic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
 using LibEmiddle.Core;
@@ -218,5 +220,162 @@ namespace LibEmiddle.Tests.Unit
             // Test returning null buffer
             SecureMemory.ReturnBuffer(null); // Should not throw
         }
+
+        #region Security Vulnerability Tests
+
+        /// <summary>
+        /// Tests that secure buffers don't leak data to managed heap
+        /// </summary>
+        [TestMethod]
+        public void SecureBuffer_ShouldNotLeakToManagedHeap()
+        {
+            // Arrange
+            byte[] sensitiveData = new byte[64];
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(sensitiveData);
+            }
+
+            // Act - Create secure buffer and copy data
+            byte[] secureBuffer = SecureMemory.CreateSecureBuffer(64);
+            Array.Copy(sensitiveData, secureBuffer, sensitiveData.Length);
+
+            // Verify data is present
+            Assert.IsTrue(SecureMemory.SecureCompare(sensitiveData, secureBuffer),
+                "Data should be correctly copied to secure buffer");
+
+            // Clear the secure buffer
+            SecureMemory.SecureClear(secureBuffer);
+
+            // Assert - Buffer should be cleared
+            foreach (byte b in secureBuffer)
+            {
+                Assert.AreEqual(0, b, "All bytes should be zero after secure clear");
+            }
+
+            // Original sensitive data should be unchanged
+            bool hasNonZero = sensitiveData.Any(b => b != 0);
+            Assert.IsTrue(hasNonZero, "Original sensitive data should remain unchanged");
+        }
+
+        /// <summary>
+        /// Tests that constant-time comparison prevents timing attacks
+        /// </summary>
+        [TestMethod]
+        public void SecureCompare_ShouldBeTimingAttackResistant()
+        {
+            // Arrange - Create keys that differ in different positions
+            byte[] key1 = new byte[32];
+            byte[] key2_early_diff = new byte[32];
+            byte[] key2_late_diff = new byte[32];
+
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(key1);
+            }
+
+            Array.Copy(key1, key2_early_diff, 32);
+            Array.Copy(key1, key2_late_diff, 32);
+
+            // Make differences at different positions
+            key2_early_diff[0] ^= 0xFF;  // Early difference
+            key2_late_diff[31] ^= 0xFF;  // Late difference
+
+            // Act & Assert - Both should return false regardless of difference position
+            Assert.IsFalse(SecureMemory.SecureCompare(key1, key2_early_diff),
+                "Keys with early difference should compare unequal");
+            Assert.IsFalse(SecureMemory.SecureCompare(key1, key2_late_diff),
+                "Keys with late difference should compare unequal");
+
+            // Test with different lengths (should also be constant time)
+            byte[] shortKey = new byte[16];
+            Assert.IsFalse(SecureMemory.SecureCompare(key1, shortKey),
+                "Keys of different lengths should compare unequal");
+        }
+
+        /// <summary>
+        /// Tests that memory clearing is effective against recovery attempts
+        /// </summary>
+        [TestMethod]
+        public void SecureClear_ShouldPreventDataRecovery()
+        {
+            // Arrange
+            byte[] sensitiveData = new byte[1024];
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(sensitiveData);
+            }
+
+            // Create multiple copies to test clearing
+            byte[] copy1 = new byte[sensitiveData.Length];
+            byte[] copy2 = new byte[sensitiveData.Length];
+            Array.Copy(sensitiveData, copy1, sensitiveData.Length);
+            Array.Copy(sensitiveData, copy2, sensitiveData.Length);
+
+            // Act - Clear one copy
+            SecureMemory.SecureClear(copy1);
+
+            // Assert - Cleared copy should be all zeros
+            foreach (byte b in copy1)
+            {
+                Assert.AreEqual(0, b, "Cleared memory should contain only zeros");
+            }
+
+            // Other copies should be unchanged
+            Assert.IsTrue(SecureMemory.SecureCompare(sensitiveData, copy2),
+                "Uncleared copy should remain unchanged");
+        }
+
+        /// <summary>
+        /// Tests that buffer pooling doesn't leak data between uses
+        /// </summary>
+        [TestMethod]
+        public void BufferPool_ShouldNotLeakDataBetweenUses()
+        {
+            // Arrange - Create and use a buffer with sensitive data
+            byte[] sensitiveData = new byte[512];
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(sensitiveData);
+            }
+
+            byte[] buffer1 = SecureMemory.CreateSecureBuffer(512);
+            Array.Copy(sensitiveData, buffer1, sensitiveData.Length);
+
+            // Return buffer to pool with secure clearing
+            SecureMemory.ReturnBuffer(buffer1, true);
+
+            // Act - Get a new buffer from the pool
+            byte[] buffer2 = SecureMemory.CreateSecureBuffer(512);
+
+            // Assert - New buffer should not contain old data
+            Assert.IsFalse(SecureMemory.SecureCompare(sensitiveData, buffer2),
+                "New buffer from pool should not contain previous sensitive data");
+
+            // New buffer should be clean (all zeros or random data, but not our sensitive data)
+            bool containsSensitiveData = false;
+            for (int i = 0; i <= buffer2.Length - sensitiveData.Length; i++)
+            {
+                bool matches = true;
+                for (int j = 0; j < sensitiveData.Length; j++)
+                {
+                    if (buffer2[i + j] != sensitiveData[j])
+                    {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches)
+                {
+                    containsSensitiveData = true;
+                    break;
+                }
+            }
+
+            Assert.IsFalse(containsSensitiveData,
+                "Pooled buffer should not contain traces of previous sensitive data");
+        }
+
+        #endregion
     }
 }

@@ -6,6 +6,8 @@ using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.KeyManagement;
 using System;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 using Microsoft.VisualStudio.TestPlatform.ObjectModel.DataCollection;
 
 namespace LibEmiddle.Tests.Unit
@@ -136,5 +138,98 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(x25519PrivateKey);
             Assert.AreEqual(Constants.X25519_KEY_SIZE, x25519PrivateKey.Length, "Derived X25519 key should be the correct length");
         }
+
+        #region Security Vulnerability Tests
+
+        /// <summary>
+        /// Tests that cached keys are properly secured and return copies
+        /// </summary>
+        [TestMethod]
+        public async Task KeyCache_ShouldReturnSecureCopies()
+        {
+            // Arrange
+            string keyId = "test-cache-key";
+            byte[] originalKey = _cryptoProvider.GenerateRandomBytes(32);
+
+            // Store the key
+            await _keyManager.StoreKeyAsync(keyId, originalKey);
+
+            // Retrieve it multiple times to test caching
+            byte[] cachedKey1 = await _keyManager.RetrieveKeyAsync(keyId);
+            byte[] cachedKey2 = await _keyManager.RetrieveKeyAsync(keyId);
+
+            Assert.IsNotNull(cachedKey1);
+            Assert.IsNotNull(cachedKey2);
+
+            // Verify they are equal in content but different objects
+            Assert.IsTrue(SecureMemory.SecureCompare(cachedKey1, cachedKey2));
+            Assert.IsFalse(ReferenceEquals(cachedKey1, cachedKey2),
+                "Cached keys should return copies, not the same reference");
+
+            // Modify one copy and verify the other is unaffected
+            cachedKey1[0] ^= 0xFF;
+            Assert.IsFalse(SecureMemory.SecureCompare(cachedKey1, cachedKey2),
+                "Modifying one copy should not affect the other");
+
+            // Cleanup
+            await _keyManager.DeleteKeyAsync(keyId);
+        }
+
+        /// <summary>
+        /// Tests that key deletion properly clears cached keys
+        /// </summary>
+        [TestMethod]
+        public async Task KeyDeletion_ShouldClearCachedKeys()
+        {
+            // Arrange
+            string keyId = "test-delete-cache-key";
+            byte[] originalKey = _cryptoProvider.GenerateRandomBytes(32);
+
+            // Store and cache the key
+            await _keyManager.StoreKeyAsync(keyId, originalKey);
+            byte[] cachedKey = await _keyManager.RetrieveKeyAsync(keyId);
+            Assert.IsNotNull(cachedKey);
+
+            // Delete the key
+            bool deleted = await _keyManager.DeleteKeyAsync(keyId);
+            Assert.IsTrue(deleted);
+
+            // Verify key is no longer retrievable
+            byte[] retrievedAfterDelete = await _keyManager.RetrieveKeyAsync(keyId);
+            Assert.IsNull(retrievedAfterDelete, "Key should not be retrievable after deletion");
+        }
+
+        /// <summary>
+        /// Tests that concurrent access to cached keys is thread-safe
+        /// </summary>
+        [TestMethod]
+        public async Task KeyCache_ShouldBeThreadSafe()
+        {
+            // Arrange
+            string keyId = "test-concurrent-key";
+            byte[] originalKey = _cryptoProvider.GenerateRandomBytes(32);
+            await _keyManager.StoreKeyAsync(keyId, originalKey);
+
+            // Act - Concurrent access
+            var tasks = new List<Task<byte[]>>();
+            for (int i = 0; i < 10; i++)
+            {
+                tasks.Add(Task.Run(async () => await _keyManager.RetrieveKeyAsync(keyId)));
+            }
+
+            byte[][] results = await Task.WhenAll(tasks);
+
+            // Assert - All results should be valid and equal
+            foreach (var result in results)
+            {
+                Assert.IsNotNull(result);
+                Assert.IsTrue(SecureMemory.SecureCompare(originalKey, result));
+            }
+
+            // Cleanup
+            await _keyManager.DeleteKeyAsync(keyId);
+        }
+
+        #endregion
     }
 }

@@ -4,12 +4,12 @@ using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
 using LibEmiddle.KeyManagement;
-using LibEmiddle.Messaging.Chat;
 using LibEmiddle.Messaging.Group;
 using LibEmiddle.MultiDevice;
 using LibEmiddle.Protocol;
 using LibEmiddle.Sessions;
 using LibEmiddle.Messaging.Transport;
+using LibEmiddle.Messaging.Chat;
 
 namespace LibEmiddle.API;
 
@@ -27,9 +27,11 @@ public sealed class LibEmiddleClient : IDisposable
     private readonly DeviceManager _deviceManager;
     private readonly IMailboxTransport _transport;
     private readonly KeyManager _keyManager;
+    private readonly MailboxManager _mailboxManager;
 
     private bool _disposed;
     private bool _initialized;
+    private bool _isListening;
 
     /// <summary>
     /// Gets the client's identity public key.
@@ -40,6 +42,16 @@ public sealed class LibEmiddleClient : IDisposable
     /// Gets the current device manager for multi-device operations.
     /// </summary>
     public IDeviceManager DeviceManager => _deviceManager;
+
+    /// <summary>
+    /// Event raised when a new message is received.
+    /// </summary>
+    public event EventHandler<MailboxMessageEventArgs>? MessageReceived;
+
+    /// <summary>
+    /// Gets whether the client is currently listening for incoming messages.
+    /// </summary>
+    public bool IsListening => _isListening;
 
     /// <summary>
     /// Initializes a new instance of the LibEmiddleClient.
@@ -87,6 +99,12 @@ public sealed class LibEmiddleClient : IDisposable
 
             // Create transport
             _transport = CreateTransport();
+
+            // Create mailbox manager with the transport and protocols
+            _mailboxManager = new MailboxManager(_identityKeyPair, _transport, doubleRatchetProtocol, _cryptoProvider);
+
+            // Wire up mailbox manager events
+            _mailboxManager.MessageReceived += OnMailboxMessageReceived;
 
             LoggingManager.LogInformation(nameof(LibEmiddleClient), "LibEmiddle client initialized successfully");
         }
@@ -401,6 +419,104 @@ public sealed class LibEmiddleClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Gets message history for a chat session with pagination support.
+    /// </summary>
+    /// <param name="sessionId">The session ID</param>
+    /// <param name="limit">Maximum number of messages to retrieve (default: 50, max: 1000)</param>
+    /// <param name="startIndex">Starting index for pagination (default: 0)</param>
+    /// <returns>Collection of message records</returns>
+    public async Task<IReadOnlyCollection<MessageRecord>?> GetChatMessageHistoryAsync(
+        string sessionId,
+        int limit = 50,
+        int startIndex = 0)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        ArgumentException.ThrowIfNullOrEmpty(sessionId);
+
+        // Security: Limit the maximum number of messages that can be retrieved at once
+        if (limit <= 0 || limit > 1000)
+        {
+            limit = Math.Min(Math.Max(limit, 1), 1000);
+            LoggingManager.LogWarning(nameof(LibEmiddleClient), $"Message history limit adjusted to {limit}");
+        }
+
+        if (startIndex < 0)
+        {
+            startIndex = 0;
+        }
+
+        try
+        {
+            var chatSession = await GetChatSessionAsync(sessionId);
+            var history = chatSession.GetMessageHistory(limit, startIndex);
+            LoggingManager.LogDebug(nameof(LibEmiddleClient),
+                $"Retrieved {history.Count} messages from session {sessionId}");
+            return history;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient),
+                $"Failed to get message history for session {sessionId}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the message count for a chat session.
+    /// </summary>
+    /// <param name="sessionId">The session ID</param>
+    /// <returns>Number of messages in the session, or -1 if session not found</returns>
+    public async Task<int> GetChatMessageCountAsync(string sessionId)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        ArgumentException.ThrowIfNullOrEmpty(sessionId);
+
+        try
+        {
+            var chatSession = await GetChatSessionAsync(sessionId);
+            var count = chatSession.GetMessageCount();
+            LoggingManager.LogDebug(nameof(LibEmiddleClient),
+                $"Session {sessionId} has {count} messages");
+            return count;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient),
+                $"Failed to get message count for session {sessionId}: {ex.Message}");
+            return -1;
+        }
+    }
+
+    /// <summary>
+    /// Clears message history for a chat session.
+    /// </summary>
+    /// <param name="sessionId">The session ID</param>
+    /// <returns>Number of messages cleared, or -1 if failed</returns>
+    public async Task<int> ClearChatMessageHistoryAsync(string sessionId)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        ArgumentException.ThrowIfNullOrEmpty(sessionId);
+
+        try
+        {
+            var chatSession = await GetChatSessionAsync(sessionId);
+            var clearedCount = chatSession.ClearMessageHistory();
+            LoggingManager.LogInformation(nameof(LibEmiddleClient),
+                $"Cleared {clearedCount} messages from session {sessionId}");
+            return clearedCount;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient),
+                $"Failed to clear message history for session {sessionId}: {ex.Message}");
+            return -1;
+        }
+    }
+
     #endregion
 
     #region Group Chat Methods (Updated for New GroupSession)
@@ -673,6 +789,33 @@ public sealed class LibEmiddleClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Gets information about a group session.
+    /// </summary>
+    /// <param name="groupId">The group identifier</param>
+    /// <returns>Group session information or null if not found</returns>
+    public async Task<IGroupSession?> GetGroupInfoAsync(string groupId)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        ArgumentException.ThrowIfNullOrEmpty(groupId);
+
+        try
+        {
+            var groupSession = await GetGroupAsync(groupId);
+            LoggingManager.LogDebug(nameof(LibEmiddleClient), $"Retrieved group info for {groupId}");
+            return groupSession;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient),
+                $"Failed to get group info for {groupId}: {ex.Message}");
+            return null;
+        }
+    }
+
+
+
     #endregion
 
     #region Key Management
@@ -748,9 +891,9 @@ public sealed class LibEmiddleClient : IDisposable
     }
 
     /// <summary>
-    /// Deletes a session by ID.
+    /// Deletes a session and all associated data.
     /// </summary>
-    /// <param name="sessionId">The session identifier</param>
+    /// <param name="sessionId">The session ID to delete</param>
     /// <returns>True if the session was deleted successfully</returns>
     public async Task<bool> DeleteSessionAsync(string sessionId)
     {
@@ -760,13 +903,43 @@ public sealed class LibEmiddleClient : IDisposable
 
         try
         {
-            return await _sessionManager.DeleteSessionAsync(sessionId);
+            var result = await _sessionManager.DeleteSessionAsync(sessionId);
+            if (result)
+            {
+                LoggingManager.LogInformation(nameof(LibEmiddleClient), $"Deleted session {sessionId}");
+            }
+            return result;
         }
         catch (Exception ex)
         {
             LoggingManager.LogError(nameof(LibEmiddleClient),
                 $"Failed to delete session {sessionId}: {ex.Message}");
-            throw;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Gets detailed information about a session.
+    /// </summary>
+    /// <param name="sessionId">The session ID</param>
+    /// <returns>Session information or null if not found</returns>
+    public async Task<ISession?> GetSessionInfoAsync(string sessionId)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        ArgumentException.ThrowIfNullOrEmpty(sessionId);
+
+        try
+        {
+            var session = await _sessionManager.GetSessionAsync(sessionId);
+            LoggingManager.LogDebug(nameof(LibEmiddleClient), $"Retrieved session info for {sessionId}");
+            return session;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient),
+                $"Failed to get session info for {sessionId}: {ex.Message}");
+            return null;
         }
     }
 
@@ -847,6 +1020,150 @@ public sealed class LibEmiddleClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Gets the number of linked devices.
+    /// </summary>
+    /// <returns>Number of linked devices</returns>
+    public int GetLinkedDeviceCount()
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+
+        try
+        {
+            return _deviceManager.GetLinkedDeviceCount();
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient), $"Failed to get linked device count: {ex.Message}");
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Removes a linked device from the device manager.
+    /// </summary>
+    /// <param name="devicePublicKey">The public key of the device to remove</param>
+    /// <returns>True if the device was removed successfully</returns>
+    public bool RemoveLinkedDevice(byte[] devicePublicKey)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        ArgumentNullException.ThrowIfNull(devicePublicKey);
+
+        try
+        {
+            var result = _deviceManager.RemoveLinkedDevice(devicePublicKey);
+            if (result)
+            {
+                LoggingManager.LogInformation(nameof(LibEmiddleClient),
+                    $"Removed linked device {Convert.ToBase64String(devicePublicKey).Substring(0, 8)}");
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient), $"Failed to remove linked device: {ex.Message}");
+            return false;
+        }
+    }
+
+    #endregion
+
+    #region Message Transport and Listening
+
+    /// <summary>
+    /// Starts listening for incoming messages.
+    /// </summary>
+    /// <param name="pollingInterval">Polling interval in milliseconds (minimum 1000ms)</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>True if listening started successfully</returns>
+    public async Task<bool> StartListeningAsync(int pollingInterval = 5000, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+
+        if (_isListening)
+        {
+            LoggingManager.LogWarning(nameof(LibEmiddleClient), "Already listening for messages");
+            return true;
+        }
+
+        // Validate polling interval for security (prevent resource exhaustion)
+        if (pollingInterval < 1000)
+        {
+            LoggingManager.LogWarning(nameof(LibEmiddleClient), "Polling interval too low, setting to minimum 1000ms");
+            pollingInterval = 1000;
+        }
+
+        try
+        {
+            await _transport.StartListeningAsync(_identityKeyPair.PublicKey, pollingInterval, cancellationToken);
+            _isListening = true;
+            LoggingManager.LogInformation(nameof(LibEmiddleClient), $"Started listening for messages with {pollingInterval}ms interval");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient), $"Failed to start listening: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Stops listening for incoming messages.
+    /// </summary>
+    /// <returns>True if listening stopped successfully</returns>
+    public async Task<bool> StopListeningAsync()
+    {
+        ThrowIfDisposed();
+
+        if (!_isListening)
+        {
+            return true;
+        }
+
+        try
+        {
+            await _transport.StopListeningAsync();
+            _isListening = false;
+            LoggingManager.LogInformation(nameof(LibEmiddleClient), "Stopped listening for messages");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient), $"Failed to stop listening: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Marks a message as read and optionally sends a read receipt.
+    /// </summary>
+    /// <param name="messageId">The message ID to mark as read</param>
+    /// <returns>True if the message was marked as read successfully</returns>
+    public async Task<bool> MarkMessageAsReadAsync(string messageId)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        ArgumentException.ThrowIfNullOrEmpty(messageId);
+
+        try
+        {
+            var result = await _mailboxManager.MarkMessageAsReadAsync(messageId);
+            if (result)
+            {
+                LoggingManager.LogDebug(nameof(LibEmiddleClient), $"Marked message {messageId} as read");
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient), $"Failed to mark message as read: {ex.Message}");
+            return false;
+        }
+    }
+
     #endregion
 
     #region Private Helper Methods
@@ -902,8 +1219,31 @@ public sealed class LibEmiddleClient : IDisposable
         {
             TransportType.InMemory => new InMemoryMailboxTransport(_cryptoProvider),
             TransportType.Http => new HttpMailboxTransport(_cryptoProvider, new HttpClient(), _options.ServerEndpoint ?? "http://localhost:8080"),
+            TransportType.WebSocket => CreateWebSocketTransport(),
             _ => new InMemoryMailboxTransport(_cryptoProvider)
         };
+    }
+
+    private IMailboxTransport CreateWebSocketTransport()
+    {
+        // For WebSocket transport, we would need a WebSocketMailboxTransport implementation
+        // For now, fall back to HTTP transport as WebSocket transport needs server-side support
+        LoggingManager.LogWarning(nameof(LibEmiddleClient), "WebSocket transport not fully implemented, falling back to HTTP");
+        return new HttpMailboxTransport(_cryptoProvider, new HttpClient(), _options.ServerEndpoint ?? "ws://localhost:8080");
+    }
+
+    private void OnMailboxMessageReceived(object? sender, MailboxMessageEventArgs e)
+    {
+        try
+        {
+            // Forward the event to client consumers
+            MessageReceived?.Invoke(this, e);
+            LoggingManager.LogDebug(nameof(LibEmiddleClient), $"Forwarded message received event for message {e.Message.Id}");
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient), $"Error in message received event handler: {ex.Message}");
+        }
     }
 
     private void EnsureInitialized()
@@ -929,6 +1269,23 @@ public sealed class LibEmiddleClient : IDisposable
 
         try
         {
+            // Stop listening first (synchronously for disposal)
+            if (_isListening)
+            {
+                try
+                {
+                    // Use synchronous stop for disposal to avoid async in Dispose
+                    _transport?.StopListeningAsync().GetAwaiter().GetResult();
+                    _isListening = false;
+                }
+                catch (Exception ex)
+                {
+                    LoggingManager.LogError(nameof(LibEmiddleClient), $"Error stopping listening during disposal: {ex.Message}");
+                }
+            }
+
+            // Dispose components in reverse order of creation
+            _mailboxManager?.Dispose();
             _sessionManager?.Dispose();
             _deviceManager?.Dispose();
             _transport?.Dispose();
@@ -944,16 +1301,6 @@ public sealed class LibEmiddleClient : IDisposable
     }
 
     #endregion
-}
-
-/// <summary>
-/// Represents transport types for the LibEmiddle client.
-/// </summary>
-public enum TransportType
-{
-    InMemory,
-    Http,
-    WebSocket
 }
 
 /// <summary>
