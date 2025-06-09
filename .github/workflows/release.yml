@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 2.0.1)'
+        required: true
+        type: string
+      branch:
+        description: 'Branch to release from'
+        required: true
+        default: 'main'
+        type: choice
+        options:
+          - main
+          - legacy-1.0
+      release_type:
+        description: 'Type of release'
+        required: true
+        default: 'minor'
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+          - hotfix
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      
+    steps:
+    - name: Validate inputs
+      id: validate
+      run: |
+        VERSION="${{ github.event.inputs.version }}"
+        BRANCH="${{ github.event.inputs.branch }}"
+        
+        # Validate version format
+        if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+          echo "Invalid version format: $VERSION"
+          exit 1
+        fi
+        
+        # Validate branch compatibility
+        if [[ $BRANCH == "legacy-1.0" && ! $VERSION =~ ^1\. ]]; then
+          echo "Legacy branch must use 1.x.x versions"
+          exit 1
+        elif [[ $BRANCH == "main" && ! $VERSION =~ ^2\. ]]; then
+          echo "Main branch must use 2.x.x versions"
+          exit 1
+        fi
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  release:
+    needs: validate
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch }}
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+    
+    - name: Update version files
+      run: |
+        VERSION="${{ needs.validate.outputs.version }}"
+        BRANCH="${{ github.event.inputs.branch }}"
+        
+        # Update Directory.Build.props
+        sed -i "s/<VersionPrefix>.*<\/VersionPrefix>/<VersionPrefix>$VERSION<\/VersionPrefix>/" Directory.Build.props
+        
+        # Update LibEmiddle.csproj
+        sed -i "s/<Version>.*<\/Version>/<Version>$VERSION<\/Version>/" LibEmiddle/LibEmiddle.csproj
+        
+        # Update protocol version if major version change
+        if [[ "${{ github.event.inputs.release_type }}" == "major" ]]; then
+          MAJOR_VERSION=$(echo $VERSION | cut -d. -f1)
+          sed -i "s/public const int MAJOR_VERSION = .*/public const int MAJOR_VERSION = $MAJOR_VERSION;/" LibEmiddle.Domain/Constants/ProtocolVersion.cs
+        fi
+    
+    - name: Build and test
+      run: |
+        dotnet restore
+        dotnet build --configuration Release
+        dotnet test --configuration Release --verbosity normal
+    
+    - name: Create NuGet packages
+      run: |
+        dotnet pack --configuration Release --output ./packages
+    
+    - name: Commit version changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add .
+        git commit -m "Release version ${{ needs.validate.outputs.version }}" || exit 0
+        git push
+    
+    - name: Create and push tag
+      run: |
+        git tag -a "v${{ needs.validate.outputs.version }}" -m "Release version ${{ needs.validate.outputs.version }}"
+        git push origin "v${{ needs.validate.outputs.version }}"
+    
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ needs.validate.outputs.version }}
+        release_name: Release v${{ needs.validate.outputs.version }}
+        body: |
+          ## Release v${{ needs.validate.outputs.version }}
+          
+          ### Changes
+          - See commit history for detailed changes
+          
+          ### Branch: ${{ github.event.inputs.branch }}
+          ### Type: ${{ github.event.inputs.release_type }}
+          
+          ### Installation
+          ```
+          dotnet add package LibEmiddle --version ${{ needs.validate.outputs.version }}
+          ```
+        draft: false
+        prerelease: ${{ contains(needs.validate.outputs.version, '-') }}
+    
+    - name: Upload packages to release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./packages/LibEmiddle.${{ needs.validate.outputs.version }}.nupkg
+        asset_name: LibEmiddle.${{ needs.validate.outputs.version }}.nupkg
+        asset_content_type: application/zip
