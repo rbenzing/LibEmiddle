@@ -10,12 +10,12 @@ namespace LibEmiddle.Domain
         /// <summary>
         /// Major version changes indicate breaking protocol changes
         /// </summary>
-        public const int MAJOR_VERSION = 1;
+        public const int MAJOR_VERSION = 2;
 
         /// <summary>
         /// Minor version changes indicate non-breaking enhancements
         /// </summary>
-        public const int MINOR_VERSION = 2;
+        public const int MINOR_VERSION = 0;
 
         /// <summary>
         /// The legacy version
@@ -35,7 +35,7 @@ namespace LibEmiddle.Domain
         /// <summary>
         /// Minimum supported version for compatibility
         /// </summary>
-        public const int MIN_SUPPORTED_MAJOR_VERSION = 1;
+        public const int MIN_SUPPORTED_MAJOR_VERSION = 2;
 
         /// <summary>
         /// Helper method to check compatibility

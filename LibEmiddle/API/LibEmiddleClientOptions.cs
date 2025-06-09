@@ -119,7 +119,7 @@ public sealed class LibEmiddleClientOptions
     /// <summary>
     /// Gets or sets the user agent string for HTTP requests.
     /// </summary>
-    public string UserAgent { get; set; } = "LibEmiddle/1.0";
+    public string UserAgent { get; set; } = "LibEmiddle/2.0";
 
     /// <summary>
     /// Gets or sets whether to enable compression for network communications.
@@ -492,7 +492,7 @@ public sealed class SecurityPolicyOptions
     /// <summary>
     /// Gets or sets the minimum allowed protocol version.
     /// </summary>
-    public string MinimumProtocolVersion { get; set; } = "1.0";
+    public string MinimumProtocolVersion { get; set; } = "2.0";
 
     /// <summary>
     /// Gets or sets whether to allow insecure connections (HTTP instead of HTTPS).
