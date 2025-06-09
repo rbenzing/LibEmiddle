@@ -28,8 +28,8 @@ LibEmiddle follows [Semantic Versioning (SemVer)](https://semver.org/) with a st
    - Only receives critical security fixes and bug fixes
    - No new features
 
-3. **`develop`** - Development branch (future v3.x.x)
-   - Integration branch for new features
+3. **`experimental`** - Development branch (future v3.x.x)
+   - Integration branch for new features and experimental work
    - Base branch for feature branches
    - Merged to main when ready for release
 
@@ -70,7 +70,7 @@ Version numbers are centrally managed in:
 
 ### Major Releases (Breaking Changes)
 
-1. Create `release/vX.0.0` branch from `develop`
+1. Create `release/vX.0.0` branch from `experimental`
 2. Update version numbers in all relevant files
 3. Update protocol version if needed
 4. Run full test suite
@@ -80,7 +80,7 @@ Version numbers are centrally managed in:
 
 ### Minor Releases (New Features)
 
-1. Create `release/vX.Y.0` branch from `develop`
+1. Create `release/vX.Y.0` branch from `experimental`
 2. Update version numbers
 3. Run full test suite
 4. Create PR to `main`
@@ -93,7 +93,7 @@ Version numbers are centrally managed in:
 3. Update version numbers
 4. Create PR to `main`
 5. Tag release after merge
-6. Cherry-pick to `develop` if needed
+6. Cherry-pick to `experimental` if needed
 
 ### Legacy Maintenance
 
@@ -115,7 +115,7 @@ Version numbers are centrally managed in:
 
 - **Main**: Full build, test, and package
 - **Legacy-1.0**: Security and critical fixes only
-- **Develop**: Continuous integration builds
+- **Experimental**: Continuous integration builds
 - **Feature branches**: PR validation builds
 
 ## Migration Guidelines

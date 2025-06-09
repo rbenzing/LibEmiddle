@@ -15,6 +15,7 @@ on:
         options:
           - main
           - legacy-1.0
+          - experimental
       release_type:
         description: 'Type of release'
         required: true
