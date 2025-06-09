@@ -5,27 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-- Nothing yet
-
-### Changed
-- Nothing yet
-
-### Deprecated
-- Nothing yet
-
-### Removed
-- Nothing yet
-
-### Fixed
-- Nothing yet
-
-### Security
-- Nothing yet
-
-## [2.0.0] - 2024-12-19
+## [2.0.0] - 2025-06-08
 
 ### Added
 - Complete architectural rewrite with improved separation of concerns
@@ -70,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Strengthened group key management
 - Enhanced device authentication mechanisms
 
-## [1.0.0] - 2024-XX-XX (Legacy)
+## [1.0.0] - 2024-05-10 (Legacy)
 
 ### Added
 - Initial release of LibEmiddle
