@@ -38,6 +38,11 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
     private readonly ConcurrentDictionary<string, long> _joinTimestamps = new();
     private readonly ConcurrentDictionary<string, HashSet<string>> _seenMessageIds = new();
 
+    // v2.5 Enhanced Group Management
+    private readonly ConcurrentDictionary<string, GroupInvitation> _activeInvitations = new();
+    private readonly bool _advancedGroupManagementEnabled;
+    private readonly object _statisticsLock = new object();
+
     // ISession interface properties
     public string SessionId { get; }
     public SessionType Type => SessionType.Group;
@@ -65,17 +70,20 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
     /// <param name="identityKeyPair">User's identity key pair</param>
     /// <param name="rotationStrategy">Key rotation strategy to use</param>
     /// <param name="creatorPublicKey">Public key of the group creator</param>
+    /// <param name="enableAdvancedGroupManagement">Whether to enable v2.5 advanced group management features</param>
     public GroupSession(
         string groupId,
         string groupName,
         KeyPair identityKeyPair,
         KeyRotationStrategy rotationStrategy = KeyRotationStrategy.Standard,
-        byte[]? creatorPublicKey = null)
+        byte[]? creatorPublicKey = null,
+        bool enableAdvancedGroupManagement = false)
     {
         _groupId = groupId ?? throw new ArgumentNullException(nameof(groupId));
         _identityKeyPair = identityKeyPair;
         RotationStrategy = rotationStrategy;
         CreatorPublicKey = creatorPublicKey ?? identityKeyPair.PublicKey;
+        _advancedGroupManagementEnabled = enableAdvancedGroupManagement;
 
         SessionId = $"group-{groupId}-{Guid.NewGuid():N}";
         CreatedAt = DateTime.UtcNow;
@@ -98,8 +106,18 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
             PublicKey = _identityKeyPair.PublicKey.ToArray(),
             JoinedAt = _lastRotationTimestamp,
             IsAdmin = true,
-            IsOwner = true
+            IsOwner = true,
+            // v2.5 properties
+            Role = MemberRole.Owner,
+            LastActivity = DateTime.UtcNow
         };
+
+        // Migrate to role system if advanced management is enabled
+        if (_advancedGroupManagementEnabled)
+        {
+            creatorMember.MigrateToRoleSystem();
+        }
+
         _members.TryAdd(creatorId, creatorMember);
 
         // Record our join time
@@ -967,6 +985,612 @@ public sealed class GroupSession : IGroupSession, ISession, IDisposable
             _sessionLock.Release();
             _sessionLock.Dispose();
         }
+    }
+
+    #endregion
+
+    #region v2.5 Enhanced Group Management
+
+    /// <summary>
+    /// Gets all members of the group with their roles and permissions (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// </summary>
+    /// <returns>Collection of group members with enhanced information.</returns>
+    public async Task<IReadOnlyCollection<GroupMember>> GetMembersAsync()
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            return _members.Values.Select(m => m.Clone()).ToList().AsReadOnly();
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Gets a specific member by their public key (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member to find.</param>
+    /// <returns>The group member, or null if not found.</returns>
+    public async Task<GroupMember?> GetMemberAsync(byte[] memberPublicKey)
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+        ArgumentNullException.ThrowIfNull(memberPublicKey);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            string memberId = GetMemberId(memberPublicKey);
+            return _members.TryGetValue(memberId, out var member) ? member.Clone() : null;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Changes a member's role in the group (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member.</param>
+    /// <param name="newRole">The new role to assign.</param>
+    /// <returns>True if the role was changed successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    public async Task<bool> ChangeMemberRoleAsync(byte[] memberPublicKey, MemberRole newRole)
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+        ArgumentNullException.ThrowIfNull(memberPublicKey);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot change member role: Session is terminated.");
+
+            // Check permissions - only owners and admins can change roles
+            if (!HasAdvancedPermission(GroupPermission.ManageAdmins))
+                throw new UnauthorizedAccessException("You don't have permission to change member roles.");
+
+            string memberId = GetMemberId(memberPublicKey);
+            if (!_members.TryGetValue(memberId, out var member))
+                return false;
+
+            // Cannot change owner role or demote the only owner
+            if (member.Role == MemberRole.Owner)
+                throw new InvalidOperationException("Cannot change the role of the group owner.");
+
+            // Cannot promote to owner
+            if (newRole == MemberRole.Owner)
+                throw new InvalidOperationException("Cannot promote member to owner. Transfer ownership separately.");
+
+            member.Role = newRole;
+            member.LastActivity = DateTime.UtcNow;
+
+            LoggingManager.LogInformation(nameof(GroupSession), 
+                $"Changed member role to {newRole} in group {GroupId}");
+
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Grants specific permissions to a member (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member.</param>
+    /// <param name="permissions">The permissions to grant.</param>
+    /// <returns>True if the permissions were granted successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    public async Task<bool> GrantPermissionsAsync(byte[] memberPublicKey, IEnumerable<GroupPermission> permissions)
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+        ArgumentNullException.ThrowIfNull(memberPublicKey);
+        ArgumentNullException.ThrowIfNull(permissions);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot grant permissions: Session is terminated.");
+
+            // Check permissions
+            if (!HasAdvancedPermission(GroupPermission.ManageAdmins))
+                throw new UnauthorizedAccessException("You don't have permission to grant permissions.");
+
+            string memberId = GetMemberId(memberPublicKey);
+            if (!_members.TryGetValue(memberId, out var member))
+                return false;
+
+            foreach (var permission in permissions)
+            {
+                member.CustomPermissions.Add(permission);
+            }
+
+            member.LastActivity = DateTime.UtcNow;
+
+            LoggingManager.LogInformation(nameof(GroupSession), 
+                $"Granted permissions to member in group {GroupId}");
+
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Revokes specific permissions from a member (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member.</param>
+    /// <param name="permissions">The permissions to revoke.</param>
+    /// <returns>True if the permissions were revoked successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    public async Task<bool> RevokePermissionsAsync(byte[] memberPublicKey, IEnumerable<GroupPermission> permissions)
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+        ArgumentNullException.ThrowIfNull(memberPublicKey);
+        ArgumentNullException.ThrowIfNull(permissions);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot revoke permissions: Session is terminated.");
+
+            // Check permissions
+            if (!HasAdvancedPermission(GroupPermission.ManageAdmins))
+                throw new UnauthorizedAccessException("You don't have permission to revoke permissions.");
+
+            string memberId = GetMemberId(memberPublicKey);
+            if (!_members.TryGetValue(memberId, out var member))
+                return false;
+
+            foreach (var permission in permissions)
+            {
+                member.CustomPermissions.Remove(permission);
+            }
+
+            member.LastActivity = DateTime.UtcNow;
+
+            LoggingManager.LogInformation(nameof(GroupSession), 
+                $"Revoked permissions from member in group {GroupId}");
+
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Mutes a member for a specified duration (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and ModerateMembers permission.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member to mute.</param>
+    /// <param name="duration">How long to mute the member for.</param>
+    /// <param name="reason">Optional reason for the mute.</param>
+    /// <returns>True if the member was muted successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    public async Task<bool> MuteMemberAsync(byte[] memberPublicKey, TimeSpan duration, string? reason = null)
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+        ArgumentNullException.ThrowIfNull(memberPublicKey);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot mute member: Session is terminated.");
+
+            // Check permissions
+            if (!HasAdvancedPermission(GroupPermission.ModerateMembers))
+                throw new UnauthorizedAccessException("You don't have permission to mute members.");
+
+            string memberId = GetMemberId(memberPublicKey);
+            if (!_members.TryGetValue(memberId, out var member))
+                return false;
+
+            // Cannot mute owners or admins
+            if (member.Role == MemberRole.Owner || member.Role == MemberRole.Admin)
+                throw new InvalidOperationException("Cannot mute group owners or administrators.");
+
+            member.MutedUntil = DateTime.UtcNow.Add(duration);
+            member.LastActivity = DateTime.UtcNow;
+
+            if (!string.IsNullOrEmpty(reason))
+            {
+                member.Metadata["MuteReason"] = reason;
+            }
+
+            LoggingManager.LogInformation(nameof(GroupSession), 
+                $"Muted member for {duration} in group {GroupId}. Reason: {reason ?? "None"}");
+
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Unmutes a member (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and ModerateMembers permission.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member to unmute.</param>
+    /// <returns>True if the member was unmuted successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    public async Task<bool> UnmuteMemberAsync(byte[] memberPublicKey)
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+        ArgumentNullException.ThrowIfNull(memberPublicKey);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot unmute member: Session is terminated.");
+
+            // Check permissions
+            if (!HasAdvancedPermission(GroupPermission.ModerateMembers))
+                throw new UnauthorizedAccessException("You don't have permission to unmute members.");
+
+            string memberId = GetMemberId(memberPublicKey);
+            if (!_members.TryGetValue(memberId, out var member))
+                return false;
+
+            member.MutedUntil = null;
+            member.LastActivity = DateTime.UtcNow;
+            member.Metadata.Remove("MuteReason");
+
+            LoggingManager.LogInformation(nameof(GroupSession), 
+                $"Unmuted member in group {GroupId}");
+
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Sets metadata for a group member (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member.</param>
+    /// <param name="key">The metadata key.</param>
+    /// <param name="value">The metadata value.</param>
+    /// <returns>True if the metadata was set successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    public async Task<bool> SetMemberMetadataAsync(byte[] memberPublicKey, string key, string value)
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+        ArgumentNullException.ThrowIfNull(memberPublicKey);
+        ArgumentException.ThrowIfNullOrEmpty(key);
+        ArgumentNullException.ThrowIfNull(value);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot set member metadata: Session is terminated.");
+
+            // Check if it's their own metadata or if they have admin permissions
+            string currentUserId = GetMemberId(_identityKeyPair.PublicKey);
+            string targetMemberId = GetMemberId(memberPublicKey);
+
+            if (currentUserId != targetMemberId && !HasAdvancedPermission(GroupPermission.ManageAdmins))
+                throw new UnauthorizedAccessException("You don't have permission to set metadata for other members.");
+
+            if (!_members.TryGetValue(targetMemberId, out var member))
+                return false;
+
+            member.Metadata[key] = value;
+            member.LastActivity = DateTime.UtcNow;
+
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Creates an invitation code for the group (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and AddMember permission.
+    /// </summary>
+    /// <param name="expiresIn">How long the invitation should be valid for.</param>
+    /// <param name="maxUses">Maximum number of times the invitation can be used (null for unlimited).</param>
+    /// <param name="defaultRole">The role new members will have when joining with this invitation.</param>
+    /// <returns>The invitation code.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    public async Task<string> CreateInvitationAsync(TimeSpan expiresIn, int? maxUses = null, MemberRole defaultRole = MemberRole.Member)
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot create invitation: Session is terminated.");
+
+            // Check permissions
+            if (!HasAdvancedPermission(GroupPermission.AddMember))
+                throw new UnauthorizedAccessException("You don't have permission to create invitations.");
+
+            var invitation = new GroupInvitation
+            {
+                InvitationCode = Guid.NewGuid().ToString("N"),
+                GroupId = GroupId,
+                CreatedBy = _identityKeyPair.PublicKey,
+                CreatedAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.Add(expiresIn),
+                MaxUses = maxUses,
+                DefaultRole = defaultRole
+            };
+
+            _activeInvitations.TryAdd(invitation.InvitationCode, invitation);
+
+            LoggingManager.LogInformation(nameof(GroupSession), 
+                $"Created invitation {invitation.InvitationCode} for group {GroupId}");
+
+            return invitation.InvitationCode;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Revokes an invitation code (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and AddMember permission.
+    /// </summary>
+    /// <param name="invitationCode">The invitation code to revoke.</param>
+    /// <returns>True if the invitation was revoked successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    public async Task<bool> RevokeInvitationAsync(string invitationCode)
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+        ArgumentException.ThrowIfNullOrEmpty(invitationCode);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot revoke invitation: Session is terminated.");
+
+            // Check permissions
+            if (!HasAdvancedPermission(GroupPermission.AddMember))
+                throw new UnauthorizedAccessException("You don't have permission to revoke invitations.");
+
+            if (!_activeInvitations.TryGetValue(invitationCode, out var invitation))
+                return false;
+
+            invitation.Revoke(_identityKeyPair.PublicKey, "Manually revoked");
+
+            LoggingManager.LogInformation(nameof(GroupSession), 
+                $"Revoked invitation {invitationCode} for group {GroupId}");
+
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Joins the group using an invitation code (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// </summary>
+    /// <param name="invitationCode">The invitation code to use.</param>
+    /// <param name="memberPublicKey">The public key of the new member.</param>
+    /// <returns>True if the member joined successfully.</returns>
+    public async Task<bool> JoinWithInvitationAsync(string invitationCode, byte[] memberPublicKey)
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+        ArgumentException.ThrowIfNullOrEmpty(invitationCode);
+        ArgumentNullException.ThrowIfNull(memberPublicKey);
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            if (State == SessionState.Terminated)
+                throw new InvalidOperationException("Cannot join group: Session is terminated.");
+
+            if (!_activeInvitations.TryGetValue(invitationCode, out var invitation))
+                return false;
+
+            if (!invitation.IsValid)
+                return false;
+
+            // Add the member
+            string memberId = GetMemberId(memberPublicKey);
+            if (_members.ContainsKey(memberId))
+                return false; // Already a member
+
+            var newMember = new GroupMember
+            {
+                PublicKey = memberPublicKey,
+                JoinedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Role = invitation.DefaultRole,
+                CustomPermissions = new HashSet<GroupPermission>(invitation.CustomPermissions),
+                LastActivity = DateTime.UtcNow,
+                InvitationCode = invitationCode
+            };
+
+            // Set legacy flags for backward compatibility
+            if (invitation.DefaultRole == MemberRole.Admin)
+                newMember.IsAdmin = true;
+            else if (invitation.DefaultRole == MemberRole.Owner)
+                newMember.IsOwner = true;
+
+            _members.TryAdd(memberId, newMember);
+            invitation.RecordUsage(memberPublicKey);
+
+            LoggingManager.LogInformation(nameof(GroupSession), 
+                $"Member joined group {GroupId} using invitation {invitationCode}");
+
+            return true;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Gets group statistics and insights (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// </summary>
+    /// <returns>Group statistics including member activity, message counts, etc.</returns>
+    public async Task<GroupStatistics> GetGroupStatisticsAsync()
+    {
+        ThrowIfDisposed();
+        ThrowIfAdvancedGroupManagementDisabled();
+
+        await _sessionLock.WaitAsync();
+        try
+        {
+            var statistics = new GroupStatistics
+            {
+                TotalMembers = _members.Count,
+                GroupCreatedAt = CreatedAt,
+                GeneratedAt = DateTime.UtcNow
+            };
+
+            // Calculate member statistics
+            var activeThreshold = DateTime.UtcNow.AddDays(-7);
+            statistics.ActiveMembers = _members.Values.Count(m => m.LastActivity >= activeThreshold);
+            statistics.MutedMembers = _members.Values.Count(m => m.IsMuted);
+
+            // Role breakdown
+            statistics.MembersByRole = _members.Values
+                .GroupBy(m => m.Role)
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            // Find most active member
+            var mostActiveKvp = _members.Values
+                .Where(m => m.LastActivity.HasValue)
+                .OrderByDescending(m => m.LastActivity)
+                .FirstOrDefault();
+
+            if (mostActiveKvp != null)
+            {
+                statistics.MostActiveMember = mostActiveKvp.PublicKey;
+                statistics.LastMessageAt = mostActiveKvp.LastActivity;
+            }
+
+            // Invitation statistics
+            statistics.ActiveInvitations = _activeInvitations.Values.Count(i => i.IsValid);
+            statistics.MembersJoinedViaInvitation = _members.Values.Count(m => !string.IsNullOrEmpty(m.InvitationCode));
+
+            // Find last member joined
+            var lastJoined = _members.Values
+                .OrderByDescending(m => m.JoinedAt)
+                .FirstOrDefault();
+
+            if (lastJoined != null)
+            {
+                statistics.LastMemberJoinedAt = DateTimeOffset.FromUnixTimeMilliseconds(lastJoined.JoinedAt).UtcDateTime;
+            }
+
+            // Calculate health score
+            statistics.HealthScore = CalculateGroupHealthScore(statistics);
+
+            return statistics;
+        }
+        finally
+        {
+            _sessionLock.Release();
+        }
+    }
+
+    #endregion
+
+    #region v2.5 Helper Methods
+
+    private void ThrowIfAdvancedGroupManagementDisabled()
+    {
+        if (!_advancedGroupManagementEnabled)
+        {
+            throw new InvalidOperationException(
+                "Advanced group management is not enabled. Enable V25Features.EnableAdvancedGroupManagement.");
+        }
+    }
+
+    private bool HasAdvancedPermission(GroupPermission permission)
+    {
+        if (!_advancedGroupManagementEnabled)
+            return false;
+
+        string currentUserId = GetMemberId(_identityKeyPair.PublicKey);
+        if (!_members.TryGetValue(currentUserId, out var currentMember))
+            return false;
+
+        return currentMember.HasPermission(permission);
+    }
+
+    private int CalculateGroupHealthScore(GroupStatistics stats)
+    {
+        int score = 100;
+
+        // Deduct points for low activity
+        if (stats.MemberActivityRate < 0.3) score -= 20;
+        else if (stats.MemberActivityRate < 0.5) score -= 10;
+
+        // Deduct points for no recent messages
+        if (stats.LastMessageAt.HasValue)
+        {
+            var daysSinceLastMessage = (DateTime.UtcNow - stats.LastMessageAt.Value).TotalDays;
+            if (daysSinceLastMessage > 30) score -= 30;
+            else if (daysSinceLastMessage > 7) score -= 15;
+        }
+        else
+        {
+            score -= 40; // No messages ever
+        }
+
+        // Deduct points for high mute ratio
+        if (stats.TotalMembers > 0)
+        {
+            var muteRatio = (double)stats.MutedMembers / stats.TotalMembers;
+            if (muteRatio > 0.3) score -= 20;
+            else if (muteRatio > 0.1) score -= 10;
+        }
+
+        // Deduct points for missing admins in large groups
+        if (stats.TotalMembers > 10 && !stats.MembersByRole.ContainsKey(MemberRole.Admin))
+            score -= 15;
+
+        return Math.Max(0, Math.Min(100, score));
     }
 
     #endregion

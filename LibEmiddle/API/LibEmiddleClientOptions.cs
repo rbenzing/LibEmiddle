@@ -1,4 +1,5 @@
 ﻿using LibEmiddle.Domain.Enums;
+using LibEmiddle.Domain;
 
 namespace LibEmiddle.API;
 
@@ -177,6 +178,99 @@ public sealed class LibEmiddleClientOptions
     /// </summary>
     public BackupOptions BackupOptions { get; set; } = new();
 
+    // --- v2.5 Enhanced Features (Additive) ---
+
+    /// <summary>
+    /// Gets or sets the cryptographic key exchange mode to use (v2.5).
+    /// Defaults to Classical for backward compatibility.
+    /// </summary>
+    public KeyExchangeMode KeyExchangeMode { get; set; } = KeyExchangeMode.Classical;
+
+    /// <summary>
+    /// Gets or sets whether to enable post-quantum cryptography fallback (v2.5).
+    /// When enabled, the system will attempt to use hybrid crypto when available.
+    /// </summary>
+    public bool EnablePostQuantumFallback { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets message batching configuration (v2.5).
+    /// When null, batching is disabled (default behavior).
+    /// </summary>
+    public BatchingOptions? BatchingOptions { get; set; } = null;
+
+    /// <summary>
+    /// Gets or sets the post-quantum cryptography configuration (v2.5).
+    /// Only used when V25Features.EnablePostQuantumPreparation is true and KeyExchangeMode is Hybrid or PostQuantum.
+    /// </summary>
+    public PostQuantumOptions? PostQuantumOptions { get; set; } = null;
+
+    /// <summary>
+    /// Gets or sets resilience configuration for network operations (v2.5).
+    /// When null, basic retry logic is used (existing behavior).
+    /// </summary>
+    public ResilienceOptions? ResilienceOptions { get; set; } = null;
+
+    /// <summary>
+    /// Gets or sets connection pooling configuration (v2.5).
+    /// When null, no connection pooling is used (existing behavior).
+    /// </summary>
+    public ConnectionPoolOptions? ConnectionPoolOptions { get; set; } = null;
+
+    /// <summary>
+    /// Gets or sets enhanced backup configuration (v2.5).
+    /// When null, uses the legacy BackupOptions configuration.
+    /// </summary>
+    public Domain.BackupOptions? EnhancedBackupOptions { get; set; } = null;
+
+    /// <summary>
+    /// Gets or sets WebRTC transport configuration (v2.5).
+    /// Only used when TransportType is WebRTC and V25Features.EnableWebRTCTransport is true.
+    /// </summary>
+    public WebRTCOptions? WebRTCOptions { get; set; } = null;
+
+    /// <summary>
+    /// Gets or sets advanced key rotation policy configuration (v2.5).
+    /// When null, uses the default rotation strategy (DefaultRotationStrategy property).
+    /// </summary>
+    public KeyRotationPolicy? AdvancedKeyRotationPolicy { get; set; } = null;
+
+    /// <summary>
+    /// Gets or sets feature flags for v2.5 functionality (v2.5).
+    /// Controls which new features are enabled.
+    /// </summary>
+    public FeatureFlags V25Features { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets multi-device configuration options (v2.5).
+    /// Provides centralized configuration for multi-device features.
+    /// </summary>
+    public MultiDeviceOptions MultiDeviceOptions { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets the user agent string to append v2.5 information (v2.5).
+    /// When null, uses the default UserAgent property.
+    /// </summary>
+    public string? V25UserAgent { get; set; } = null;
+
+    /// <summary>
+    /// Gets the effective user agent string including v2.5 information.
+    /// </summary>
+    public string EffectiveUserAgent => V25UserAgent ?? $"{UserAgent} (v2.5-enabled)";
+
+    /// <summary>
+    /// Gets whether any v2.5 features are enabled.
+    /// </summary>
+    public bool HasV25Features => V25Features.EnableAsyncMessageStreams ||
+                                  V25Features.EnableMessageBatching ||
+                                  V25Features.EnableAdvancedGroupManagement ||
+                                  V25Features.EnableHealthMonitoring ||
+                                  V25Features.EnableFluentBuilder ||
+                                  V25Features.EnablePluggableStorage ||
+                                  V25Features.EnablePostQuantumPreparation ||
+                                  V25Features.EnableWebRTCTransport ||
+                                  V25Features.EnableConnectionPooling ||
+                                  V25Features.EnableSessionBackup;
+
     /// <summary>
     /// Validates the configuration options and returns any validation errors.
     /// </summary>
@@ -205,6 +299,15 @@ public sealed class LibEmiddleClientOptions
                 {
                     errors.Add($"ServerEndpoint scheme must be {expectedScheme} or {expectedSchemeSecure} for {TransportType} transport");
                 }
+            }
+        }
+
+        // Validate WebRTC transport (v2.5)
+        if (TransportType == TransportType.WebRTC)
+        {
+            if (!V25Features.EnableWebRTCTransport)
+            {
+                errors.Add("WebRTC transport requires V25Features.EnableWebRTCTransport to be enabled");
             }
         }
 
@@ -271,6 +374,96 @@ public sealed class LibEmiddleClientOptions
             }
         }
 
+        // Validate v2.5 feature configurations
+        if (!V25Features.IsValid())
+        {
+            errors.Add("V25Features configuration is invalid");
+        }
+
+        // Validate v2.5 optional configurations
+        if (BatchingOptions != null && !BatchingOptions.IsValid())
+        {
+            errors.Add("BatchingOptions configuration is invalid");
+        }
+
+        if (PostQuantumOptions != null)
+        {
+            var pqErrors = PostQuantumOptions.Validate();
+            if (pqErrors.Any())
+            {
+                errors.AddRange(pqErrors.Select(e => $"PostQuantumOptions: {e}"));
+            }
+        }
+
+        if (ResilienceOptions != null && !ResilienceOptions.IsValid())
+        {
+            errors.Add("ResilienceOptions configuration is invalid");
+        }
+
+        if (ConnectionPoolOptions != null && !ConnectionPoolOptions.IsValid())
+        {
+            errors.Add("ConnectionPoolOptions configuration is invalid");
+        }
+
+        if (EnhancedBackupOptions != null && !EnhancedBackupOptions.IsValid())
+        {
+            errors.Add("EnhancedBackupOptions configuration is invalid");
+        }
+
+        // Validate feature flag dependencies
+        if (EnablePostQuantumFallback && KeyExchangeMode == KeyExchangeMode.Classical)
+        {
+            errors.Add("EnablePostQuantumFallback requires KeyExchangeMode to be Hybrid or PostQuantum");
+        }
+
+        if (BatchingOptions != null && !V25Features.EnableMessageBatching)
+        {
+            errors.Add("BatchingOptions requires V25Features.EnableMessageBatching to be enabled");
+        }
+
+        if (PostQuantumOptions != null && !V25Features.EnablePostQuantumPreparation)
+        {
+            errors.Add("PostQuantumOptions requires V25Features.EnablePostQuantumPreparation to be enabled");
+        }
+
+        if (PostQuantumOptions != null && KeyExchangeMode == KeyExchangeMode.Classical)
+        {
+            errors.Add("PostQuantumOptions requires KeyExchangeMode to be Hybrid or PostQuantum");
+        }
+
+        if (ConnectionPoolOptions != null && !V25Features.EnableConnectionPooling)
+        {
+            errors.Add("ConnectionPoolOptions requires V25Features.EnableConnectionPooling to be enabled");
+        }
+
+        if (WebRTCOptions != null && !V25Features.EnableWebRTCTransport)
+        {
+            errors.Add("WebRTCOptions requires V25Features.EnableWebRTCTransport to be enabled");
+        }
+
+        if (WebRTCOptions != null && TransportType != TransportType.WebRTC)
+        {
+            errors.Add("WebRTCOptions requires TransportType to be WebRTC");
+        }
+
+        if (WebRTCOptions != null)
+        {
+            var webrtcErrors = WebRTCOptions.Validate();
+            if (webrtcErrors.Any())
+            {
+                errors.AddRange(webrtcErrors.Select(e => $"WebRTCOptions: {e}"));
+            }
+        }
+
+        if (AdvancedKeyRotationPolicy != null)
+        {
+            var rotationErrors = AdvancedKeyRotationPolicy.Validate();
+            if (rotationErrors.Any())
+            {
+                errors.AddRange(rotationErrors.Select(e => $"AdvancedKeyRotationPolicy: {e}"));
+            }
+        }
+
         // Validate nested options
         errors.AddRange(RetryOptions.Validate());
         errors.AddRange(RateLimitOptions.Validate());
@@ -319,7 +512,20 @@ public sealed class LibEmiddleClientOptions
             RetryOptions = RetryOptions.Clone(),
             RateLimitOptions = RateLimitOptions.Clone(),
             SecurityPolicy = SecurityPolicy.Clone(),
-            BackupOptions = BackupOptions.Clone()
+            BackupOptions = BackupOptions.Clone(),
+            // v2.5 properties
+            KeyExchangeMode = KeyExchangeMode,
+            EnablePostQuantumFallback = EnablePostQuantumFallback,
+            BatchingOptions = BatchingOptions,
+            PostQuantumOptions = PostQuantumOptions?.Clone(),
+            ResilienceOptions = ResilienceOptions,
+            ConnectionPoolOptions = ConnectionPoolOptions,
+            EnhancedBackupOptions = EnhancedBackupOptions,
+            WebRTCOptions = WebRTCOptions?.Clone(),
+            AdvancedKeyRotationPolicy = AdvancedKeyRotationPolicy?.Clone(),
+            V25Features = V25Features, // FeatureFlags is a class, so this is a reference copy
+            MultiDeviceOptions = MultiDeviceOptions.Clone(),
+            V25UserAgent = V25UserAgent
         };
     }
 }
@@ -505,6 +711,17 @@ public sealed class SecurityPolicyOptions
     public long MaxClockSkewMs { get; set; } = 300000; // 5 minutes
 
     /// <summary>
+    /// Gets or sets whether to enable post-quantum cryptography fallback (v2.5).
+    /// When enabled, the system will attempt to use hybrid crypto when available.
+    /// </summary>
+    public bool EnablePostQuantumFallback { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the cryptographic key exchange mode to use (v2.5).
+    /// </summary>
+    public KeyExchangeMode KeyExchangeMode { get; set; } = KeyExchangeMode.Classical;
+
+    /// <summary>
     /// Validates the security policy options.
     /// </summary>
     public List<string> Validate()
@@ -535,7 +752,9 @@ public sealed class SecurityPolicyOptions
             RequireMessageAuthentication = RequireMessageAuthentication,
             MinimumProtocolVersion = MinimumProtocolVersion,
             AllowInsecureConnections = AllowInsecureConnections,
-            MaxClockSkewMs = MaxClockSkewMs
+            MaxClockSkewMs = MaxClockSkewMs,
+            EnablePostQuantumFallback = EnablePostQuantumFallback,
+            KeyExchangeMode = KeyExchangeMode
         };
     }
 }
@@ -607,6 +826,72 @@ public sealed class BackupOptions
             BackupIntervalHours = BackupIntervalHours,
             MaxBackupFiles = MaxBackupFiles,
             EncryptBackups = EncryptBackups
+        };
+    }
+}
+
+/// <summary>
+/// Multi-device configuration options (v2.5).
+/// </summary>
+public sealed class MultiDeviceOptions
+{
+    /// <summary>
+    /// Gets or sets whether multi-device support is enabled.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the maximum number of linked devices allowed.
+    /// </summary>
+    public int MaxLinkedDevices { get; set; } = 10;
+
+    /// <summary>
+    /// Gets or sets whether automatic synchronization is enabled.
+    /// </summary>
+    public bool AutomaticSyncEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the device sync timeout in milliseconds.
+    /// </summary>
+    public int DeviceSyncTimeoutMs { get; set; } = 30000;
+
+    /// <summary>
+    /// Gets or sets whether to enable device link verification.
+    /// </summary>
+    public bool EnableDeviceLinkVerification { get; set; } = true;
+
+    /// <summary>
+    /// Validates the multi-device options.
+    /// </summary>
+    public List<string> Validate()
+    {
+        var errors = new List<string>();
+
+        if (MaxLinkedDevices < 1 || MaxLinkedDevices > 100)
+        {
+            errors.Add("MaxLinkedDevices must be between 1 and 100");
+        }
+
+        if (DeviceSyncTimeoutMs < 5000 || DeviceSyncTimeoutMs > 300000)
+        {
+            errors.Add("DeviceSyncTimeoutMs must be between 5,000 and 300,000");
+        }
+
+        return errors;
+    }
+
+    /// <summary>
+    /// Creates a copy of these multi-device options.
+    /// </summary>
+    public MultiDeviceOptions Clone()
+    {
+        return new MultiDeviceOptions
+        {
+            Enabled = Enabled,
+            MaxLinkedDevices = MaxLinkedDevices,
+            AutomaticSyncEnabled = AutomaticSyncEnabled,
+            DeviceSyncTimeoutMs = DeviceSyncTimeoutMs,
+            EnableDeviceLinkVerification = EnableDeviceLinkVerification
         };
     }
 }

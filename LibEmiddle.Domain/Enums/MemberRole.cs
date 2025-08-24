@@ -1,23 +1,28 @@
 ﻿namespace LibEmiddle.Domain.Enums
 {
     /// <summary>
-    /// Represents a member's role in a group
+    /// Represents a member's role in a group (v2.5 enhanced)
     /// </summary>
     public enum MemberRole
     {
         /// <summary>
-        /// Group member
+        /// Regular group member with basic permissions
         /// </summary>
         Member = 0,
 
         /// <summary>
-        /// Group admin
+        /// Group moderator with message moderation capabilities
         /// </summary>
-        Admin = 1,
+        Moderator = 1,
 
         /// <summary>
-        /// Group owner
+        /// Group admin with member management capabilities
         /// </summary>
-        Owner = 2
+        Admin = 2,
+
+        /// <summary>
+        /// Group owner with full control
+        /// </summary>
+        Owner = 3
     }
 }

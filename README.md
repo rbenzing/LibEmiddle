@@ -4,15 +4,15 @@
 ![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.5.0-blue)
 
-A comprehensive, production-ready end-to-end encryption library for .NET applications implementing modern cryptographic protocols with a focus on security, privacy, and usability.
+A comprehensive, production-ready end-to-end encryption library for .NET applications implementing modern cryptographic protocols with a focus on security, privacy, and usability. Now with advanced features including post-quantum cryptography preparation, WebRTC transport, message batching, and enterprise-grade monitoring capabilities.
 
 ## 🚀 Quick Start
 
 ```csharp
 // Install via NuGet
-// dotnet add package LibEmiddle --version 2.0.0
+// dotnet add package LibEmiddle --version 2.5.0
 
 using LibEmiddle.API;
 using LibEmiddle.Domain.Enums;
@@ -42,18 +42,25 @@ var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 - **Double Ratchet Algorithm** - Continuous key rotation for forward secrecy
 - **AES-GCM Encryption** - Authenticated encryption with strong integrity guarantees
 - **Ed25519 & X25519** - Modern elliptic curve cryptography for digital signatures and key exchange
+- **Post-Quantum Cryptography** - Preparation for quantum-resistant algorithms (v2.5)
+- **Advanced Key Rotation** - Sophisticated key rotation policies and monitoring
 
 ### 💬 Communication Patterns
 - **One-to-One Messaging** - Secure private conversations with forward secrecy
 - **Group Messaging** - Efficient encrypted group chats with advanced member management
 - **Multi-Device Support** - Seamless synchronization and device linking
 - **Asynchronous Communication** - Robust mailbox system with delivery and read receipts
+- **WebRTC Transport** - Peer-to-peer encrypted communication (v2.5)
+- **Message Batching** - Efficient bulk messaging with compression support (v2.5)
 
 ### 🏗️ Architecture Highlights
 - **Unified Client API** - Single `LibEmiddleClient` for all operations
 - **Modular Design** - Pluggable transport, storage, and crypto providers
-- **Session Management** - Automatic session persistence and recovery
+- **Session Management** - Automatic session persistence and recovery with backup capabilities
 - **Event-Driven** - Real-time message handling with comprehensive events
+- **Feature Flags** - Gradual rollout and configuration of new capabilities (v2.5)
+- **Enterprise Monitoring** - Built-in diagnostics and resilience management (v2.5)
+- **Connection Pooling** - Optimized connection management for high throughput (v2.5)
 
 ## 💬 Individual Chat Sessions
 
@@ -306,6 +313,143 @@ session.StateChanged += (sender, args) =>
 };
 ```
 
+## 🆕 Advanced Features (v2.5)
+
+### 🌐 WebRTC Transport
+```csharp
+// Configure WebRTC transport for peer-to-peer communication
+var webRtcOptions = new LibEmiddleClientOptions
+{
+    TransportType = TransportType.WebRTC,
+    WebRTCOptions = new WebRTCOptions
+    {
+        ICEServers = new[] { "stun:stun.l.google.com:19302" },
+        NetworkQualityThreshold = WebRTCNetworkQualityLevel.Good,
+        EnableAdaptiveBitrate = true
+    }
+};
+
+using var client = new LibEmiddleClient(webRtcOptions);
+await client.InitializeAsync();
+
+// Establish direct peer connection
+var peerSession = await client.CreateWebRTCSessionAsync(targetPeerKey);
+```
+
+### 📦 Message Batching
+```csharp
+// Enable message batching for improved throughput
+var options = new LibEmiddleClientOptions
+{
+    FeatureFlags = new FeatureFlags
+    {
+        EnableMessageBatching = true
+    },
+    BatchingOptions = new BatchingOptions
+    {
+        MaxBatchSize = 50,
+        BatchTimeoutMs = 1000,
+        CompressionLevel = CompressionLevel.Balanced
+    }
+};
+
+// Messages are automatically batched and compressed
+await client.SendChatMessageAsync(recipientKey, "Message 1");
+await client.SendChatMessageAsync(recipientKey, "Message 2");
+await client.SendChatMessageAsync(recipientKey, "Message 3");
+// All three messages sent in a single compressed batch
+```
+
+### 🔐 Post-Quantum Cryptography Preparation
+```csharp
+// Configure post-quantum crypto algorithms (preparation for future)
+var options = new LibEmiddleClientOptions
+{
+    PostQuantumOptions = new PostQuantumOptions
+    {
+        Algorithm = PostQuantumAlgorithm.Kyber1024,
+        EnableHybridMode = true, // Classical + Post-quantum
+        KeyExchangeMode = KeyExchangeMode.Hybrid
+    }
+};
+
+// The system will use hybrid classical+PQ when available
+using var client = new LibEmiddleClient(options);
+```
+
+### 📊 Enterprise Monitoring & Diagnostics
+```csharp
+// Enable comprehensive monitoring and diagnostics
+var options = new LibEmiddleClientOptions
+{
+    FeatureFlags = new FeatureFlags
+    {
+        EnableDiagnostics = true,
+        EnableResilienceManager = true
+    },
+    ResilienceOptions = new ResilienceOptions
+    {
+        RetryPolicy = RetryPolicy.ExponentialBackoff,
+        HealthCheckIntervalMs = 30000,
+        EnableFailover = true
+    }
+};
+
+using var client = new LibEmiddleClient(options);
+
+// Access diagnostics information
+var diagnostics = client.GetDiagnostics();
+Console.WriteLine($"Active Sessions: {diagnostics.ActiveSessions}");
+Console.WriteLine($"Messages Sent: {diagnostics.MessagesSent}");
+Console.WriteLine($"Network Quality: {diagnostics.NetworkQuality}");
+
+// Monitor resilience events
+client.ResilienceManager.ConnectionRestored += (sender, args) =>
+{
+    Console.WriteLine($"Connection restored after {args.DowntimeMs}ms");
+};
+```
+
+### 🏊‍♂️ Connection Pooling
+```csharp
+// Configure connection pooling for high-throughput scenarios
+var options = new LibEmiddleClientOptions
+{
+    ConnectionPoolOptions = new ConnectionPoolOptions
+    {
+        MinPoolSize = 5,
+        MaxPoolSize = 20,
+        ConnectionTimeoutMs = 30000,
+        IdleTimeoutMs = 300000,
+        EnableLoadBalancing = true
+    }
+};
+
+// Connections are automatically managed and reused
+using var client = new LibEmiddleClient(options);
+```
+
+### 🔄 Advanced Key Rotation
+```csharp
+// Configure sophisticated key rotation policies
+var rotationPolicy = new KeyRotationPolicy
+{
+    Strategy = KeyRotationStrategy.Adaptive,
+    TimeBasedRotationIntervalHours = 24,
+    MessageCountThreshold = 10000,
+    RiskBasedRotation = true,
+    BackupKeyCount = 3
+};
+
+await client.SetAdvancedKeyRotationPolicyAsync(sessionId, rotationPolicy);
+
+// Monitor key rotation events
+client.KeyRotated += (sender, args) =>
+{
+    Console.WriteLine($"Keys rotated for session {args.SessionId}: {args.RotationReason}");
+};
+```
+
 ## 🛡️ Security Features
 
 ### Forward Secrecy & Post-Compromise Security
@@ -327,12 +471,12 @@ session.StateChanged += (sender, args) =>
 
 ### NuGet Package
 ```bash
-dotnet add package LibEmiddle --version 2.0.0
+dotnet add package LibEmiddle --version 2.5.0
 ```
 
 ### Package Manager Console
 ```powershell
-Install-Package LibEmiddle -Version 2.0.0
+Install-Package LibEmiddle -Version 2.5.0
 ```
 
 ### Requirements
@@ -340,15 +484,33 @@ Install-Package LibEmiddle -Version 2.0.0
 - Windows, Linux, or macOS
 - libsodium native library (included in package)
 
-## 🔄 Migration from v1.x
+## 🔄 Migration Guide
 
-Version 2.0 introduces breaking changes. See [CHANGELOG.md](CHANGELOG.md) for detailed migration instructions.
+### From v2.0 to v2.5
+Version 2.5 is backward compatible with v2.0. New features are opt-in via `FeatureFlags`:
 
-### Key Changes:
-- New unified `LibEmiddleClient` API
-- Enhanced session management
-- Improved security protocols
-- Better error handling and logging
+```csharp
+var options = new LibEmiddleClientOptions
+{
+    FeatureFlags = new FeatureFlags
+    {
+        EnableMessageBatching = true,      // Opt-in to batching
+        EnableDiagnostics = true,          // Opt-in to monitoring
+        EnableAdvancedGroupManagement = true // Opt-in to enhanced groups
+    }
+};
+```
+
+### From v1.x to v2.x
+Version 2.x introduces breaking changes. See [CHANGELOG.md](CHANGELOG.md) for detailed migration instructions.
+
+### Key Changes in v2.5:
+- **Feature Flags System** - Gradual rollout of new capabilities
+- **WebRTC Transport** - Peer-to-peer encrypted communication
+- **Message Batching** - Improved performance with compression
+- **Post-Quantum Preparation** - Future-ready cryptographic interfaces
+- **Enterprise Monitoring** - Built-in diagnostics and resilience management
+- **Advanced Key Rotation** - Sophisticated rotation policies
 
 ### Migration Example:
 ```csharp
@@ -376,11 +538,25 @@ We welcome contributions! Please see our [contributing guidelines](CONTRIBUTING.
 4. Add tests for new functionality
 5. Submit a pull request
 
+## 📚 Documentation
+
+The [Documentation/](Documentation/) folder contains comprehensive technical documentation including:
+
+- **Architecture Diagrams**: Full system architecture and component interactions
+- **Sequence Diagrams**: Detailed protocol flows for all major operations
+  - 1-to-1 Chat establishment and messaging
+  - Group Chat creation and management
+  - Device linking and revocation processes
+  - Advanced key rotation workflows
+  - Post-quantum key exchange preparation
+  - Message batching and compression flows
+- **Technical Specifications**: In-depth coverage of cryptographic protocols and security features
+
 ## 📞 Support
 
 - **Issues**: [GitHub Issues](https://github.com/rbenzing/LibEmiddle/issues)
 - **Security**: For security concerns, email Russell Benzing at [me@russellbenzing.com]
-- **Documentation**: See [docs/](docs/) folder for detailed documentation
+- **Documentation**: See [Documentation/](Documentation/) folder for detailed technical documentation and sequence diagrams
 
 ## 🔗 References
 

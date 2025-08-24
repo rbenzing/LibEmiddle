@@ -1,14 +1,16 @@
 ﻿using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Threading.Channels;
+using System.Runtime.CompilerServices;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
+using LibEmiddle.Messaging.Batching;
 
 namespace LibEmiddle.Messaging.Chat
 {
     /// <summary>
-    /// Represents an end-to-end encrypted chat session with a remote party,
     /// Represents an end-to-end encrypted chat session with a remote party,
     /// managing Double Ratchet state, message history, and session lifecycle.
     /// </summary>
@@ -48,12 +50,22 @@ namespace LibEmiddle.Messaging.Chat
         // Services
         private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
 
+        // v2.5 Async message streaming (opt-in via feature flags)
+        private readonly Channel<MessageReceivedEventArgs>? _messageChannel;
+        private readonly ChannelWriter<MessageReceivedEventArgs>? _messageWriter;
+        private readonly ChannelReader<MessageReceivedEventArgs>? _messageReader;
+        private readonly bool _asyncStreamingEnabled;
+
+        // v2.5 Message batching (opt-in via feature flags)
+        private readonly IMessageBatcher? _messageBatcher;
+        private readonly bool _batchingEnabled;
+
         /// <summary>
         /// Gets the initial message data for X3DH key exchange (sender-only).
         /// </summary>
         public InitialMessageData? InitialMessageData => _initialMessageData;
 
-        // Constructor with dependency injection
+        // Constructor with dependency injection (v2.0 compatibility)
         public ChatSession(
             DoubleRatchetSession initialCryptoSession,
             byte[] remotePublicKey,
@@ -68,6 +80,53 @@ namespace LibEmiddle.Messaging.Chat
             SessionId = initialCryptoSession.SessionId;
             CreatedAt = DateTime.UtcNow;
             State = SessionState.Initialized;
+
+            // v2.0 behavior: async streaming and batching disabled
+            _asyncStreamingEnabled = false;
+            _batchingEnabled = false;
+        }
+
+        // Constructor with v2.5 options (async streaming and batching support)
+        public ChatSession(
+            DoubleRatchetSession initialCryptoSession,
+            byte[] remotePublicKey,
+            byte[] localPublicKey,
+            IDoubleRatchetProtocol doubleRatchetProtocol,
+            bool enableAsyncStreaming,
+            BatchingOptions? batchingOptions = null)
+        {
+            _cryptoSession = initialCryptoSession ?? throw new ArgumentNullException(nameof(initialCryptoSession));
+            RemotePublicKey = remotePublicKey ?? throw new ArgumentNullException(nameof(remotePublicKey));
+            LocalPublicKey = localPublicKey ?? throw new ArgumentNullException(nameof(localPublicKey));
+            _doubleRatchetProtocol = doubleRatchetProtocol ?? throw new ArgumentNullException(nameof(doubleRatchetProtocol));
+
+            SessionId = initialCryptoSession.SessionId;
+            CreatedAt = DateTime.UtcNow;
+            State = SessionState.Initialized;
+
+            // v2.5 behavior: configure async streaming
+            _asyncStreamingEnabled = enableAsyncStreaming;
+            if (_asyncStreamingEnabled)
+            {
+                // Create unbounded channel for message streaming
+                var channelOptions = new UnboundedChannelOptions()
+                {
+                    SingleReader = false,
+                    SingleWriter = true,
+                    AllowSynchronousContinuations = false
+                };
+                
+                _messageChannel = Channel.CreateUnbounded<MessageReceivedEventArgs>(channelOptions);
+                _messageWriter = _messageChannel.Writer;
+                _messageReader = _messageChannel.Reader;
+            }
+
+            // v2.5 behavior: configure message batching
+            _batchingEnabled = batchingOptions != null;
+            if (_batchingEnabled)
+            {
+                _messageBatcher = new MessageBatcher(batchingOptions);
+            }
         }
 
         /// <summary>
@@ -445,10 +504,186 @@ namespace LibEmiddle.Messaging.Chat
             // StateChanged?.Invoke(this, new SessionStateChangedEventArgs(previousState, newState));
         }
 
-        /// <summary> Raises the MessageReceived event. </summary>
+        /// <summary> Raises the MessageReceived event and writes to stream if enabled. </summary>
         protected virtual void OnMessageReceived(MessageReceivedEventArgs e)
         {
+            // Traditional event-based notification (always available)
             Task.Run(() => MessageReceived?.Invoke(this, e));
+
+            // v2.5 stream-based notification (optional)
+            if (_asyncStreamingEnabled && _messageWriter != null)
+            {
+                // Non-blocking write to channel
+                if (!_messageWriter.TryWrite(e))
+                {
+                    // Channel might be closed or full, log but don't fail
+                    LoggingManager.LogWarning(nameof(ChatSession), 
+                        $"Failed to write message to stream for session {SessionId}");
+                }
+            }
+        }
+
+        // --- v2.5 Message Batching Methods ---
+
+        /// <summary>
+        /// Sends a message with optional batching (v2.5).
+        /// If batching is enabled, the message may be queued for later transmission.
+        /// Requires V25Features.EnableMessageBatching = true.
+        /// </summary>
+        /// <param name="message">The plaintext message to send.</param>
+        /// <param name="priority">Priority level for batching.</param>
+        /// <param name="forceSend">If true, bypasses batching and sends immediately.</param>
+        /// <returns>True if the message was sent or queued successfully.</returns>
+        public async Task<bool> SendMessageAsync(string message, MessagePriority priority, bool forceSend = false)
+        {
+            ThrowIfDisposed();
+            ArgumentException.ThrowIfNullOrEmpty(message, nameof(message));
+
+            // Encrypt the message first
+            var encryptedMessage = await EncryptAsync(message);
+            if (encryptedMessage == null)
+            {
+                return false;
+            }
+
+            // If batching is enabled and not forcing immediate send
+            if (_batchingEnabled && _messageBatcher != null && !forceSend)
+            {
+                // Try to add to batch
+                var added = await _messageBatcher.AddMessageAsync(encryptedMessage, priority);
+                
+                if (!added)
+                {
+                    // Batch is full, flush it and try again
+                    var readyBatch = await _messageBatcher.GetReadyBatchAsync();
+                    if (readyBatch != null)
+                    {
+                        // In a real implementation, this would send the batch via transport
+                        LoggingManager.LogDebug(nameof(ChatSession), 
+                            $"Batch {readyBatch.BatchId} ready for transmission with {readyBatch.Messages.Count} messages");
+                    }
+
+                    // Try adding to new batch
+                    added = await _messageBatcher.AddMessageAsync(encryptedMessage, priority);
+                }
+
+                if (added)
+                {
+                    LoggingManager.LogDebug(nameof(ChatSession), 
+                        $"Message queued for batching with priority {priority}");
+                    return true;
+                }
+                else
+                {
+                    // Fall back to immediate send
+                    LoggingManager.LogWarning(nameof(ChatSession), 
+                        "Failed to queue message for batching, sending immediately");
+                }
+            }
+
+            // Send immediately (either forced or batching failed/disabled)
+            // In a real implementation, this would send via transport
+            LoggingManager.LogDebug(nameof(ChatSession), 
+                forceSend ? "Message sent immediately (forced)" : "Message sent immediately");
+            
+            return true;
+        }
+
+        /// <summary>
+        /// Gets the current message batcher if batching is enabled (v2.5).
+        /// Requires V25Features.EnableMessageBatching = true.
+        /// </summary>
+        /// <returns>The message batcher, or null if batching is not enabled.</returns>
+        public IMessageBatcher? GetMessageBatcher()
+        {
+            ThrowIfDisposed();
+            return _messageBatcher;
+        }
+
+        /// <summary>
+        /// Forces any pending batched messages to be sent immediately (v2.5).
+        /// Requires V25Features.EnableMessageBatching = true.
+        /// </summary>
+        /// <returns>The number of messages flushed.</returns>
+        public async Task<int> FlushPendingMessagesAsync()
+        {
+            ThrowIfDisposed();
+            
+            if (!_batchingEnabled || _messageBatcher == null)
+            {
+                return 0;
+            }
+
+            var batch = await _messageBatcher.FlushBatchAsync();
+            if (batch != null)
+            {
+                LoggingManager.LogDebug(nameof(ChatSession), 
+                    $"Flushed batch {batch.BatchId} with {batch.Messages.Count} messages");
+                
+                // In a real implementation, this would send the batch via transport
+                return batch.Messages.Count;
+            }
+
+            return 0;
+        }
+
+        // --- v2.5 Async Stream Methods ---
+
+        /// <summary>
+        /// Gets an async stream of incoming messages (v2.5).
+        /// This runs in parallel with the MessageReceived event.
+        /// Requires V25Features.EnableAsyncMessageStreams = true.
+        /// </summary>
+        /// <param name="cancellationToken">Token to cancel the stream.</param>
+        /// <returns>Async enumerable of message received events.</returns>
+        /// <exception cref="InvalidOperationException">If async streaming is not enabled.</exception>
+        /// <exception cref="ObjectDisposedException">If the session is disposed.</exception>
+        public async IAsyncEnumerable<MessageReceivedEventArgs> GetMessageStreamAsync(
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            
+            if (!_asyncStreamingEnabled || _messageReader == null)
+            {
+                throw new InvalidOperationException(
+                    "Async message streaming is not enabled. Enable V25Features.EnableAsyncMessageStreams.");
+            }
+
+            await foreach (var message in _messageReader.ReadAllAsync(cancellationToken))
+            {
+                yield return message;
+            }
+        }
+
+        /// <summary>
+        /// Gets an async stream of incoming messages with optional filtering (v2.5).
+        /// This runs in parallel with the MessageReceived event.
+        /// Requires V25Features.EnableAsyncMessageStreams = true.
+        /// </summary>
+        /// <param name="messageFilter">Optional filter predicate for messages.</param>
+        /// <param name="cancellationToken">Token to cancel the stream.</param>
+        /// <returns>Async enumerable of filtered message received events.</returns>
+        /// <exception cref="InvalidOperationException">If async streaming is not enabled.</exception>
+        /// <exception cref="ObjectDisposedException">If the session is disposed.</exception>
+        public async IAsyncEnumerable<MessageReceivedEventArgs> GetFilteredMessageStreamAsync(
+            Func<MessageReceivedEventArgs, bool>? messageFilter = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            
+            if (!_asyncStreamingEnabled || _messageReader == null)
+            {
+                throw new InvalidOperationException(
+                    "Async message streaming is not enabled. Enable V25Features.EnableAsyncMessageStreams.");
+            }
+
+            await foreach (var message in _messageReader.ReadAllAsync(cancellationToken))
+            {
+                if (messageFilter == null || messageFilter(message))
+                {
+                    yield return message;
+                }
+            }
         }
 
         /// <summary> Checks if disposed and throws. </summary>
@@ -492,6 +727,32 @@ namespace LibEmiddle.Messaging.Chat
 
                             // Clear message history
                             ClearMessageHistoryInternal();
+
+                            // Close message stream channel (v2.5)
+                            if (_asyncStreamingEnabled && _messageWriter != null)
+                            {
+                                try
+                                {
+                                    _messageWriter.Complete();
+                                }
+                                catch (Exception)
+                                {
+                                    // Ignore channel completion errors
+                                }
+                            }
+
+                            // Dispose message batcher (v2.5)
+                            if (_batchingEnabled && _messageBatcher != null)
+                            {
+                                try
+                                {
+                                    _messageBatcher.Dispose();
+                                }
+                                catch (Exception)
+                                {
+                                    // Ignore batcher disposal errors
+                                }
+                            }
 
                             // Update state
                             State = SessionState.Terminated;

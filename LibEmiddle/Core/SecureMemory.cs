@@ -1,5 +1,4 @@
-﻿using LibEmiddle.Messaging.Chat;
-using System.Buffers;
+﻿using System.Buffers;
 using System.Runtime.InteropServices;
 
 namespace LibEmiddle.Core

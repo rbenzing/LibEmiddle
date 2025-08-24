@@ -1,4 +1,4 @@
-﻿﻿namespace LibEmiddle.Domain.Enums
+﻿namespace LibEmiddle.Domain.Enums
 {
     /// <summary>
     /// Represents transport types for the LibEmiddle client.
@@ -18,6 +18,12 @@
         /// <summary>
         /// WebSocket transport for real-time communications.
         /// </summary>
-        WebSocket
+        WebSocket,
+        
+        /// <summary>
+        /// WebRTC transport for peer-to-peer communications (v2.5).
+        /// Enables direct encrypted communication between clients.
+        /// </summary>
+        WebRTC
     }
 }

@@ -94,5 +94,53 @@ namespace LibEmiddle.Abstractions
         /// Performs basic checks on the crypto session state.
         /// </summary>
         bool IsValid();
+
+        // --- v2.5 Enhanced Methods (Optional - requires V25Features.EnableAsyncMessageStreams) ---
+
+        /// <summary>
+        /// Gets an async stream of incoming messages (v2.5).
+        /// This runs in parallel with the MessageReceived event.
+        /// Requires V25Features.EnableAsyncMessageStreams = true.
+        /// </summary>
+        /// <param name="cancellationToken">Token to cancel the stream.</param>
+        /// <returns>Async enumerable of message received events.</returns>
+        IAsyncEnumerable<MessageReceivedEventArgs> GetMessageStreamAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Gets an async stream of incoming messages with optional filtering (v2.5).
+        /// This runs in parallel with the MessageReceived event.
+        /// Requires V25Features.EnableAsyncMessageStreams = true.
+        /// </summary>
+        /// <param name="messageFilter">Optional filter predicate for messages.</param>
+        /// <param name="cancellationToken">Token to cancel the stream.</param>
+        /// <returns>Async enumerable of filtered message received events.</returns>
+        IAsyncEnumerable<MessageReceivedEventArgs> GetFilteredMessageStreamAsync(
+            Func<MessageReceivedEventArgs, bool>? messageFilter = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Sends a message with optional batching (v2.5).
+        /// If batching is enabled, the message may be queued for later transmission.
+        /// Requires V25Features.EnableMessageBatching = true.
+        /// </summary>
+        /// <param name="message">The plaintext message to send.</param>
+        /// <param name="priority">Priority level for batching.</param>
+        /// <param name="forceSend">If true, bypasses batching and sends immediately.</param>
+        /// <returns>True if the message was sent or queued successfully.</returns>
+        Task<bool> SendMessageAsync(string message, MessagePriority priority, bool forceSend = false);
+
+        /// <summary>
+        /// Gets the current message batcher if batching is enabled (v2.5).
+        /// Requires V25Features.EnableMessageBatching = true.
+        /// </summary>
+        /// <returns>The message batcher, or null if batching is not enabled.</returns>
+        IMessageBatcher? GetMessageBatcher();
+
+        /// <summary>
+        /// Forces any pending batched messages to be sent immediately (v2.5).
+        /// Requires V25Features.EnableMessageBatching = true.
+        /// </summary>
+        /// <returns>The number of messages flushed.</returns>
+        Task<int> FlushPendingMessagesAsync();
     }
 }

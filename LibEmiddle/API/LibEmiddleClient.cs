@@ -10,6 +10,7 @@ using LibEmiddle.Protocol;
 using LibEmiddle.Sessions;
 using LibEmiddle.Messaging.Transport;
 using LibEmiddle.Messaging.Chat;
+using LibEmiddle.Diagnostics;
 
 namespace LibEmiddle.API;
 
@@ -28,6 +29,9 @@ public sealed class LibEmiddleClient : IDisposable
     private readonly IMailboxTransport _transport;
     private readonly KeyManager _keyManager;
     private readonly MailboxManager _mailboxManager;
+
+    // v2.5 - Diagnostics system (optional)
+    private readonly Lazy<ILibEmiddleDiagnostics?> _diagnostics;
 
     private bool _disposed;
     private bool _initialized;
@@ -52,6 +56,12 @@ public sealed class LibEmiddleClient : IDisposable
     /// Gets whether the client is currently listening for incoming messages.
     /// </summary>
     public bool IsListening => _isListening;
+
+    /// <summary>
+    /// Gets the diagnostic and health monitoring interface (v2.5).
+    /// Returns null if health monitoring is not enabled in the feature flags.
+    /// </summary>
+    public ILibEmiddleDiagnostics? Diagnostics => _diagnostics.Value;
 
     /// <summary>
     /// Initializes a new instance of the LibEmiddleClient.
@@ -105,6 +115,21 @@ public sealed class LibEmiddleClient : IDisposable
 
             // Wire up mailbox manager events
             _mailboxManager.MessageReceived += OnMailboxMessageReceived;
+
+            // Initialize diagnostics system (v2.5) - lazy initialization based on feature flag
+            _diagnostics = new Lazy<ILibEmiddleDiagnostics?>(() =>
+            {
+                if (!_options.V25Features.EnableHealthMonitoring)
+                    return null;
+
+                var diagnosticsImpl = new LibEmiddleDiagnostics();
+                
+                // Record client initialization event
+                diagnosticsImpl.RecordEvent(Domain.Diagnostics.DiagnosticEvent.OperationCompleted(
+                    "LibEmiddleClient", "ClientInitialized", 0));
+                
+                return diagnosticsImpl;
+            });
 
             LoggingManager.LogInformation(nameof(LibEmiddleClient), "LibEmiddle client initialized successfully");
         }
@@ -1290,6 +1315,12 @@ public sealed class LibEmiddleClient : IDisposable
             _deviceManager?.Dispose();
             _transport?.Dispose();
             _keyManager?.Dispose();
+            
+            // Dispose diagnostics system (v2.5)
+            if (_diagnostics.IsValueCreated && _diagnostics.Value is IDisposable disposableDiagnostics)
+            {
+                disposableDiagnostics.Dispose();
+            }
         }
         catch (Exception ex)
         {

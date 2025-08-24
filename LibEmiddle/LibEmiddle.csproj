@@ -32,7 +32,7 @@
 		<None Include="../README.md" Pack="true" PackagePath="/" />
 		<None Include="../LICENSE" Pack="true" PackagePath="/" />
 		<None Include="../NOTICE" Pack="true" PackagePath="/" />
-		<None Include="../structure.txt" Pack="true" PackagePath="/" />
+		<None Include="../Structure.txt" Pack="true" PackagePath="/" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -55,5 +55,6 @@
 
 	<ItemGroup>
 	  <ProjectReference Include="..\LibEmiddle.Abstractions\LibEmiddle.Abstractions.csproj" />
+	  <ProjectReference Include="..\LibEmiddle.Domain\LibEmiddle.Domain.csproj" />
 	</ItemGroup>
 </Project>

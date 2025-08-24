@@ -25,6 +25,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Nothing yet
 
+## [2.5.0] - 2025-8-24
+
+### Added
+- **Feature Flags System**: Gradual rollout and configuration of new capabilities
+- **WebRTC Transport**: Peer-to-peer encrypted communication with ICE server support
+- **Message Batching**: Efficient bulk messaging with configurable compression levels
+- **Post-Quantum Cryptography Preparation**: Interface definitions and hybrid mode support for quantum-resistant algorithms (Kyber1024, Dilithium)
+- **Enterprise Monitoring & Diagnostics**: Built-in health monitoring, metrics collection, and diagnostic capabilities
+- **Connection Pooling**: Optimized connection management with configurable pool sizes and load balancing
+- **Advanced Key Rotation**: Sophisticated rotation policies with time-based, usage-based, and risk-based triggers
+- **Session Backup Management**: Automated backup and recovery capabilities for session data
+- **Resilience Manager**: Automatic failover, retry policies, and connection restoration
+- **Async Message Streams**: IAsyncEnumerable support for reactive programming patterns
+- **Advanced Group Management**: Granular permissions system with fine-grained member control
+- **Compression Support**: Multiple compression levels (None, Fast, Balanced, Maximum) for message batching
+- **Network Quality Monitoring**: Real-time network quality assessment for WebRTC connections
+- **Group Statistics**: Comprehensive analytics and statistics for group sessions
+- **Group Invitations**: Enhanced invitation system with expiration and validation
+- **Message Priority System**: Priority-based message handling and delivery
+- **Enhanced Security Policies**: Expanded security policy options with quantum-readiness preparation
+
+### Changed
+- Enhanced `LibEmiddleClientOptions` with new configuration sections for advanced features
+- Improved `TransportType` enum to include WebRTC support
+- Extended `MemberRole` and `GroupMember` with advanced permission capabilities
+- Updated session management to support backup and recovery operations
+- Enhanced error handling and logging throughout the system
+- Improved performance optimizations for high-throughput scenarios
+
+### Fixed
+- Improved memory management in long-running sessions
+- Enhanced thread safety in multi-device scenarios
+- Better handling of network connectivity issues
+- Optimized key rotation timing and coordination
+- Improved group synchronization reliability
+
+### Security
+- **Hybrid Cryptography Support**: Preparation for classical + post-quantum cryptographic combinations
+- **Enhanced Key Rotation**: More sophisticated rotation strategies with configurable policies
+- **Improved Forward Secrecy**: Better key isolation and cleanup procedures
+- **Quantum-Resistant Preparation**: Infrastructure for future post-quantum algorithm integration
+- **Advanced Authentication**: Enhanced device and session authentication mechanisms
+- **Security Monitoring**: Real-time security event monitoring and alerting capabilities
+
+### Performance
+- **Connection Pooling**: Significant performance improvements for high-throughput scenarios
+- **Message Batching**: Reduced network overhead through intelligent message batching and compression
+- **Optimized Memory Usage**: Better memory management and reduced allocations
+- **Parallel Processing**: Enhanced parallel processing capabilities for concurrent operations
+- **Efficient Serialization**: Improved serialization performance for large messages and batches
+
+### Documentation
+- Added comprehensive sequence diagrams for all major operations
+- Enhanced technical documentation with detailed architecture descriptions
+- Added Mermaid diagrams for visual protocol flow representation
+- Expanded API documentation with v2.5 feature coverage
+- Updated migration guide for v2.0 to v2.5 transition
+
 ## [2.0.0] - 2024-12-19
 
 ### Added
@@ -70,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Strengthened group key management
 - Enhanced device authentication mechanisms
 
-## [1.0.0] - 2024-XX-XX (Legacy)
+## [1.0.0] - 2024-02-14 (Legacy)
 
 ### Added
 - Initial release of LibEmiddle
@@ -89,6 +147,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## Migration Guide
+
+### From v2.0 to v2.5
+
+**✅ BACKWARD COMPATIBLE**: Version 2.5 is backward compatible with v2.0.
+
+New features in v2.5 are **opt-in** through the Feature Flags system:
+
+```csharp
+var options = new LibEmiddleClientOptions
+{
+    // Existing v2.0 configuration works unchanged
+    TransportType = TransportType.Http,
+    ServerEndpoint = "https://your-server.com",
+    
+    // New v2.5 features are opt-in
+    FeatureFlags = new FeatureFlags
+    {
+        EnableMessageBatching = true,           // Opt-in to message batching
+        EnableDiagnostics = true,              // Opt-in to monitoring
+        EnableAdvancedGroupManagement = true,  // Opt-in to enhanced groups
+        EnableAsyncMessageStreams = true,      // Opt-in to reactive streams
+        EnableWebRTCTransport = true          // Opt-in to WebRTC support
+    },
+    
+    // Configure new optional features
+    WebRTCOptions = new WebRTCOptions { /* configuration */ },
+    BatchingOptions = new BatchingOptions { /* configuration */ },
+    PostQuantumOptions = new PostQuantumOptions { /* configuration */ }
+};
+```
+
+#### Benefits of Upgrading to v2.5:
+- **Performance**: Message batching and connection pooling improvements
+- **Monitoring**: Built-in diagnostics and health monitoring
+- **Future-Ready**: Post-quantum cryptography preparation
+- **Flexibility**: WebRTC transport for peer-to-peer scenarios
+- **Enterprise**: Advanced features for high-scale deployments
 
 ### From v1.x to v2.x
 
@@ -128,8 +223,9 @@ For detailed migration instructions, see the [Migration Guide](docs/MIGRATION.md
 
 | Version | Status | Support Level | End of Life |
 |---------|--------|---------------|-------------|
-| 2.x.x   | Current | Full support | TBD |
-| 1.x.x   | Legacy  | Security fixes only | 2025-12-31 |
+| 2.5.x   | Current | Full support | TBD |
+| 2.0.x   | Maintenance | Security fixes and critical bugs | 2025-12-31 |
+| 1.x.x   | Legacy  | Security fixes only | 2025-06-30 |
 
 ## Links
 

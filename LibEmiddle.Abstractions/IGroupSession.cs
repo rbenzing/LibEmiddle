@@ -144,4 +144,118 @@ public interface IGroupSession : ISession
     /// <returns>True if the state was restored successfully, false if deserialization or validation failed</returns>
     /// <exception cref="ArgumentException">Thrown when serializedState is null, empty, or invalid</exception>
     Task<bool> RestoreSerializedStateAsync(string serializedState);
+
+    // --- v2.5 Enhanced Group Management Methods (Optional - requires V25Features.EnableAdvancedGroupManagement) ---
+
+    /// <summary>
+    /// Gets all members of the group with their roles and permissions (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// </summary>
+    /// <returns>Collection of group members with enhanced information.</returns>
+    Task<IReadOnlyCollection<GroupMember>> GetMembersAsync();
+
+    /// <summary>
+    /// Gets a specific member by their public key (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member to find.</param>
+    /// <returns>The group member, or null if not found.</returns>
+    Task<GroupMember?> GetMemberAsync(byte[] memberPublicKey);
+
+    /// <summary>
+    /// Changes a member's role in the group (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member.</param>
+    /// <param name="newRole">The new role to assign.</param>
+    /// <returns>True if the role was changed successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    Task<bool> ChangeMemberRoleAsync(byte[] memberPublicKey, MemberRole newRole);
+
+    /// <summary>
+    /// Grants specific permissions to a member (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member.</param>
+    /// <param name="permissions">The permissions to grant.</param>
+    /// <returns>True if the permissions were granted successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    Task<bool> GrantPermissionsAsync(byte[] memberPublicKey, IEnumerable<GroupPermission> permissions);
+
+    /// <summary>
+    /// Revokes specific permissions from a member (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member.</param>
+    /// <param name="permissions">The permissions to revoke.</param>
+    /// <returns>True if the permissions were revoked successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    Task<bool> RevokePermissionsAsync(byte[] memberPublicKey, IEnumerable<GroupPermission> permissions);
+
+    /// <summary>
+    /// Mutes a member for a specified duration (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and ModerateMembers permission.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member to mute.</param>
+    /// <param name="duration">How long to mute the member for.</param>
+    /// <param name="reason">Optional reason for the mute.</param>
+    /// <returns>True if the member was muted successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    Task<bool> MuteMemberAsync(byte[] memberPublicKey, TimeSpan duration, string? reason = null);
+
+    /// <summary>
+    /// Unmutes a member (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and ModerateMembers permission.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member to unmute.</param>
+    /// <returns>True if the member was unmuted successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    Task<bool> UnmuteMemberAsync(byte[] memberPublicKey);
+
+    /// <summary>
+    /// Sets metadata for a group member (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// </summary>
+    /// <param name="memberPublicKey">The public key of the member.</param>
+    /// <param name="key">The metadata key.</param>
+    /// <param name="value">The metadata value.</param>
+    /// <returns>True if the metadata was set successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    Task<bool> SetMemberMetadataAsync(byte[] memberPublicKey, string key, string value);
+
+    /// <summary>
+    /// Creates an invitation code for the group (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and AddMember permission.
+    /// </summary>
+    /// <param name="expiresIn">How long the invitation should be valid for.</param>
+    /// <param name="maxUses">Maximum number of times the invitation can be used (null for unlimited).</param>
+    /// <param name="defaultRole">The role new members will have when joining with this invitation.</param>
+    /// <returns>The invitation code.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    Task<string> CreateInvitationAsync(TimeSpan expiresIn, int? maxUses = null, MemberRole defaultRole = MemberRole.Member);
+
+    /// <summary>
+    /// Revokes an invitation code (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true and AddMember permission.
+    /// </summary>
+    /// <param name="invitationCode">The invitation code to revoke.</param>
+    /// <returns>True if the invitation was revoked successfully.</returns>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the current user lacks permission.</exception>
+    Task<bool> RevokeInvitationAsync(string invitationCode);
+
+    /// <summary>
+    /// Joins the group using an invitation code (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// </summary>
+    /// <param name="invitationCode">The invitation code to use.</param>
+    /// <param name="memberPublicKey">The public key of the new member.</param>
+    /// <returns>True if the member joined successfully.</returns>
+    Task<bool> JoinWithInvitationAsync(string invitationCode, byte[] memberPublicKey);
+
+    /// <summary>
+    /// Gets group statistics and insights (v2.5).
+    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// </summary>
+    /// <returns>Group statistics including member activity, message counts, etc.</returns>
+    Task<GroupStatistics> GetGroupStatisticsAsync();
 }
