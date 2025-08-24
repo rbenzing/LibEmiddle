@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell:*)",
+      "Bash(dotnet build)",
+      "Bash(/bashes)",
+      "Bash(where dotnet)",
+      "Bash(cmd /c:*)",
+      "Bash(xmllint:*)",
+      "WebFetch(domain:mermaid.js.org)",
+      "Bash(dotnet build:*)",
+      "WebSearch",
+      "Bash(dotnet --version)",
+      "Bash(dotnet --list-sdks)",
+      "Bash(dotnet test:*)",
+      "Bash(dotnet tool list:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
