@@ -83,7 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded API documentation with v2.5 feature coverage
 - Updated migration guide for v2.0 to v2.5 transition
 
-## [2.0.0] - 2024-12-19
+## [2.0.0] - 2025-6-9
 
 ### Added
 - Complete architectural rewrite with improved separation of concerns
@@ -128,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Strengthened group key management
 - Enhanced device authentication mechanisms
 
-## [1.0.0] - 2024-02-14 (Legacy)
+## [1.0.0] - 2024-12-29 (Legacy)
 
 ### Added
 - Initial release of LibEmiddle
