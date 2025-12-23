@@ -33,6 +33,16 @@ namespace LibEmiddle.Tests.Unit
             _cryptoProvider = new CryptoProvider();
         }
 
+        [TestCleanup]
+        public void Cleanup()
+        {
+            _cryptoProvider?.Dispose();
+
+            // Give GC time to clean up
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+
         #region Setup Helper Methods
 
         /// <summary>

@@ -30,8 +30,12 @@ namespace LibEmiddle.Tests.Unit
         [TestCleanup]
         public void Cleanup()
         {
-            (_cryptoProvider as IDisposable)?.Dispose();
-            (_deviceLinkingService as IDisposable)?.Dispose();
+            _deviceLinkingService?.Dispose();
+            _cryptoProvider?.Dispose();
+
+            // Give GC time to clean up
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
         }
 
         #region Device Linking Tests
