@@ -50,8 +50,8 @@ var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 - **Group Messaging** - Efficient encrypted group chats with advanced member management
 - **Multi-Device Support** - Seamless synchronization and device linking
 - **Asynchronous Communication** - Robust mailbox system with delivery and read receipts
-- **WebRTC Transport** - Peer-to-peer encrypted communication (v2.5)
 - **Message Batching** - Efficient bulk messaging with compression support (v2.5)
+- **Flexible Transport Layer** - HTTP and InMemory transports (WebRTC planned for v3.0)
 
 ### 🏗️ Architecture Highlights
 - **Unified Client API** - Single `LibEmiddleClient` for all operations
@@ -170,61 +170,88 @@ await groupSession.RotateKeysAsync();
 await client.LeaveGroupAsync("team-secure-chat");
 ```
 
-## 📬 Transport and Messaging
+## 📬 Mailbox Transport System
 
+LibEmiddle uses a flexible **mailbox transport system** for asynchronous encrypted message delivery. The transport layer handles message routing while encryption is managed by the Double Ratchet protocol.
+
+### Transport Types
+
+#### InMemory Transport (Testing & Development)
 ```csharp
-// Configure different transport types
-var httpOptions = new LibEmiddleClientOptions
-{
-    TransportType = TransportType.Http,
-    ServerEndpoint = "https://secure-messaging.example.com",
-    NetworkTimeoutMs = 30000,
-    EnableStrictCertificateValidation = true
-};
-
-var webSocketOptions = new LibEmiddleClientOptions
-{
-    TransportType = TransportType.WebSocket,
-    ServerEndpoint = "wss://realtime.example.com/ws",
-    CustomHeaders = new Dictionary<string, string>
-    {
-        ["Authorization"] = "Bearer your-token"
-    }
-};
-
-// In-memory transport for testing
-var testOptions = new LibEmiddleClientOptions
+// Perfect for testing and local development
+var options = new LibEmiddleClientOptions
 {
     TransportType = TransportType.InMemory
 };
 
-// Start listening for incoming messages
-await client.StartListeningAsync();
+using var client = new LibEmiddleClient(options);
+await client.InitializeAsync();
+```
 
-// Handle all incoming messages
-client.MessageReceived += async (sender, args) =>
+#### HTTP Transport (Production)
+```csharp
+// Production-ready HTTP REST API transport
+var options = new LibEmiddleClientOptions
 {
-    var message = args.Message;
-    Console.WriteLine($"Received message: {message.MessageId}");
+    TransportType = TransportType.Http,
+    ServerEndpoint = "https://messaging-server.example.com/api",
+    NetworkTimeoutMs = 30000,
+    EnableStrictCertificateValidation = true,
 
-    // Process based on message type
-    switch (message.MessageType)
+    CustomHeaders = new Dictionary<string, string>
     {
-        case MessageType.Chat:
-            await ProcessChatMessage(message);
-            break;
-        case MessageType.GroupMessage:
-            await ProcessGroupMessage(message);
-            break;
-        case MessageType.DeviceSync:
-            await ProcessDeviceSync(message);
-            break;
+        ["Authorization"] = "Bearer your-jwt-token"
     }
 };
+
+using var client = new LibEmiddleClient(options);
+await client.InitializeAsync();
+```
+
+### Receiving Messages
+
+```csharp
+// Listen for incoming messages
+client.MessageReceived += async (sender, args) =>
+{
+    Console.WriteLine($"From: {Convert.ToBase64String(args.Message.SenderKey)[..8]}...");
+    Console.WriteLine($"Message: {args.DecryptedContent}");
+
+    // Optionally mark as read
+    await client.MarkMessageAsReadAsync(args.Message.Id);
+};
+
+// Start listening (default 5 second polling interval)
+await client.StartListeningAsync();
+
+// For low-latency applications, use shorter polling
+await client.StartListeningAsync(pollingInterval: 1000); // 1 second
 
 // Stop listening when done
 await client.StopListeningAsync();
 ```
+
+### Sending Messages
+
+```csharp
+// Send a message (automatically encrypted with Double Ratchet)
+await client.SendChatMessageAsync(recipientPublicKey, "Hello!");
+
+// Or use ChatSession for more control
+var session = await client.CreateChatSessionAsync(recipientPublicKey, "user@example.com");
+await client.SendChatMessageAsync(recipientPublicKey, "Secure message");
+```
+
+### Architecture Overview
+
+```
+Application → LibEmiddleClient → ChatSession → MailboxManager (encrypts)
+    → IMailboxTransport → HttpMailboxTransport → Server
+```
+
+**Key Point**: Only `MailboxManager` handles encryption/decryption. Transport layers work with already-encrypted messages.
+
+For a complete guide, see [Mailbox Transport Guide](Documentation/Mailbox-Transport-Guide.md) and [Message Flow Diagram](Documentation/Message-Flow-Sequence.md).
 
 ## 🔒 Advanced Configuration
 
@@ -314,27 +341,6 @@ session.StateChanged += (sender, args) =>
 ```
 
 ## 🆕 Advanced Features (v2.5)
-
-### 🌐 WebRTC Transport
-```csharp
-// Configure WebRTC transport for peer-to-peer communication
-var webRtcOptions = new LibEmiddleClientOptions
-{
-    TransportType = TransportType.WebRTC,
-    WebRTCOptions = new WebRTCOptions
-    {
-        ICEServers = new[] { "stun:stun.l.google.com:19302" },
-        NetworkQualityThreshold = WebRTCNetworkQualityLevel.Good,
-        EnableAdaptiveBitrate = true
-    }
-};
-
-using var client = new LibEmiddleClient(webRtcOptions);
-await client.InitializeAsync();
-
-// Establish direct peer connection
-var peerSession = await client.CreateWebRTCSessionAsync(targetPeerKey);
-```
 
 ### 📦 Message Batching
 ```csharp
@@ -524,6 +530,42 @@ var newClient = new LibEmiddleClient(options);
 await newClient.InitializeAsync();
 ```
 
+## 🔮 Future Roadmap
+
+### Planned Features
+
+#### WebRTC Transport (Under Development)
+Direct peer-to-peer encrypted communication using WebRTC data channels:
+- Low-latency P2P messaging without server intermediaries
+- NAT traversal with ICE/STUN/TURN support
+- Adaptive bitrate based on network conditions
+- Network quality monitoring and automatic fallback
+
+**Status**: Currently a stub implementation for API development. Not production-ready in v2.5.
+
+**Target**: v3.0 release
+
+```csharp
+// Future API (not yet functional)
+var webRtcOptions = new LibEmiddleClientOptions
+{
+    TransportType = TransportType.WebRTC,
+    WebRTCOptions = new WebRTCOptions
+    {
+        ICEServers = new[] { "stun:stun.l.google.com:19302" },
+        EnableAdaptiveBitrate = true
+    }
+};
+```
+
+#### Other Planned Enhancements
+- Real-time presence indicators
+- Message search and indexing
+- Advanced group permissions and roles
+- Cross-platform push notifications
+- Server-side message filtering
+- WebSocket transport with server push (alternative to polling)
+
 ## 📄 License
 
 MIT License - See [LICENSE](LICENSE) file for details.
@@ -542,6 +584,8 @@ We welcome contributions! Please see our [contributing guidelines](CONTRIBUTING.
 
 The [Documentation/](Documentation/) folder contains comprehensive technical documentation including:
 
+- **Mailbox Transport Guide**: Complete guide to the mailbox transport system ([Mailbox-Transport-Guide.md](Documentation/Mailbox-Transport-Guide.md))
+- **Message Flow Diagrams**: Mermaid sequence diagrams showing complete message flow ([Message-Flow-Sequence.md](Documentation/Message-Flow-Sequence.md))
 - **Architecture Diagrams**: Full system architecture and component interactions
 - **Sequence Diagrams**: Detailed protocol flows for all major operations
   - 1-to-1 Chat establishment and messaging

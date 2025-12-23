@@ -25,11 +25,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Nothing yet
 
+## [2.5.1] - 2025-12-22
+
+### Added
+- **Comprehensive Mailbox Transport Documentation**: New complete guide explaining the mailbox transport system architecture, usage patterns, and integration (Documentation/Mailbox-Transport-Guide.md)
+- **Detailed Message Flow Diagrams**: Mermaid sequence diagrams showing complete message sending and receiving flows through all layers (Documentation/Message-Flow-Sequence.md)
+- **Enhanced XML Documentation**: Improved code documentation for transport implementations with implementation guidance and usage examples
+
+### Changed
+- **Refactored Transport Polling Logic**: Extracted duplicate polling code from HttpMailboxTransport and InMemoryMailboxTransport into BaseMailboxTransport helper method, reducing code duplication by ~120 lines
+- **Clarified WebRTC Status**: Updated README and CHANGELOG to clearly indicate WebRTC is under development (stub only) and planned for v3.0, not production-ready in v2.5
+- **Improved README**: Added dedicated "Mailbox Transport System" section with practical code examples and architecture overview
+
+### Documentation
+- Added complete mailbox transport system guide with architecture overview, usage examples, best practices, and troubleshooting
+- Added Mermaid sequence diagrams for complete message flow visualization
+- Enhanced transport implementation XML documentation with guidance for custom transport development
+- Clarified WebRTC transport status across all documentation
+- Added "Future Roadmap" section to README with planned features
+
+### Fixed
+- Eliminated duplicate polling logic between transport implementations (DRY principle)
+- Improved code maintainability through shared helper methods
+
 ## [2.5.0] - 2025-8-24
 
 ### Added
 - **Feature Flags System**: Gradual rollout and configuration of new capabilities
-- **WebRTC Transport**: Peer-to-peer encrypted communication with ICE server support
 - **Message Batching**: Efficient bulk messaging with configurable compression levels
 - **Post-Quantum Cryptography Preparation**: Interface definitions and hybrid mode support for quantum-resistant algorithms (Kyber1024, Dilithium)
 - **Enterprise Monitoring & Diagnostics**: Built-in health monitoring, metrics collection, and diagnostic capabilities
@@ -82,6 +104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Mermaid diagrams for visual protocol flow representation
 - Expanded API documentation with v2.5 feature coverage
 - Updated migration guide for v2.0 to v2.5 transition
+- **NEW**: Added complete Mailbox Transport System guide (Documentation/Mailbox-Transport-Guide.md)
+- **NEW**: Added detailed message flow sequence diagrams (Documentation/Message-Flow-Sequence.md)
 
 ## [2.0.0] - 2024-12-19
 
@@ -182,8 +206,10 @@ var options = new LibEmiddleClientOptions
 - **Performance**: Message batching and connection pooling improvements
 - **Monitoring**: Built-in diagnostics and health monitoring
 - **Future-Ready**: Post-quantum cryptography preparation
-- **Flexibility**: WebRTC transport for peer-to-peer scenarios
 - **Enterprise**: Advanced features for high-scale deployments
+
+#### Note on WebRTC Transport:
+WebRTC transport was initially planned for v2.5 but remains under development. The current implementation is a stub for API development only and is **not production-ready**. Full WebRTC support is targeted for v3.0.
 
 ### From v1.x to v2.x
 

@@ -152,65 +152,12 @@ public sealed class InMemoryMailboxTransport(ICryptoProvider cryptoProvider) : B
     /// <inheritdoc/>
     protected override async Task StartListeningInternalAsync(byte[] localIdentityKey, int pollingInterval, CancellationToken cancellationToken)
     {
+        // Stop any existing polling first
         await StopListeningInternalAsync();
 
+        // Create new cancellation token source and use base class polling loop helper
         _pollingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var linkedToken = _pollingCts.Token;
-
-        // Start polling task
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                while (!linkedToken.IsCancellationRequested)
-                {
-                    try
-                    {
-                        var messages = await FetchMessagesAsync(localIdentityKey, linkedToken);
-
-                        foreach (var message in messages)
-                        {
-                            // Notify listeners about new message
-                            OnMessageReceived(message);
-
-                            // Mark message as read to prevent refetching
-                            await MarkMessageAsReadAsync(message.Id);
-                        }
-
-                        // Wait for the specified polling interval
-                        await Task.Delay(pollingInterval, linkedToken);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // Normal cancellation, break the loop
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        LoggingManager.LogError(nameof(InMemoryMailboxTransport), "Error during message polling", ex);
-
-                        // Continue polling even after errors
-                        try
-                        {
-                            await Task.Delay(pollingInterval, linkedToken);
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            // Normal cancellation, break the loop
-                            break;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                LoggingManager.LogError(nameof(InMemoryMailboxTransport), "Fatal error in polling loop", ex);
-            }
-
-            LoggingManager.LogInformation(nameof(InMemoryMailboxTransport), "Message polling stopped");
-        }, linkedToken);
-
-        LoggingManager.LogInformation(nameof(InMemoryMailboxTransport), "Started in-memory mailbox polling");
+        await StartPollingLoopAsync(localIdentityKey, pollingInterval, cancellationToken, _pollingCts);
     }
 
     /// <inheritdoc/>

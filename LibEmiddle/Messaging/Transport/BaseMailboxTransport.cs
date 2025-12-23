@@ -226,12 +226,133 @@ public abstract class BaseMailboxTransport(ICryptoProvider cryptoProvider) : IMa
     }
 
     /// <summary>
+    /// Helper method that provides a standard polling loop implementation for transport classes.
+    /// </summary>
+    /// <param name="localIdentityKey">The identity key of the user.</param>
+    /// <param name="pollingInterval">Interval in milliseconds to poll for new messages.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <param name="pollingCts">Cancellation token source for the polling operation (will be created if null).</param>
+    /// <returns>A task representing the asynchronous polling operation.</returns>
+    /// <remarks>
+    /// This helper method provides the common polling loop logic used by transport implementations.
+    /// It handles:
+    /// <list type="bullet">
+    /// <item><description>Continuous polling at the specified interval</description></item>
+    /// <item><description>Message fetching and validation</description></item>
+    /// <item><description>Event notifications for received messages</description></item>
+    /// <item><description>Automatic mark-as-read after processing</description></item>
+    /// <item><description>Error handling with retry logic</description></item>
+    /// <item><description>Graceful shutdown on cancellation</description></item>
+    /// </list>
+    /// </remarks>
+    protected Task StartPollingLoopAsync(
+        byte[] localIdentityKey,
+        int pollingInterval,
+        CancellationToken cancellationToken,
+        CancellationTokenSource? pollingCts = null)
+    {
+        // Create linked cancellation token if not provided
+        pollingCts ??= CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var linkedToken = pollingCts.Token;
+
+        // Start polling task
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!linkedToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        // Fetch messages
+                        var messages = await FetchMessagesAsync(localIdentityKey, linkedToken);
+
+                        foreach (var message in messages)
+                        {
+                            // Notify listeners about new message
+                            OnMessageReceived(message);
+
+                            // Mark message as read to prevent refetching
+                            await MarkMessageAsReadAsync(message.Id);
+                        }
+
+                        // Wait for the specified polling interval
+                        await Task.Delay(pollingInterval, linkedToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Normal cancellation, break the loop
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        string transportName = GetType().Name;
+                        LoggingManager.LogError(transportName, "Error during message polling", ex);
+
+                        // Continue polling even after errors
+                        try
+                        {
+                            await Task.Delay(pollingInterval, linkedToken);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // Normal cancellation, break the loop
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                string transportName = GetType().Name;
+                LoggingManager.LogError(transportName, "Fatal error in polling loop", ex);
+            }
+
+            string finalTransportName = GetType().Name;
+            LoggingManager.LogInformation(finalTransportName, "Message polling stopped");
+        }, linkedToken);
+
+        string currentTransportName = GetType().Name;
+        LoggingManager.LogInformation(currentTransportName, "Started mailbox polling");
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// Implementation-specific method to start listening for incoming messages.
     /// </summary>
     /// <param name="localIdentityKey">The identity key of the user.</param>
     /// <param name="pollingInterval">Interval in milliseconds to poll for new messages.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
+    /// <remarks>
+    /// <para>
+    /// <strong>Implementation Guidance:</strong>
+    /// </para>
+    /// <para>
+    /// This method should implement a polling loop or push mechanism to monitor for new messages.
+    /// The standard polling pattern is:
+    /// </para>
+    /// <code>
+    /// protected override async Task StartListeningInternalAsync(
+    ///     byte[] localIdentityKey,
+    ///     int pollingInterval,
+    ///     CancellationToken cancellationToken)
+    /// {
+    ///     await StartPollingLoopAsync(localIdentityKey, pollingInterval, cancellationToken);
+    /// }
+    /// </code>
+    /// <para>
+    /// For custom implementations, use the <see cref="StartPollingLoopAsync"/> helper method which handles:
+    /// <list type="bullet">
+    /// <item><description>Polling loop management</description></item>
+    /// <item><description>Message fetching and validation</description></item>
+    /// <item><description>Event raising</description></item>
+    /// <item><description>Error handling and recovery</description></item>
+    /// <item><description>Graceful cancellation</description></item>
+    /// </list>
+    /// </para>
+    /// </remarks>
     protected abstract Task StartListeningInternalAsync(byte[] localIdentityKey, int pollingInterval, CancellationToken cancellationToken);
 
     /// <summary>

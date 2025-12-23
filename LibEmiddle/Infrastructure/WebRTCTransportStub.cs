@@ -9,9 +9,34 @@ namespace LibEmiddle.Infrastructure
     /// This implementation provides the interface contract but doesn't perform actual WebRTC operations.
     /// </summary>
     /// <remarks>
-    /// WARNING: This is a stub implementation for v2.5 API development.
-    /// In a production environment, this should be replaced with a real implementation
-    /// that provides actual WebRTC peer-to-peer communication capabilities.
+    /// <para>
+    /// <strong>⚠️ NOT PRODUCTION READY - STUB IMPLEMENTATION ONLY ⚠️</strong>
+    /// </para>
+    /// <para>
+    /// This is a placeholder stub implementation created for v2.5 API development and testing.
+    /// It simulates WebRTC behavior but does NOT provide actual peer-to-peer communication.
+    /// </para>
+    /// <para>
+    /// <strong>Current Behavior:</strong>
+    /// <list type="bullet">
+    /// <item><description>Simulates connection establishment with delays</description></item>
+    /// <item><description>Echoes sent data back as received data (no real P2P)</description></item>
+    /// <item><description>Generates fake statistics and network quality metrics</description></item>
+    /// <item><description>Does NOT perform actual WebRTC operations</description></item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <strong>Production Use:</strong> Do NOT use this implementation in production environments.
+    /// A full WebRTC implementation with actual peer-to-peer communication is planned for v3.0.
+    /// </para>
+    /// <para>
+    /// <strong>For Testing Only:</strong> This stub is suitable for:
+    /// <list type="bullet">
+    /// <item><description>Unit testing WebRTC-dependent code</description></item>
+    /// <item><description>API design and interface validation</description></item>
+    /// <item><description>Integration testing without real P2P infrastructure</description></item>
+    /// </list>
+    /// </para>
     /// </remarks>
     internal class WebRTCTransportStub : IWebRTCTransport
     {
