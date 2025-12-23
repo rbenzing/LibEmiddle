@@ -18,6 +18,7 @@
 		<Description>A comprehensive end-to-end encryption library implementing Double Ratchet and X3DH protocols for secure messaging.</Description>
 		<PackageTags>encryption;security;e2ee;double-ratchet;x3dh;messaging</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 		<PackageProjectUrl>https://github.com/rbenzing/LibEmiddle</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/rbenzing/LibEmiddle</RepositoryUrl>

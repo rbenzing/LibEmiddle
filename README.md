@@ -568,7 +568,11 @@ var webRtcOptions = new LibEmiddleClientOptions
 
 ## 📄 License
 
-MIT License - See [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+
+⚠️ **Important**: If you modify this software and provide it as a service over a network (e.g., SaaS), you must make the complete source code of your modified version available to all users.
+
+See [LICENSE](LICENSE) file for details or visit https://www.gnu.org/licenses/agpl-3.0.html
 
 ## 🤝 Contributing
 

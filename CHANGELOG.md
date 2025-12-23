@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Enhanced XML Documentation**: Improved code documentation for transport implementations with implementation guidance and usage examples
 
 ### Changed
+- **LICENSE CHANGE**: Changed from MIT License to GNU Affero General Public License v3.0 (AGPL-3.0) - Network use requires source disclosure
 - **Refactored Transport Polling Logic**: Extracted duplicate polling code from HttpMailboxTransport and InMemoryMailboxTransport into BaseMailboxTransport helper method, reducing code duplication by ~120 lines
 - **Clarified WebRTC Status**: Updated README and CHANGELOG to clearly indicate WebRTC is under development (stub only) and planned for v3.0, not production-ready in v2.5
 - **Improved README**: Added dedicated "Mailbox Transport System" section with practical code examples and architecture overview
