@@ -343,7 +343,6 @@ public sealed partial class Sodium
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial int crypto_aead_aes256gcm_decrypt_detached_afternm(
         Span<byte> m,          // unsigned char *m
-        out ulong mlen_p,     // unsigned long long *mlen_p
         Span<byte> nsec,       // unsigned char *nsec (always null)
         ReadOnlySpan<byte> c,          // const unsigned char *c
         ulong clen,       // unsigned long long clen
@@ -957,6 +956,64 @@ public sealed partial class Sodium
             SecureMemory.SecureClear(publicKey);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Derives a key from a password using Argon2id.
+    /// The salt must be <c>crypto_pwhash_SALTBYTES</c> (16) bytes.
+    /// Uses INTERACTIVE ops/mem limits (suitable for user-facing operations).
+    /// </summary>
+    [LibraryImport(LibraryName, EntryPoint = "crypto_pwhash")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    private static partial int crypto_pwhash(
+        Span<byte> @out,
+        ulong outlen,
+        ReadOnlySpan<byte> passwd,
+        ulong passwdlen,
+        ReadOnlySpan<byte> salt,   // must be exactly 16 bytes
+        ulong opslimit,
+        nuint memlimit,
+        int alg);                  // 2 = Argon2id13
+
+    // crypto_pwhash constants
+    private const int PwhashAlgArgon2id13 = 2;
+    private const ulong PwhashOpsLimitInteractive = 2;
+    private static readonly nuint PwhashMemLimitInteractive = (nuint)(64 * 1024 * 1024); // 64 MB
+    internal const int PwhashSaltBytes = 16;
+
+    /// <summary>
+    /// Derives a 32-byte key from a password and a 16-byte salt using Argon2id.
+    /// Unlike HKDF, Argon2id is memory-hard and resistant to brute-force attacks.
+    /// </summary>
+    /// <param name="password">The password bytes.</param>
+    /// <param name="salt">A 16-byte salt (<see cref="PwhashSaltBytes"/>).</param>
+    /// <param name="keyLength">Desired output length in bytes (default 32).</param>
+    public static byte[] DeriveKeyArgon2id(ReadOnlySpan<byte> password, ReadOnlySpan<byte> salt, int keyLength = 32)
+    {
+        if (password.IsEmpty)
+            throw new ArgumentException("Password cannot be empty.", nameof(password));
+        if (salt.Length != PwhashSaltBytes)
+            throw new ArgumentException($"Salt must be exactly {PwhashSaltBytes} bytes.", nameof(salt));
+        if (keyLength < 16 || keyLength > 64)
+            throw new ArgumentOutOfRangeException(nameof(keyLength), "Key length must be 16-64 bytes.");
+
+        Initialize();
+
+        byte[] output = new byte[keyLength];
+        int rc = crypto_pwhash(
+            output,
+            (ulong)keyLength,
+            password,
+            (ulong)password.Length,
+            salt,
+            PwhashOpsLimitInteractive,
+            PwhashMemLimitInteractive,
+            PwhashAlgArgon2id13);
+
+        if (rc != 0)
+            throw new InvalidOperationException("Argon2id key derivation failed.");
+
+        return output;
     }
 
     /// <summary>

@@ -25,7 +25,7 @@ namespace LibEmiddle.Diagnostics
         
         private LibEmiddleHealthMetrics _currentMetrics = new();
         private bool _isEnabled = true;
-        private bool _disposed = false;
+        private volatile bool _disposed = false;
         private readonly int _maxHistorySize = 1000;
 
         public bool IsEnabled => _isEnabled;
@@ -106,7 +106,6 @@ namespace LibEmiddle.Diagnostics
             PopulateTransportSummary(report);
             PopulateCryptographicSummary(report);
             PopulatePerformanceStatistics(report);
-            PopulateFeatureFlagsStatus(report);
             PopulateSecurityAudit(report);
 
             return report;
@@ -337,12 +336,6 @@ namespace LibEmiddle.Diagnostics
                 MemoryUsageBytes = _currentMetrics.MemoryUsageBytes,
                 Uptime = _currentMetrics.Uptime
             };
-        }
-
-        private void PopulateFeatureFlagsStatus(DiagnosticReport report)
-        {
-            // Would be populated from actual feature flags
-            report.Features = new FeatureFlagsStatus();
         }
 
         private void PopulateSecurityAudit(DiagnosticReport report)

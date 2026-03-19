@@ -145,26 +145,23 @@ public interface IGroupSession : ISession
     /// <exception cref="ArgumentException">Thrown when serializedState is null, empty, or invalid</exception>
     Task<bool> RestoreSerializedStateAsync(string serializedState);
 
-    // --- v2.5 Enhanced Group Management Methods (Optional - requires V25Features.EnableAdvancedGroupManagement) ---
+    // --- Enhanced Group Management Methods ---
 
     /// <summary>
-    /// Gets all members of the group with their roles and permissions (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// Gets all members of the group with their roles and permissions.
     /// </summary>
     /// <returns>Collection of group members with enhanced information.</returns>
     Task<IReadOnlyCollection<GroupMember>> GetMembersAsync();
 
     /// <summary>
-    /// Gets a specific member by their public key (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// Gets a specific member by their public key.
     /// </summary>
     /// <param name="memberPublicKey">The public key of the member to find.</param>
     /// <returns>The group member, or null if not found.</returns>
     Task<GroupMember?> GetMemberAsync(byte[] memberPublicKey);
 
     /// <summary>
-    /// Changes a member's role in the group (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// Changes a member's role in the group.
     /// </summary>
     /// <param name="memberPublicKey">The public key of the member.</param>
     /// <param name="newRole">The new role to assign.</param>
@@ -173,8 +170,7 @@ public interface IGroupSession : ISession
     Task<bool> ChangeMemberRoleAsync(byte[] memberPublicKey, MemberRole newRole);
 
     /// <summary>
-    /// Grants specific permissions to a member (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// Grants specific permissions to a member.
     /// </summary>
     /// <param name="memberPublicKey">The public key of the member.</param>
     /// <param name="permissions">The permissions to grant.</param>
@@ -183,8 +179,7 @@ public interface IGroupSession : ISession
     Task<bool> GrantPermissionsAsync(byte[] memberPublicKey, IEnumerable<GroupPermission> permissions);
 
     /// <summary>
-    /// Revokes specific permissions from a member (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// Revokes specific permissions from a member.
     /// </summary>
     /// <param name="memberPublicKey">The public key of the member.</param>
     /// <param name="permissions">The permissions to revoke.</param>
@@ -193,8 +188,7 @@ public interface IGroupSession : ISession
     Task<bool> RevokePermissionsAsync(byte[] memberPublicKey, IEnumerable<GroupPermission> permissions);
 
     /// <summary>
-    /// Mutes a member for a specified duration (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true and ModerateMembers permission.
+    /// Mutes a member for a specified duration.
     /// </summary>
     /// <param name="memberPublicKey">The public key of the member to mute.</param>
     /// <param name="duration">How long to mute the member for.</param>
@@ -204,8 +198,7 @@ public interface IGroupSession : ISession
     Task<bool> MuteMemberAsync(byte[] memberPublicKey, TimeSpan duration, string? reason = null);
 
     /// <summary>
-    /// Unmutes a member (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true and ModerateMembers permission.
+    /// Unmutes a member.
     /// </summary>
     /// <param name="memberPublicKey">The public key of the member to unmute.</param>
     /// <returns>True if the member was unmuted successfully.</returns>
@@ -213,8 +206,7 @@ public interface IGroupSession : ISession
     Task<bool> UnmuteMemberAsync(byte[] memberPublicKey);
 
     /// <summary>
-    /// Sets metadata for a group member (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true and appropriate permissions.
+    /// Sets metadata for a group member.
     /// </summary>
     /// <param name="memberPublicKey">The public key of the member.</param>
     /// <param name="key">The metadata key.</param>
@@ -224,8 +216,7 @@ public interface IGroupSession : ISession
     Task<bool> SetMemberMetadataAsync(byte[] memberPublicKey, string key, string value);
 
     /// <summary>
-    /// Creates an invitation code for the group (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true and AddMember permission.
+    /// Creates an invitation code for the group.
     /// </summary>
     /// <param name="expiresIn">How long the invitation should be valid for.</param>
     /// <param name="maxUses">Maximum number of times the invitation can be used (null for unlimited).</param>
@@ -235,8 +226,7 @@ public interface IGroupSession : ISession
     Task<string> CreateInvitationAsync(TimeSpan expiresIn, int? maxUses = null, MemberRole defaultRole = MemberRole.Member);
 
     /// <summary>
-    /// Revokes an invitation code (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true and AddMember permission.
+    /// Revokes an invitation code.
     /// </summary>
     /// <param name="invitationCode">The invitation code to revoke.</param>
     /// <returns>True if the invitation was revoked successfully.</returns>
@@ -244,8 +234,7 @@ public interface IGroupSession : ISession
     Task<bool> RevokeInvitationAsync(string invitationCode);
 
     /// <summary>
-    /// Joins the group using an invitation code (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// Joins the group using an invitation code.
     /// </summary>
     /// <param name="invitationCode">The invitation code to use.</param>
     /// <param name="memberPublicKey">The public key of the new member.</param>
@@ -253,8 +242,7 @@ public interface IGroupSession : ISession
     Task<bool> JoinWithInvitationAsync(string invitationCode, byte[] memberPublicKey);
 
     /// <summary>
-    /// Gets group statistics and insights (v2.5).
-    /// Requires V25Features.EnableAdvancedGroupManagement = true.
+    /// Gets group statistics and insights.
     /// </summary>
     /// <returns>Group statistics including member activity, message counts, etc.</returns>
     Task<GroupStatistics> GetGroupStatisticsAsync();

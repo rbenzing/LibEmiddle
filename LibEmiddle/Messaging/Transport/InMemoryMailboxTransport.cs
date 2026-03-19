@@ -310,8 +310,9 @@ public sealed class InMemoryMailboxTransport(ICryptoProvider cryptoProvider) : B
     {
         try
         {
-            // Stop listening operations first
-            StopListeningInternalAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+            // SYNC-REQUIRED: DisposeManagedResources() cannot be async. Use Task.Run to avoid
+            // deadlocks on sync contexts (ASP.NET, WPF, WinForms).
+            Task.Run(() => StopListeningInternalAsync()).GetAwaiter().GetResult();
         }
         catch (Exception ex)
         {

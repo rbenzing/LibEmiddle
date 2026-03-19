@@ -19,7 +19,7 @@ namespace LibEmiddle.Sessions
         private readonly ICryptoProvider _cryptoProvider;
         private readonly string _storagePath;
         private readonly SemaphoreSlim _ioLock = new(1, 1);
-        private bool _disposed;
+        private volatile bool _disposed;
 
         public SessionPersistenceManager(ICryptoProvider cryptoProvider, string? storagePath = null)
         {
@@ -354,7 +354,15 @@ namespace LibEmiddle.Sessions
                     }
 
                     // Store the encryption key in secure storage
-                    await _cryptoProvider.StoreKeyAsync($"session:{dto.SessionId}", key);
+                    bool keyStored = await _cryptoProvider.StoreKeyAsync($"session:{dto.SessionId}", key);
+                    if (!keyStored)
+                    {
+                        // Key wasn't persisted — the session file is unreadable without the key; remove it.
+                        KeyStorage.SecureDeleteFile(filePath);
+                        LoggingManager.LogError(nameof(SessionPersistenceManager),
+                            $"Failed to store encryption key for session {dto.SessionId}; session file removed.");
+                        return false;
+                    }
 
                     return true;
                 }
@@ -442,11 +450,73 @@ namespace LibEmiddle.Sessions
             }
         }
 
+        /// <summary>
+        /// Saves a recipient's public key bundle indexed by their Ed25519 identity key.
+        /// Bundles are public information and are stored as plain JSON.
+        /// </summary>
+        public async Task SaveKeyBundleAsync(X3DHPublicBundle bundle)
+        {
+            ArgumentNullException.ThrowIfNull(bundle, nameof(bundle));
+            if (bundle.IdentityKey == null || bundle.IdentityKey.Length == 0)
+                throw new ArgumentException("Bundle must have a non-empty identity key.", nameof(bundle));
+
+            string filePath = GetBundleFilePath(bundle.IdentityKey);
+            string json = JsonSerialization.Serialize(bundle);
+
+            await _ioLock.WaitAsync();
+            try
+            {
+                await File.WriteAllTextAsync(filePath, json, System.Text.Encoding.UTF8);
+            }
+            finally
+            {
+                _ioLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Loads a previously saved recipient bundle by their Ed25519 identity key.
+        /// Returns null if no bundle was found.
+        /// </summary>
+        public async Task<X3DHPublicBundle?> LoadKeyBundleByIdentityKeyAsync(byte[] identityKey)
+        {
+            ArgumentNullException.ThrowIfNull(identityKey, nameof(identityKey));
+
+            string filePath = GetBundleFilePath(identityKey);
+
+            await _ioLock.WaitAsync();
+            try
+            {
+                if (!File.Exists(filePath))
+                    return null;
+
+                string json = await File.ReadAllTextAsync(filePath, System.Text.Encoding.UTF8);
+                return JsonSerialization.Deserialize<X3DHPublicBundle>(json);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(SessionPersistenceManager), $"Failed to load key bundle: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                _ioLock.Release();
+            }
+        }
+
         private string GetSessionFilePath(string sessionId)
         {
             // Sanitize the session ID to make it safe for use as a filename
             string safeSessionId = new string(sessionId.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray());
             return Path.Combine(_storagePath, $"{safeSessionId}.session");
+        }
+
+        private string GetBundleFilePath(byte[] identityKey)
+        {
+            // Use URL-safe base64 (no +, /, =) so it is safe as a filename
+            string b64 = Convert.ToBase64String(identityKey)
+                .Replace('+', '-').Replace('/', '_').Replace("=", "");
+            return Path.Combine(_storagePath, $"bundle-{b64}.bundle");
         }
 
         private string SerializeDoubleRatchetSession(DoubleRatchetSession session)

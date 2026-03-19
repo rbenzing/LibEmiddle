@@ -65,15 +65,24 @@ var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 ## 💬 Individual Chat Sessions
 
 ```csharp
-// Create a chat session with a specific user
+// First contact: supply the recipient's full X3DHPublicBundle as UTF-8 JSON bytes.
+// The library caches the bundle for future lookups by identity key.
+byte[] bundleBytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(recipientBundle));
 var chatSession = await client.CreateChatSessionAsync(
-    recipientPublicKey,
+    bundleBytes,
     recipientUserId: "alice@example.com",
     options: new ChatSessionOptions
     {
         RotationStrategy = KeyRotationStrategy.Aggressive,
         EnableMessageHistory = true
     });
+
+// Subsequent contacts: a bare 32-byte identity key is sufficient
+// (the bundle is looked up from the local cache).
+var chatSession = await client.CreateChatSessionAsync(
+    recipientPublicKey,   // 32-byte Ed25519 identity key
+    recipientUserId: "alice@example.com",
+    options: new ChatSessionOptions { RotationStrategy = KeyRotationStrategy.Standard });
 
 // Send encrypted messages
 var encryptedMessage = await chatSession.EncryptAsync("Hello Alice!");
@@ -237,7 +246,7 @@ await client.StopListeningAsync();
 // Send a message (automatically encrypted with Double Ratchet)
 await client.SendChatMessageAsync(recipientPublicKey, "Hello!");
 
-// Or use ChatSession for more control
+// Or use ChatSession for more control (requires bundle cached or pass bundleBytes on first use)
 var session = await client.CreateChatSessionAsync(recipientPublicKey, "user@example.com");
 await client.SendChatMessageAsync(recipientPublicKey, "Secure message");
 ```
@@ -470,7 +479,7 @@ client.KeyRotated += (sender, args) =>
 
 ### Memory Security
 - **Secure Memory Handling** - Sensitive data is properly cleared from memory
-- **Key Derivation** - Strong key derivation functions (HKDF, Argon2)
+- **Key Derivation** - HKDF for protocol keys; Argon2id (memory-hard, 64 MB) for password-based keys
 - **Constant-Time Operations** - Protection against timing attacks
 
 ## 📦 Installation

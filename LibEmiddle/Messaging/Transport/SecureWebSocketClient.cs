@@ -27,7 +27,7 @@ namespace LibEmiddle.Messaging.Transport
 
         private readonly Uri _serverUri = new(serverUrl);
         private DoubleRatchetSession? _session = null;
-        private bool _disposed = false;
+        private volatile bool _disposed = false;
         private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
         /// <summary>
@@ -394,8 +394,9 @@ namespace LibEmiddle.Messaging.Transport
 
             if (disposing)
             {
-                // Dispose managed resources
-                CloseWebSocketSafe().GetAwaiter().GetResult();
+                // SYNC-REQUIRED: Dispose(bool) cannot be async. Use Task.Run to avoid
+                // deadlocks on sync contexts (ASP.NET, WPF, WinForms).
+                Task.Run(() => CloseWebSocketSafe()).GetAwaiter().GetResult();
                 _connectionLock.Dispose();
 
                 // Clear any sensitive data

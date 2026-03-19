@@ -15,7 +15,7 @@ namespace LibEmiddle.Storage
         private readonly ConcurrentDictionary<string, StoredItem> _storage;
         private readonly JsonSerializerOptions _jsonOptions;
         private readonly Timer _cleanupTimer;
-        private bool _disposed = false;
+        private volatile bool _disposed = false;
 
         public string ProviderName => "In-Memory Storage";
         public bool SupportsTransactions => true; // In-memory can support pseudo-transactions
@@ -228,14 +228,10 @@ namespace LibEmiddle.Storage
                         case StorageOperationType.Set:
                             if (operation.Value != null && operation.ValueType != null)
                             {
-                                // Use reflection to call the generic SetAsync method
-                                var method = typeof(InMemoryStorageProvider)
-                                    .GetMethod(nameof(SetAsync))!
-                                    .MakeGenericMethod(operation.ValueType);
-
-                                object?[] parameters = { operation.Key, operation.Value, operation.Expiry };
-                                var task = (Task<bool>)method.Invoke(this, parameters)!;
-                                var success = await task;
+                                // Use compile-time dispatch via the non-generic SetAsyncCore overload.
+                                // JsonSerializer.Serialize(object, Type, options) handles runtime-typed
+                                // serialization without any MethodInfo.MakeGenericMethod reflection.
+                                var success = await SetAsyncCore(operation.Key, operation.Value, operation.ValueType, operation.Expiry);
 
                                 if (!success)
                                     throw new InvalidOperationException($"Failed to set key: {operation.Key}");
@@ -328,6 +324,48 @@ namespace LibEmiddle.Storage
         #endregion
 
         #region Private Methods
+
+        /// <summary>
+        /// Non-generic set implementation used by <see cref="BatchAsync"/> to avoid runtime reflection.
+        /// Serializes <paramref name="value"/> using <see cref="JsonSerializer.Serialize(object?, Type, JsonSerializerOptions?)"/>
+        /// which accepts a runtime <see cref="Type"/> directly — no <c>MethodInfo.MakeGenericMethod</c> required.
+        /// </summary>
+        private Task<bool> SetAsyncCore(string key, object value, Type valueType, TimeSpan? expiry)
+        {
+            try
+            {
+                // Serialize with the runtime Type — avoids the need for a generic type parameter
+                var json = JsonSerializer.Serialize(value, valueType, _jsonOptions);
+                var metadata = new StorageMetadata
+                {
+                    Key = key,
+                    CreatedAt = DateTime.UtcNow,
+                    ModifiedAt = DateTime.UtcNow,
+                    ExpiresAt = expiry.HasValue ? DateTime.UtcNow.Add(expiry.Value) : null,
+                    SizeBytes = System.Text.Encoding.UTF8.GetByteCount(json),
+                    ValueType = valueType.FullName ?? valueType.Name
+                };
+
+                var item = new StoredItem
+                {
+                    Data = json,
+                    Metadata = metadata,
+                    ValueType = valueType
+                };
+
+                _storage.AddOrUpdate(key, item, (k, existing) =>
+                {
+                    item.Metadata.CreatedAt = existing.Metadata.CreatedAt; // Preserve creation time
+                    return item;
+                });
+
+                return Task.FromResult(true);
+            }
+            catch (Exception)
+            {
+                return Task.FromResult(false);
+            }
+        }
 
         private bool MatchesPattern(string value, string pattern)
         {

@@ -14,7 +14,7 @@ namespace LibEmiddle.Crypto
     public sealed class CryptoProvider : ICryptoProvider, IDisposable
     {
         private readonly KeyStorage _keyStorage;
-        private bool _disposed;
+        private volatile bool _disposed;
 
         /// <summary>
         /// Initializes a new instance of the CryptoProvider class.
@@ -278,16 +278,43 @@ namespace LibEmiddle.Crypto
 
             try
             {
-                // Use a deterministic approach for key derivation
-                // Convert password to bytes
                 byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
 
-                // Use a fixed salt for deterministic key derivation
-                // In production, you might want to use a per-application salt
-                byte[] salt = Encoding.UTF8.GetBytes("LibEmiddle-KeyDerivation-Salt-v1");
+                // Use a fixed application salt for deterministic derivation (same password → same key).
+                // Argon2id is memory-hard (64 MB, 2 passes) and far more resistant to brute-force
+                // than HKDF, which has no memory or time cost.
+                // The salt is application-specific, not per-user random, because this overload
+                // must be deterministic (callers cannot store a separate salt).
+                // For random-salt usage, call DeriveKeyFromPassword(password, salt) directly.
+                byte[] fixedSalt = Encoding.UTF8.GetBytes("LibEmiddle-KDF-v2-Salt1");
+                // Pad/truncate to exactly PwhashSaltBytes (16)
+                byte[] salt = new byte[Sodium.PwhashSaltBytes];
+                Buffer.BlockCopy(fixedSalt, 0, salt, 0, Math.Min(fixedSalt.Length, salt.Length));
 
-                // Use HKDF to derive exactly 32 bytes for AES encryption
-                return Sodium.HkdfDerive(passwordBytes, salt, Encoding.UTF8.GetBytes("LibEmiddle-Password-Key"), 32);
+                return Sodium.DeriveKeyArgon2id(passwordBytes, salt);
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(CryptoProvider), $"Error deriving key from password: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Derives a 32-byte AES key from a password and a caller-supplied random salt using Argon2id.
+        /// The salt must be exactly <c>16 bytes</c>. Store the salt alongside the encrypted data.
+        /// </summary>
+        public byte[] DeriveKeyFromPassword(string password, byte[] salt)
+        {
+            if (string.IsNullOrEmpty(password))
+                throw new ArgumentException("Password cannot be null or empty.", nameof(password));
+            if (salt == null || salt.Length != Sodium.PwhashSaltBytes)
+                throw new ArgumentException($"Salt must be exactly {Sodium.PwhashSaltBytes} bytes.", nameof(salt));
+
+            try
+            {
+                byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+                return Sodium.DeriveKeyArgon2id(passwordBytes, salt);
             }
             catch (Exception ex)
             {
@@ -492,12 +519,12 @@ namespace LibEmiddle.Crypto
         }
 
         /// <inheritdoc/>
-        public Task<bool> DeleteKeyAsync(string keyId, string? password = null)
+        public async Task<bool> DeleteKeyAsync(string keyId, string? password = null)
         {
             if (string.IsNullOrEmpty(keyId))
                 throw new ArgumentException("Key ID cannot be null or empty.", nameof(keyId));
 
-            byte[]? keyFound = RetrieveKeyAsync(keyId, password).GetAwaiter().GetResult();
+            byte[]? keyFound = await RetrieveKeyAsync(keyId, password).ConfigureAwait(false);
             if (keyFound == null && password == null)
                 throw new FileNotFoundException();
             if (keyFound == null && password != null)
@@ -508,18 +535,18 @@ namespace LibEmiddle.Crypto
                 if (password != null)
                 {
                     // Delete password-protected key
-                    return Task.FromResult(_keyStorage.DeleteData($"password-key:{keyId}"));
+                    return _keyStorage.DeleteData($"password-key:{keyId}");
                 }
                 else
                 {
                     // Delete regular key
-                    return Task.FromResult(_keyStorage.DeleteKey(keyId));
+                    return _keyStorage.DeleteKey(keyId);
                 }
             }
             catch (Exception ex)
             {
                 LoggingManager.LogError(nameof(CryptoProvider), $"Error deleting key {keyId}: {ex.Message}");
-                return Task.FromResult(false);
+                return false;
             }
         }
 

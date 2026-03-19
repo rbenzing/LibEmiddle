@@ -59,11 +59,6 @@ namespace LibEmiddle.Domain.Diagnostics
         public PerformanceStatistics Performance { get; set; } = new();
 
         /// <summary>
-        /// Feature flags status.
-        /// </summary>
-        public FeatureFlagsStatus Features { get; set; } = new();
-
-        /// <summary>
         /// Security audit information.
         /// </summary>
         public SecurityAudit Security { get; set; } = new();
@@ -138,23 +133,6 @@ namespace LibEmiddle.Domain.Diagnostics
         public double SuccessRate => TotalOperations > 0 ? ((double)(TotalOperations - FailedOperations) / TotalOperations) * 100 : 0;
         public long MemoryUsageBytes { get; set; }
         public TimeSpan Uptime { get; set; }
-    }
-
-    /// <summary>
-    /// Feature flags status for diagnostic report.
-    /// </summary>
-    public class FeatureFlagsStatus
-    {
-        public bool AsyncMessageStreams { get; set; }
-        public bool MessageBatching { get; set; }
-        public bool AdvancedGroupManagement { get; set; }
-        public bool HealthMonitoring { get; set; }
-        public bool FluentBuilder { get; set; }
-        public bool PluggableStorage { get; set; }
-        public bool PostQuantumPreparation { get; set; }
-        public bool WebRTCTransport { get; set; }
-        public bool ConnectionPooling { get; set; }
-        public bool SessionBackup { get; set; }
     }
 
     /// <summary>

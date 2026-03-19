@@ -20,7 +20,7 @@ namespace LibEmiddle.MultiDevice;
 public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
 {
     private readonly ICryptoProvider _cryptoProvider;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     // Maximum allowed difference (in milliseconds) between the message timestamp and the current time.
     private const long AllowedTimestampSkewMilliseconds = 300000; // 5 minutes
@@ -307,7 +307,7 @@ public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
 
             // Verify the signature of the new device's public key
             LoggingManager.LogInformation(nameof(DeviceLinkingService),
-                $"Verifying signature of {Convert.ToBase64String(newDeviceKeyPair.PublicKey)} with key {Convert.ToBase64String(mainDeviceEd25519Public)}");
+                $"Verifying signature for device key ...{Convert.ToBase64String(newDeviceKeyPair.PublicKey)[^8..]} with main key ...{Convert.ToBase64String(mainDeviceEd25519Public)[^8..]}");
 
             if (!_cryptoProvider.VerifySignature(newDeviceKeyPair.PublicKey, signature, mainDeviceEd25519Public))
             {
@@ -520,40 +520,14 @@ public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
 
     /// <summary>
     /// Normalizes a public key to X25519 format for consistent processing.
+    /// Delegates to <see cref="KeyConversion.ConvertEd25519PublicKeyToX25519"/> for shared logic.
     /// </summary>
     /// <param name="publicKey">The public key to normalize (Ed25519 or X25519)</param>
     /// <returns>The key in X25519 format</returns>
     /// <exception cref="ArgumentException">Thrown if the key is invalid or has wrong length</exception>
-    private byte[] NormalizeToX25519PublicKey(byte[] publicKey)
+    private static byte[] NormalizeToX25519PublicKey(byte[] publicKey)
     {
-        // Both Ed25519 and X25519 public keys are 32 bytes, so we need to try validation
-        // to determine which type it is. Try Ed25519 first since that's more common in our use case.
-        if (publicKey.Length == Constants.ED25519_PUBLIC_KEY_SIZE) // Same as X25519_KEY_SIZE (32 bytes)
-        {
-            // Try Ed25519 validation first
-            if (_cryptoProvider.ValidateEd25519PublicKey(publicKey))
-            {
-                // It's an Ed25519 key, convert to X25519
-                return _cryptoProvider.ConvertEd25519PublicKeyToX25519(publicKey);
-            }
-            // If Ed25519 validation failed, try X25519 validation
-            else if (_cryptoProvider.ValidateX25519PublicKey(publicKey))
-            {
-                // It's already an X25519 key, return a copy
-                return publicKey.ToArray();
-            }
-            else
-            {
-                throw new ArgumentException("Invalid public key - neither Ed25519 nor X25519 validation passed", nameof(publicKey));
-            }
-        }
-        else
-        {
-            throw new ArgumentException(
-                $"Invalid public key length: {publicKey.Length}. " +
-                $"Expected {Constants.ED25519_PUBLIC_KEY_SIZE} bytes (32 bytes)",
-                nameof(publicKey));
-        }
+        return KeyConversion.ConvertEd25519PublicKeyToX25519(publicKey);
     }
 
     /// <summary>

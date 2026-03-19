@@ -361,7 +361,7 @@ namespace LibEmiddle.Protocol
                             isNewRatchetKey = true;
                         }
                         // Check if we received a message with a new ratchet key
-                        else if (!updatedSession.ReceiverRatchetPublicKey.SequenceEqual(encryptedMessage.SenderDHKey))
+                        else if (!CryptographicOperations.FixedTimeEquals(updatedSession.ReceiverRatchetPublicKey, encryptedMessage.SenderDHKey))
                         {
                             LoggingManager.LogDebug(nameof(DoubleRatchetProtocol), "Received message with new ratchet key, updating session");
 
@@ -504,9 +504,14 @@ namespace LibEmiddle.Protocol
             LoggingManager.LogDebug(nameof(DoubleRatchetProtocol),
                 $"Skipping receiver chain keys due to new ratchet key");
 
-            // Skip only the keys that we haven't received yet in the old chain
-            // Since we're starting a new chain, we don't need to skip any keys
-            // The new ratchet key indicates a fresh start
+            // Storing skipped keys from the old chain requires the caller to NOT have reset
+            // ReceiveMessageNumber yet (so we know the actual old message number range).
+            // The caller resets ReceiveMessageNumber = 0 before calling this method, so we
+            // cannot implement this safely here without restructuring DecryptAsync.
+            // This is intentionally left as a no-op until DecryptAsync passes the old
+            // ReceiveMessageNumber in. Out-of-order message delivery on chain transitions
+            // is tracked as a separate improvement item.
+
         }
 
         /// <summary>

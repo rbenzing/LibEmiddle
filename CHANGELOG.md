@@ -8,22 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Nothing yet
+- **Bundle Caching**: `SessionPersistenceManager` now includes `SaveKeyBundleAsync()` and `LoadKeyBundleByIdentityKeyAsync()` for caching recipient X3DH key bundles to disk, enabling session creation from a bare identity key after the first exchange
+- **Password KDF Overload**: New `CryptoProvider.DeriveKeyFromPassword(string password, byte[] salt)` overload accepting a caller-supplied random salt for non-deterministic key derivation
+- **Shared Key Conversion Helper**: New `LibEmiddle.Core.KeyConversion.ConvertEd25519PublicKeyToX25519()` consolidating duplicate Ed25519→X25519 conversion logic previously spread across `DeviceManager` and `DeviceLinkingService`
+- **Unit Tests**: Added 60+ new unit tests covering `MessageSigning`, `AES` detached encryption, `Nonce` thread-safety, `EnhancedFileStorageProvider`, `PostQuantumCrypto`, stub infrastructure visibility, and `SessionManager` bundle/group session paths
 
 ### Changed
-- Nothing yet
-
-### Deprecated
-- Nothing yet
-
-### Removed
-- Nothing yet
+- **Password Key Derivation**: Migrated from HKDF with a fixed static salt to **Argon2id** (via libsodium's `crypto_pwhash`) for memory-hard password-based key derivation (64 MB, 2 passes). The deterministic overload uses a fixed application-specific salt; the new overload accepts a random salt
+- **CreateSessionAsync Bundle Handling**: Now accepts a serialized `X3DHPublicBundle` as UTF-8 JSON bytes and automatically caches the bundle via `SaveKeyBundleAsync()` for future bare-key lookups
+- **GetOrCreateRecipientBundleAsync**: Replaced stub implementation (threw `InvalidOperationException`) with a proper lookup using the new `LoadKeyBundleByIdentityKeyAsync()`. Throws `ArgumentException` with a descriptive message if no cached bundle is found
+- **Batch Serialization**: Replaced reflection-based `MakeGenericMethod` in `BatchAsync` with the BCL's `JsonSerializer.Serialize(object?, Type, JsonSerializerOptions?)` overload, eliminating runtime reflection
+- **Disposal Guards**: Changed all `bool _disposed` fields to `volatile bool _disposed` across all `IDisposable` classes for correct thread-safe disposal checks
+- **Timer Callback**: `EnhancedFileStorageProvider.CleanupExpiredItems` refactored to `async void` + inner `DoCleanupExpiredItemsAsync()` pattern, eliminating the `.Wait()` call that could deadlock on synchronization contexts
 
 ### Fixed
-- Nothing yet
+- **AES-GCM Detached Decryption**: Corrected the P/Invoke signature for `crypto_aead_aes256gcm_decrypt_detached_afternm` in `Sodium.cs` — removed the erroneous `out ulong mlen_p` second parameter that does not exist in this libsodium entry point, which was causing all AES-GCM detached decryption to fail
+- **MessageSigning Verification**: Fixed reversed argument order in `Sodium.SignVerifyDetached()` call inside `MessageSigning.VerifyObject<T>()` — signature and message bytes were swapped, causing all signature verification to fail
+- **Session File Integrity**: `EncryptAndSaveSessionAsync` now checks the return value of `StoreKeyAsync` and removes the orphaned session file if the encryption key cannot be persisted
 
 ### Security
-- Nothing yet
+- **Argon2id Password Hardening**: The Argon2id KDF (64 MB memory, 2 iterations) is orders of magnitude more resistant to GPU/ASIC brute-force attacks than the previous HKDF-with-fixed-salt approach
 
 ## [2.5.1] - 2025-12-22
 

@@ -87,21 +87,6 @@ namespace LibEmiddle.API.Builders
             return this;
         }
 
-        public ILibEmiddleClientBuilder WithV25Features(Action<IV25FeaturesBuilder> configure)
-        {
-            var builder = new V25FeaturesBuilder(_options);
-            configure(builder);
-            return this;
-        }
-
-        public ILibEmiddleClientBuilder EnableStableBeta()
-        {
-            // Enable all stable v2.5 features for beta testing
-            var builder = new V25FeaturesBuilder(_options);
-            builder.EnableAllStable();
-            return this;
-        }
-
         public ILibEmiddleClientBuilder WithCustomOptions(Action<LibEmiddleClientOptions> configure)
         {
             configure(_options);
@@ -308,7 +293,6 @@ namespace LibEmiddle.API.Builders
 
         public IPerformanceOptionsBuilder WithBatching(Action<IBatchingOptionsBuilder> configure)
         {
-            _options.V25Features.EnableMessageBatching = true;
             _options.BatchingOptions ??= new Domain.BatchingOptions();
             
             var builder = new BatchingOptionsBuilder(_options.BatchingOptions);
@@ -318,7 +302,6 @@ namespace LibEmiddle.API.Builders
 
         public IPerformanceOptionsBuilder WithConnectionPooling(Action<IConnectionPoolOptionsBuilder> configure)
         {
-            _options.V25Features.EnableConnectionPooling = true;
             _options.ConnectionPoolOptions ??= new Domain.ConnectionPoolOptions();
             
             var builder = new ConnectionPoolOptionsBuilder(_options.ConnectionPoolOptions);
@@ -337,123 +320,9 @@ namespace LibEmiddle.API.Builders
 
         public IPerformanceOptionsBuilder WithBackup(Action<IBackupOptionsBuilder> configure)
         {
-            _options.V25Features.EnableSessionBackup = true;
             _options.EnhancedBackupOptions ??= new Domain.BackupOptions();
             
             var builder = new BackupOptionsBuilder(_options.EnhancedBackupOptions);
-            configure(builder);
-            return this;
-        }
-    }
-
-    internal class V25FeaturesBuilder : IV25FeaturesBuilder
-    {
-        private readonly LibEmiddleClientOptions _options;
-
-        public V25FeaturesBuilder(LibEmiddleClientOptions options)
-        {
-            _options = options;
-        }
-
-        public IV25FeaturesBuilder EnableAsyncMessageStreams()
-        {
-            _options.V25Features.EnableAsyncMessageStreams = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder EnableMessageBatching()
-        {
-            _options.V25Features.EnableMessageBatching = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder EnableAdvancedGroupManagement()
-        {
-            _options.V25Features.EnableAdvancedGroupManagement = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder EnableHealthMonitoring()
-        {
-            _options.V25Features.EnableHealthMonitoring = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder EnablePluggableStorage()
-        {
-            _options.V25Features.EnablePluggableStorage = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder EnablePostQuantumPreparation()
-        {
-            _options.V25Features.EnablePostQuantumPreparation = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder EnableWebRTCTransport()
-        {
-            _options.V25Features.EnableWebRTCTransport = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder EnableConnectionPooling()
-        {
-            _options.V25Features.EnableConnectionPooling = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder EnableSessionBackup()
-        {
-            _options.V25Features.EnableSessionBackup = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder EnableAllStable()
-        {
-            _options.V25Features.EnableMessageBatching = true;
-            _options.V25Features.EnableAdvancedGroupManagement = true;
-            _options.V25Features.EnableHealthMonitoring = true;
-            _options.V25Features.EnablePluggableStorage = true;
-            _options.V25Features.EnableConnectionPooling = true;
-            _options.V25Features.EnableSessionBackup = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder EnableAllExperimental()
-        {
-            EnableAllStable();
-            _options.V25Features.EnableAsyncMessageStreams = true;
-            _options.V25Features.EnablePostQuantumPreparation = true;
-            _options.V25Features.EnableWebRTCTransport = true;
-            return this;
-        }
-
-        public IV25FeaturesBuilder WithPostQuantum(Action<IPostQuantumOptionsBuilder> configure)
-        {
-            _options.V25Features.EnablePostQuantumPreparation = true;
-            _options.PostQuantumOptions ??= new Domain.PostQuantumOptions();
-            
-            var builder = new PostQuantumOptionsBuilder(_options.PostQuantumOptions);
-            configure(builder);
-            return this;
-        }
-
-        public IV25FeaturesBuilder WithWebRTC(Action<IWebRTCOptionsBuilder> configure)
-        {
-            _options.V25Features.EnableWebRTCTransport = true;
-            _options.WebRTCOptions ??= new Domain.WebRTCOptions();
-            
-            var builder = new WebRTCOptionsBuilder(_options.WebRTCOptions);
-            configure(builder);
-            return this;
-        }
-
-        public IV25FeaturesBuilder WithAdvancedKeyRotation(Action<IKeyRotationPolicyBuilder> configure)
-        {
-            _options.AdvancedKeyRotationPolicy ??= new Domain.KeyRotationPolicy();
-            
-            var builder = new KeyRotationPolicyBuilder(_options.AdvancedKeyRotationPolicy);
             configure(builder);
             return this;
         }

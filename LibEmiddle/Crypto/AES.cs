@@ -357,8 +357,7 @@ namespace LibEmiddle.Crypto
 
                 rc = Sodium.crypto_aead_aes256gcm_decrypt_detached_afternm(
                     plaintext,            // m
-                    out ulong mlen,       // mlen_p
-                    null, // nsec
+                    default,              // nsec (always null)
                     ciphertext,           // c
                     (ulong)ciphertext.Length,
                     tag,                  // mac
@@ -367,7 +366,7 @@ namespace LibEmiddle.Crypto
                     nonce,                // npub
                     statePtr             // ctx
                 );
-                if (rc != 0 || mlen != (ulong)plaintext.Length)
+                if (rc != 0)
                     throw new CryptographicException("AES-GCM detached decryption failed");
             }
 

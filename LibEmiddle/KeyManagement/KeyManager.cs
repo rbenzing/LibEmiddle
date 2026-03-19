@@ -18,7 +18,7 @@ namespace LibEmiddle.KeyManagement
         private readonly TimeSpan _cacheExpiration = TimeSpan.FromMinutes(10);
         private readonly Timer _cacheCleanupTimer;
         private readonly object _cacheLock = new object();
-        private bool _disposed;
+        private volatile bool _disposed;
 
         /// <summary>
         /// Represents a cached key with expiration time
@@ -27,7 +27,7 @@ namespace LibEmiddle.KeyManagement
         {
             public byte[] Key { get; private set; }
             public DateTime ExpirationTime { get; }
-            private bool _disposed;
+            private volatile bool _disposed;
 
             public CachedKey(byte[] key, TimeSpan expiration)
             {
@@ -153,7 +153,7 @@ namespace LibEmiddle.KeyManagement
                 throw new ArgumentException("Key ID cannot be null or empty", nameof(keyId));
 
             // Get the key first to authenticate
-            byte[]? success = RetrieveKeyAsync(keyId, password).GetAwaiter().GetResult();
+            byte[]? success = await RetrieveKeyAsync(keyId, password).ConfigureAwait(false);
             if (success == null)
             {
                 return false;

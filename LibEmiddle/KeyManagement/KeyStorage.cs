@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Security.Cryptography;
+using System.Text;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
@@ -12,7 +13,7 @@ namespace LibEmiddle.KeyManagement
     internal class KeyStorage : IDisposable
     {
         private readonly string _baseStoragePath;
-        private bool _disposed;
+        private volatile bool _disposed;
 
         // Default file extensions
         private const string KEY_FILE_EXTENSION = ".key";
@@ -72,7 +73,7 @@ namespace LibEmiddle.KeyManagement
 
                     // Serialize metadata
                     string metadataJson = System.Text.Json.JsonSerializer.Serialize(metadata);
-                    byte[] metadataBytes = Encoding.Default.GetBytes(metadataJson);
+                    byte[] metadataBytes = Encoding.UTF8.GetBytes(metadataJson);
 
                     // Generate a nonce for encryption
                     byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
@@ -491,32 +492,14 @@ namespace LibEmiddle.KeyManagement
 
         private bool StoreKeyEncryptionKey(string keyId, byte[] encryptionKey)
         {
-            // Ensure the directory exists
             string dirPath = Path.GetDirectoryName(GetKeyEncryptionKeyPath(keyId)) ?? _baseStoragePath;
             Directory.CreateDirectory(dirPath);
 
-            // Store the encryption key with platform-specific protection
             try
             {
                 string filePath = GetKeyEncryptionKeyPath(keyId);
-
-                // Use DPAPI or similar platform-specific protection
-                byte[] protectedData;
-
-                // Use custom protection (Sodium secretbox with a hardcoded key)
-                // In a production environment, you'd want a better key management strategy
-                byte[] hardcodedKey = GetHardcodedEncryptionKey();
-                byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
-                byte[] ciphertext = AES.AESEncrypt(encryptionKey, hardcodedKey, nonce, null);
-
-                // Combine nonce and ciphertext
-                protectedData = new byte[nonce.Length + ciphertext.Length];
-                nonce.AsSpan().CopyTo(protectedData.AsSpan(0));
-                ciphertext.AsSpan().CopyTo(protectedData.AsSpan(nonce.Length));
-
-                // Write to file
+                byte[] protectedData = ProtectKeyMaterial(encryptionKey);
                 File.WriteAllBytes(filePath, protectedData);
-
                 return true;
             }
             catch (Exception ex)
@@ -531,26 +514,11 @@ namespace LibEmiddle.KeyManagement
             try
             {
                 string filePath = GetKeyEncryptionKeyPath(keyId);
-
                 if (!File.Exists(filePath))
                     return null;
 
-                // Read protected data
                 byte[] protectedData = File.ReadAllBytes(filePath);
-
-                // Use custom protection (Sodium secretbox with a hardcoded key)
-                byte[] hardcodedKey = GetHardcodedEncryptionKey(); // Should match the key used for encryption
-
-                // Extract nonce
-                byte[] nonce = new byte[Constants.NONCE_SIZE];
-                protectedData.AsSpan(0, nonce.Length).CopyTo(nonce);
-
-                // Extract ciphertext
-                byte[] ciphertext = new byte[protectedData.Length - nonce.Length];
-                protectedData.AsSpan(nonce.Length).CopyTo(ciphertext);
-
-                // Decrypt
-                return AES.AESDecrypt(ciphertext, hardcodedKey, nonce, null);
+                return UnprotectKeyMaterial(protectedData);
             }
             catch (Exception ex)
             {
@@ -572,20 +540,70 @@ namespace LibEmiddle.KeyManagement
         }
 
         /// <summary>
-        /// Gets a hardcoded encryption key for protecting stored encryption keys.
-        /// In production, this should be replaced with proper key management.
+        /// Protects key material using OS-provided DPAPI on Windows, or a machine-derived key on other platforms.
         /// </summary>
-        private static byte[] GetHardcodedEncryptionKey()
+        private static byte[] ProtectKeyMaterial(byte[] data)
         {
-            // Use a fixed but non-zero key for testing/development
-            // In production, this should come from a secure key management system
-            return new byte[]
+            if (OperatingSystem.IsWindows())
             {
-                0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
-                0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c,
-                0x76, 0x2e, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2,
-                0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f
-            };
+                return ProtectedData.Protect(
+                    data, null, DataProtectionScope.CurrentUser);
+            }
+
+            // Non-Windows: encrypt with a machine-derived key
+            byte[] machineKey = DeriveMachineKey();
+            try
+            {
+                byte[] nonce = Sodium.GenerateRandomBytes(Constants.NONCE_SIZE);
+                byte[] ciphertext = AES.AESEncrypt(data, machineKey, nonce, null);
+                byte[] result = new byte[nonce.Length + ciphertext.Length];
+                nonce.AsSpan().CopyTo(result.AsSpan(0, nonce.Length));
+                ciphertext.AsSpan().CopyTo(result.AsSpan(nonce.Length));
+                return result;
+            }
+            finally
+            {
+                SecureMemory.SecureClear(machineKey);
+            }
+        }
+
+        /// <summary>
+        /// Unprotects key material that was protected by <see cref="ProtectKeyMaterial"/>.
+        /// </summary>
+        private static byte[] UnprotectKeyMaterial(byte[] protectedData)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return ProtectedData.Unprotect(
+                    protectedData, null, DataProtectionScope.CurrentUser);
+            }
+
+            // Non-Windows: decrypt with machine-derived key
+            byte[] machineKey = DeriveMachineKey();
+            try
+            {
+                byte[] nonce = new byte[Constants.NONCE_SIZE];
+                protectedData.AsSpan(0, nonce.Length).CopyTo(nonce);
+                byte[] ciphertext = new byte[protectedData.Length - nonce.Length];
+                protectedData.AsSpan(nonce.Length).CopyTo(ciphertext);
+                return AES.AESDecrypt(ciphertext, machineKey, nonce, null);
+            }
+            finally
+            {
+                SecureMemory.SecureClear(machineKey);
+            }
+        }
+
+        /// <summary>
+        /// Derives a machine-specific 32-byte key from stable environment identifiers using HKDF-SHA256.
+        /// Used as a fallback on non-Windows platforms where DPAPI is unavailable.
+        /// </summary>
+        private static byte[] DeriveMachineKey()
+        {
+            string machineId = Environment.MachineName + Environment.UserName + "LibEmiddle_v1";
+            byte[] ikm = Encoding.UTF8.GetBytes(machineId);
+            byte[] salt = Encoding.UTF8.GetBytes("LibEmiddle_KeyProtection_Salt_v1");
+            return Sodium.HkdfDerive(ikm, salt, outputLength: 32);
         }
 
         #endregion

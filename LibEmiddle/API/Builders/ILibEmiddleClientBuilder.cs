@@ -74,19 +74,6 @@ namespace LibEmiddle.API.Builders
         ILibEmiddleClientBuilder WithPerformance(Action<IPerformanceOptionsBuilder> configure);
 
         /// <summary>
-        /// Enables v2.5 features.
-        /// </summary>
-        /// <param name="configure">Action to configure v2.5 features.</param>
-        /// <returns>The builder instance for method chaining.</returns>
-        ILibEmiddleClientBuilder WithV25Features(Action<IV25FeaturesBuilder> configure);
-
-        /// <summary>
-        /// Enables all stable v2.5 features for beta testing.
-        /// </summary>
-        /// <returns>The builder instance for method chaining.</returns>
-        ILibEmiddleClientBuilder EnableStableBeta();
-
-        /// <summary>
         /// Configures custom options directly.
         /// </summary>
         /// <param name="configure">Action to configure the options object.</param>

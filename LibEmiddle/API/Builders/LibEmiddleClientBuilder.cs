@@ -53,7 +53,6 @@ namespace LibEmiddle.API.Builders
                 .WithStorage(storage => storage
                     .DisableSessionPersistence()
                     .SetMaxMessageHistory(100))
-                .EnableStableBeta()
                 .Build();
         }
 

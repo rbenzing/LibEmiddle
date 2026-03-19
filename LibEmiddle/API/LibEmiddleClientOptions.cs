@@ -178,98 +178,67 @@ public sealed class LibEmiddleClientOptions
     /// </summary>
     public BackupOptions BackupOptions { get; set; } = new();
 
-    // --- v2.5 Enhanced Features (Additive) ---
+    // --- Enhanced Features ---
 
     /// <summary>
-    /// Gets or sets the cryptographic key exchange mode to use (v2.5).
+    /// Gets or sets the cryptographic key exchange mode to use.
     /// Defaults to Classical for backward compatibility.
     /// </summary>
     public KeyExchangeMode KeyExchangeMode { get; set; } = KeyExchangeMode.Classical;
 
     /// <summary>
-    /// Gets or sets whether to enable post-quantum cryptography fallback (v2.5).
+    /// Gets or sets whether to enable post-quantum cryptography fallback.
     /// When enabled, the system will attempt to use hybrid crypto when available.
     /// </summary>
     public bool EnablePostQuantumFallback { get; set; } = false;
 
     /// <summary>
-    /// Gets or sets message batching configuration (v2.5).
+    /// Gets or sets message batching configuration.
     /// When null, batching is disabled (default behavior).
     /// </summary>
     public BatchingOptions? BatchingOptions { get; set; } = null;
 
     /// <summary>
-    /// Gets or sets the post-quantum cryptography configuration (v2.5).
-    /// Only used when V25Features.EnablePostQuantumPreparation is true and KeyExchangeMode is Hybrid or PostQuantum.
+    /// Gets or sets the post-quantum cryptography configuration.
+    /// Only used when KeyExchangeMode is Hybrid or PostQuantum.
     /// </summary>
     public PostQuantumOptions? PostQuantumOptions { get; set; } = null;
 
     /// <summary>
-    /// Gets or sets resilience configuration for network operations (v2.5).
+    /// Gets or sets resilience configuration for network operations.
     /// When null, basic retry logic is used (existing behavior).
     /// </summary>
     public ResilienceOptions? ResilienceOptions { get; set; } = null;
 
     /// <summary>
-    /// Gets or sets connection pooling configuration (v2.5).
+    /// Gets or sets connection pooling configuration.
     /// When null, no connection pooling is used (existing behavior).
     /// </summary>
     public ConnectionPoolOptions? ConnectionPoolOptions { get; set; } = null;
 
     /// <summary>
-    /// Gets or sets enhanced backup configuration (v2.5).
+    /// Gets or sets enhanced backup configuration.
     /// When null, uses the legacy BackupOptions configuration.
     /// </summary>
     public Domain.BackupOptions? EnhancedBackupOptions { get; set; } = null;
 
     /// <summary>
-    /// Gets or sets WebRTC transport configuration (v2.5).
-    /// Only used when TransportType is WebRTC and V25Features.EnableWebRTCTransport is true.
+    /// Gets or sets WebRTC transport configuration.
+    /// Only used when TransportType is WebRTC.
     /// </summary>
     public WebRTCOptions? WebRTCOptions { get; set; } = null;
 
     /// <summary>
-    /// Gets or sets advanced key rotation policy configuration (v2.5).
+    /// Gets or sets advanced key rotation policy configuration.
     /// When null, uses the default rotation strategy (DefaultRotationStrategy property).
     /// </summary>
     public KeyRotationPolicy? AdvancedKeyRotationPolicy { get; set; } = null;
 
     /// <summary>
-    /// Gets or sets feature flags for v2.5 functionality (v2.5).
-    /// Controls which new features are enabled.
-    /// </summary>
-    public FeatureFlags V25Features { get; set; } = new();
-
-    /// <summary>
-    /// Gets or sets multi-device configuration options (v2.5).
+    /// Gets or sets multi-device configuration options.
     /// Provides centralized configuration for multi-device features.
     /// </summary>
     public MultiDeviceOptions MultiDeviceOptions { get; set; } = new();
-
-    /// <summary>
-    /// Gets or sets the user agent string to append v2.5 information (v2.5).
-    /// When null, uses the default UserAgent property.
-    /// </summary>
-    public string? V25UserAgent { get; set; } = null;
-
-    /// <summary>
-    /// Gets the effective user agent string including v2.5 information.
-    /// </summary>
-    public string EffectiveUserAgent => V25UserAgent ?? $"{UserAgent} (v2.5-enabled)";
-
-    /// <summary>
-    /// Gets whether any v2.5 features are enabled.
-    /// </summary>
-    public bool HasV25Features => V25Features.EnableAsyncMessageStreams ||
-                                  V25Features.EnableMessageBatching ||
-                                  V25Features.EnableAdvancedGroupManagement ||
-                                  V25Features.EnableHealthMonitoring ||
-                                  V25Features.EnableFluentBuilder ||
-                                  V25Features.EnablePluggableStorage ||
-                                  V25Features.EnablePostQuantumPreparation ||
-                                  V25Features.EnableWebRTCTransport ||
-                                  V25Features.EnableConnectionPooling ||
-                                  V25Features.EnableSessionBackup;
 
     /// <summary>
     /// Validates the configuration options and returns any validation errors.
@@ -299,15 +268,6 @@ public sealed class LibEmiddleClientOptions
                 {
                     errors.Add($"ServerEndpoint scheme must be {expectedScheme} or {expectedSchemeSecure} for {TransportType} transport");
                 }
-            }
-        }
-
-        // Validate WebRTC transport (v2.5)
-        if (TransportType == TransportType.WebRTC)
-        {
-            if (!V25Features.EnableWebRTCTransport)
-            {
-                errors.Add("WebRTC transport requires V25Features.EnableWebRTCTransport to be enabled");
             }
         }
 
@@ -374,13 +334,7 @@ public sealed class LibEmiddleClientOptions
             }
         }
 
-        // Validate v2.5 feature configurations
-        if (!V25Features.IsValid())
-        {
-            errors.Add("V25Features configuration is invalid");
-        }
-
-        // Validate v2.5 optional configurations
+        // Validate optional configurations
         if (BatchingOptions != null && !BatchingOptions.IsValid())
         {
             errors.Add("BatchingOptions configuration is invalid");
@@ -410,35 +364,15 @@ public sealed class LibEmiddleClientOptions
             errors.Add("EnhancedBackupOptions configuration is invalid");
         }
 
-        // Validate feature flag dependencies
+        // Validate feature dependencies
         if (EnablePostQuantumFallback && KeyExchangeMode == KeyExchangeMode.Classical)
         {
             errors.Add("EnablePostQuantumFallback requires KeyExchangeMode to be Hybrid or PostQuantum");
         }
 
-        if (BatchingOptions != null && !V25Features.EnableMessageBatching)
-        {
-            errors.Add("BatchingOptions requires V25Features.EnableMessageBatching to be enabled");
-        }
-
-        if (PostQuantumOptions != null && !V25Features.EnablePostQuantumPreparation)
-        {
-            errors.Add("PostQuantumOptions requires V25Features.EnablePostQuantumPreparation to be enabled");
-        }
-
         if (PostQuantumOptions != null && KeyExchangeMode == KeyExchangeMode.Classical)
         {
             errors.Add("PostQuantumOptions requires KeyExchangeMode to be Hybrid or PostQuantum");
-        }
-
-        if (ConnectionPoolOptions != null && !V25Features.EnableConnectionPooling)
-        {
-            errors.Add("ConnectionPoolOptions requires V25Features.EnableConnectionPooling to be enabled");
-        }
-
-        if (WebRTCOptions != null && !V25Features.EnableWebRTCTransport)
-        {
-            errors.Add("WebRTCOptions requires V25Features.EnableWebRTCTransport to be enabled");
         }
 
         if (WebRTCOptions != null && TransportType != TransportType.WebRTC)
@@ -513,7 +447,7 @@ public sealed class LibEmiddleClientOptions
             RateLimitOptions = RateLimitOptions.Clone(),
             SecurityPolicy = SecurityPolicy.Clone(),
             BackupOptions = BackupOptions.Clone(),
-            // v2.5 properties
+            // Enhanced properties
             KeyExchangeMode = KeyExchangeMode,
             EnablePostQuantumFallback = EnablePostQuantumFallback,
             BatchingOptions = BatchingOptions,
@@ -523,9 +457,7 @@ public sealed class LibEmiddleClientOptions
             EnhancedBackupOptions = EnhancedBackupOptions,
             WebRTCOptions = WebRTCOptions?.Clone(),
             AdvancedKeyRotationPolicy = AdvancedKeyRotationPolicy?.Clone(),
-            V25Features = V25Features, // FeatureFlags is a class, so this is a reference copy
-            MultiDeviceOptions = MultiDeviceOptions.Clone(),
-            V25UserAgent = V25UserAgent
+            MultiDeviceOptions = MultiDeviceOptions.Clone()
         };
     }
 }

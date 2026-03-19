@@ -197,7 +197,7 @@ namespace LibEmiddle.Core
         public sealed class SecureArray<T> : IDisposable where T : struct
         {
             private readonly T[] _array;
-            private bool _disposed = false;
+            private volatile bool _disposed = false;
             private bool _isLocked = false;
 
             /// <summary>
@@ -293,7 +293,7 @@ namespace LibEmiddle.Core
         {
             private readonly IntPtr _ptr;
             private readonly int _length;
-            private bool _disposed;
+            private volatile bool _disposed;
 
             public SecureBuffer(int length)
             {

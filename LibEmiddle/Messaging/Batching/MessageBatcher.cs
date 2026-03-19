@@ -23,7 +23,7 @@ namespace LibEmiddle.Messaging.Batching
         private int _sequenceCounter = 0;
         
         private readonly BatchingStatistics _statistics = new();
-        private bool _disposed = false;
+        private volatile bool _disposed = false;
 
         public BatchingOptions Options => _options;
 

@@ -44,7 +44,8 @@ namespace LibEmiddle.Messaging.Chat
         public event EventHandler<MessageReceivedEventArgs>? MessageReceived;
 
         // Collections
-        private readonly ConcurrentQueue<MessageRecord> _messageHistory = new();
+        private readonly List<MessageRecord> _messageHistory = new();
+        private const int MaxTrackedMessages = 100;
         public ConcurrentDictionary<string, string> Metadata { get; } = new();
 
         // Services
@@ -247,11 +248,13 @@ namespace LibEmiddle.Messaging.Chat
         /// <summary>
         /// Encrypts and sends a message using the current Double Ratchet state.
         /// Handles state updates and emits events.
+        /// A transport must be configured via the session builder before calling this method.
         /// </summary>
         /// <param name="message">Plaintext message to send.</param>
         /// <returns>True if the message was sent successfully, false otherwise.</returns>
         /// <exception cref="ArgumentException">If message is null or empty.</exception>
         /// <exception cref="InvalidOperationException">If session is Terminated or Suspended.</exception>
+        /// <exception cref="NotSupportedException">If no transport is configured on the session.</exception>
         /// <exception cref="ObjectDisposedException"></exception>
         public async Task<bool> SendMessageAsync(string message)
         {
@@ -264,9 +267,8 @@ namespace LibEmiddle.Messaging.Chat
                 return false;
             }
 
-            // In a real implementation, this would send the message via transport
-            // For now, we'll just return success
-            return true;
+            throw new NotSupportedException(
+                "No transport configured. Register a transport via the builder before sending messages.");
         }
 
         /// <summary>
@@ -337,17 +339,15 @@ namespace LibEmiddle.Messaging.Chat
                 _cryptoSession = updatedSession;
                 LastMessageSentAt = DateTime.UtcNow;
 
-                // Track in history
-                if (_messageHistory.Count < Constants.MAX_TRACKED_MESSAGE_IDS)
+                // Track in history and enforce retention limit
+                _messageHistory.Add(new MessageRecord
                 {
-                    _messageHistory.Enqueue(new MessageRecord
-                    {
-                        IsOutgoing = true,
-                        Timestamp = DateTime.UtcNow,
-                        Content = message,
-                        EncryptedMessage = encryptedMessage
-                    });
-                }
+                    IsOutgoing = true,
+                    Timestamp = DateTime.UtcNow,
+                    Content = message,
+                    EncryptedMessage = encryptedMessage
+                });
+                TrimMessageHistory();
 
                 return encryptedMessage;
             }
@@ -410,16 +410,17 @@ namespace LibEmiddle.Messaging.Chat
                 _cryptoSession = updatedSession;
                 LastMessageReceivedAt = DateTime.UtcNow;
 
-                // Track in history
-                if (_messageHistory.Count < Constants.MAX_TRACKED_MESSAGE_IDS && decryptedMessage != null)
+                // Track in history and enforce retention limit
+                if (decryptedMessage != null)
                 {
-                    _messageHistory.Enqueue(new MessageRecord
+                    _messageHistory.Add(new MessageRecord
                     {
                         IsOutgoing = false,
                         Timestamp = DateTime.UtcNow,
                         Content = decryptedMessage,
                         EncryptedMessage = encryptedMessage
                     });
+                    TrimMessageHistory();
                 }
 
                 return decryptedMessage;
@@ -453,23 +454,28 @@ namespace LibEmiddle.Messaging.Chat
         }
 
         /// <summary>
-        /// Retrieves message history (thread-safe read from ConcurrentQueue).
+        /// Retrieves a snapshot of message history. Thread-safe via session lock.
         /// </summary>
         public IReadOnlyCollection<MessageRecord> GetMessageHistory(int limit = 100, int startIndex = 0)
         {
             ThrowIfDisposed();
-            // ConcurrentQueue ToArray is snapshot, Skip/Take is LINQ
-            return _messageHistory.Skip(Math.Max(0, startIndex)).Take(Math.Max(0, limit)).ToList().AsReadOnly();
+            lock (_messageHistory)
+            {
+                return _messageHistory.Skip(Math.Max(0, startIndex)).Take(Math.Max(0, limit)).ToList().AsReadOnly();
+            }
         }
 
         /// <summary> Gets the count of messages in the history. </summary>
         public int GetMessageCount()
         {
             ThrowIfDisposed();
-            return _messageHistory.Count;
+            lock (_messageHistory)
+            {
+                return _messageHistory.Count;
+            }
         }
 
-        /// <summary> Clears the message history. </summary>
+        /// <summary> Clears the message history, zeroing plaintext content before removal. </summary>
         public int ClearMessageHistory()
         {
             ThrowIfDisposed();
@@ -478,9 +484,32 @@ namespace LibEmiddle.Messaging.Chat
 
         private int ClearMessageHistoryInternal()
         {
-            int count = 0;
-            while (_messageHistory.TryDequeue(out _)) { count++; }
-            return count;
+            lock (_messageHistory)
+            {
+                int count = _messageHistory.Count;
+                foreach (var record in _messageHistory)
+                {
+                    record.SecureWipe();
+                }
+                _messageHistory.Clear();
+                return count;
+            }
+        }
+
+        /// <summary>
+        /// Trims the message history to <see cref="MaxTrackedMessages"/>, zeroing the
+        /// plaintext <see cref="MessageRecord.Content"/> of evicted entries to minimise
+        /// the window of sensitive data in heap memory.
+        /// Must be called while the session lock or _messageHistory lock is held.
+        /// </summary>
+        private void TrimMessageHistory()
+        {
+            while (_messageHistory.Count > MaxTrackedMessages)
+            {
+                var oldest = _messageHistory[0];
+                oldest.SecureWipe();
+                _messageHistory.RemoveAt(0);
+            }
         }
 
         /// <summary> Sets custom metadata. </summary>
@@ -523,12 +552,11 @@ namespace LibEmiddle.Messaging.Chat
             }
         }
 
-        // --- v2.5 Message Batching Methods ---
+        // --- Message Batching Methods ---
 
         /// <summary>
-        /// Sends a message with optional batching (v2.5).
+        /// Sends a message with optional batching.
         /// If batching is enabled, the message may be queued for later transmission.
-        /// Requires V25Features.EnableMessageBatching = true.
         /// </summary>
         /// <param name="message">The plaintext message to send.</param>
         /// <param name="priority">Priority level for batching.</param>
@@ -590,8 +618,8 @@ namespace LibEmiddle.Messaging.Chat
         }
 
         /// <summary>
-        /// Gets the current message batcher if batching is enabled (v2.5).
-        /// Requires V25Features.EnableMessageBatching = true.
+        /// Gets the current message batcher if batching is enabled.
+        /// Returns null if batching is not configured for this session.
         /// </summary>
         /// <returns>The message batcher, or null if batching is not enabled.</returns>
         public IMessageBatcher? GetMessageBatcher()
@@ -601,8 +629,8 @@ namespace LibEmiddle.Messaging.Chat
         }
 
         /// <summary>
-        /// Forces any pending batched messages to be sent immediately (v2.5).
-        /// Requires V25Features.EnableMessageBatching = true.
+        /// Forces any pending batched messages to be sent immediately.
+        /// Returns 0 if batching is not configured for this session.
         /// </summary>
         /// <returns>The number of messages flushed.</returns>
         public async Task<int> FlushPendingMessagesAsync()
@@ -627,12 +655,12 @@ namespace LibEmiddle.Messaging.Chat
             return 0;
         }
 
-        // --- v2.5 Async Stream Methods ---
+        // --- Async Stream Methods ---
 
         /// <summary>
-        /// Gets an async stream of incoming messages (v2.5).
+        /// Gets an async stream of incoming messages.
         /// This runs in parallel with the MessageReceived event.
-        /// Requires V25Features.EnableAsyncMessageStreams = true.
+        /// Requires async streaming to be enabled when the session is created.
         /// </summary>
         /// <param name="cancellationToken">Token to cancel the stream.</param>
         /// <returns>Async enumerable of message received events.</returns>
@@ -646,7 +674,7 @@ namespace LibEmiddle.Messaging.Chat
             if (!_asyncStreamingEnabled || _messageReader == null)
             {
                 throw new InvalidOperationException(
-                    "Async message streaming is not enabled. Enable V25Features.EnableAsyncMessageStreams.");
+                    "Async message streaming is not enabled. Create the session with enableAsyncStreaming: true.");
             }
 
             await foreach (var message in _messageReader.ReadAllAsync(cancellationToken))
@@ -656,9 +684,9 @@ namespace LibEmiddle.Messaging.Chat
         }
 
         /// <summary>
-        /// Gets an async stream of incoming messages with optional filtering (v2.5).
+        /// Gets an async stream of incoming messages with optional filtering.
         /// This runs in parallel with the MessageReceived event.
-        /// Requires V25Features.EnableAsyncMessageStreams = true.
+        /// Requires async streaming to be enabled when the session is created.
         /// </summary>
         /// <param name="messageFilter">Optional filter predicate for messages.</param>
         /// <param name="cancellationToken">Token to cancel the stream.</param>
@@ -674,7 +702,7 @@ namespace LibEmiddle.Messaging.Chat
             if (!_asyncStreamingEnabled || _messageReader == null)
             {
                 throw new InvalidOperationException(
-                    "Async message streaming is not enabled. Enable V25Features.EnableAsyncMessageStreams.");
+                    "Async message streaming is not enabled. Create the session with enableAsyncStreaming: true.");
             }
 
             await foreach (var message in _messageReader.ReadAllAsync(cancellationToken))

@@ -42,7 +42,7 @@ namespace LibEmiddle.Sessions
 
         private readonly ConcurrentDictionary<string, ISession> _activeSessions = new();
         private readonly SemaphoreSlim _operationLock = new(1, 1);
-        private bool _disposed;
+        private volatile bool _disposed;
 
         /// <inheritdoc/>
         public async Task<ISession> CreateSessionAsync(byte[] recipientKey, object? options = null)
@@ -219,6 +219,12 @@ namespace LibEmiddle.Sessions
                     string bundleJson = System.Text.Encoding.UTF8.GetString(recipientKey);
                     recipientBundle = JsonSerialization.Deserialize<X3DHPublicBundle>(bundleJson)
                         ?? throw new ArgumentException("Invalid recipient bundle format", nameof(recipientKey));
+
+                    // Cache the bundle so future calls with just the identity key can find it
+                    if (recipientBundle.IdentityKey != null && recipientBundle.IdentityKey.Length > 0)
+                    {
+                        _ = _persistenceManager.SaveKeyBundleAsync(recipientBundle);
+                    }
                 }
 
                 // Validate the bundle
@@ -447,20 +453,22 @@ namespace LibEmiddle.Sessions
         {
             try
             {
-                // Extract the group ID from the session ID
+                // Extract the group ID from the session ID (format: "group-{groupId}-{guid}")
+                // The group name is not stored in the session ID — it is restored from serialized state.
                 var parts = sessionId.Split('-');
-                if (parts.Length < 2)
+                if (parts.Length < 2 || string.IsNullOrEmpty(parts[1]))
                 {
                     LoggingManager.LogError("SessionManager", $"Invalid group session ID format: {sessionId}");
                     return null;
                 }
 
-                string groupId = parts[1]; // Assumes format "group-{groupId}-{guid}"
+                string groupId = parts[1];
 
-                // Create a new GroupSession instance
+                // Create a new GroupSession instance with an empty group name placeholder;
+                // the real name will be restored by RestoreSerializedStateAsync below.
                 var groupSession = new GroupSession(
                     groupId,
-                    parts[2],
+                    string.Empty,
                     _identityKeyPair,
                     KeyRotationStrategy.Standard); // Default strategy, will be restored from state
 
@@ -487,6 +495,39 @@ namespace LibEmiddle.Sessions
         }
 
         /// <summary>
+        /// Returns an existing active <see cref="IChatSession"/> with <paramref name="recipientPublicKey"/>,
+        /// or creates a new one if none exists. Avoids opening duplicate sessions to the same peer.
+        /// </summary>
+        public async Task<IChatSession> GetOrCreateChatSessionAsync(
+            byte[] recipientPublicKey,
+            string? recipientUserId = null)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(recipientPublicKey, nameof(recipientPublicKey));
+
+            // Fast path: check the in-memory session cache
+            foreach (var kv in _activeSessions)
+            {
+                if (kv.Value is Messaging.Chat.ChatSession cs &&
+                    cs.RemotePublicKey.AsSpan().SequenceEqual(recipientPublicKey))
+                {
+                    return cs;
+                }
+            }
+
+            // No cached session — create one
+            var options = string.IsNullOrEmpty(recipientUserId)
+                ? null
+                : new ChatSessionOptions { RemoteUserId = recipientUserId };
+
+            var session = await CreateSessionAsync(recipientPublicKey, options);
+            if (session is IChatSession chatSession)
+                return chatSession;
+
+            throw new InvalidOperationException("Failed to create a chat session for the given recipient key.");
+        }
+
+        /// <summary>
         /// Creates and validates a local X3DH key bundle for receiving messages.
         /// </summary>
         /// <param name="numOneTimeKeys">Number of one-time prekeys to generate.</param>
@@ -508,35 +549,28 @@ namespace LibEmiddle.Sessions
         }
 
         /// <summary>
-        /// Gets or creates a recipient's key bundle.
+        /// Retrieves a recipient's key bundle by their identity key.
+        /// The bundle must have been previously received and cached via a call to
+        /// <see cref="CreateSessionAsync"/> that supplied a serialized <see cref="X3DHPublicBundle"/>.
         /// </summary>
-        /// <param name="recipientKey">The recipient's identity key.</param>
-        /// <returns>The recipient's key bundle.</returns>
+        /// <param name="recipientKey">The recipient's Ed25519 identity public key (32 bytes).</param>
+        /// <returns>The cached <see cref="X3DHPublicBundle"/> for this identity key.</returns>
+        /// <exception cref="ArgumentException">
+        /// Thrown when no cached bundle is found for the given identity key.
+        /// Obtain the recipient's full X3DHPublicBundle (IdentityKey + SignedPreKey + signature)
+        /// and pass it as UTF-8 JSON bytes to <see cref="CreateSessionAsync"/> first.
+        /// </exception>
         private async Task<X3DHPublicBundle> GetOrCreateRecipientBundleAsync(byte[] recipientKey)
         {
-            // In a real implementation, this would fetch the bundle from a server
-            // For now, we'll create a mock bundle for testing purposes
+            var bundle = await _persistenceManager.LoadKeyBundleByIdentityKeyAsync(recipientKey);
+            if (bundle != null)
+                return bundle;
 
-            // Generate a signed prekey
-            var signedPreKeyPair = await _cryptoProvider.GenerateKeyPairAsync(KeyType.X25519);
-
-            // Sign the prekey with the recipient's identity key
-            // Note: In a real scenario, the server would already have this bundle signed by the recipient
-            // This is just for testing and demo purposes
-            byte[] signature = new byte[64]; // Mock signature
-
-            // Create the bundle
-            return new X3DHPublicBundle
-            {
-                IdentityKey = recipientKey,
-                SignedPreKey = signedPreKeyPair.PublicKey,
-                SignedPreKeyId = 1,
-                SignedPreKeySignature = signature,
-                OneTimePreKeys = new List<byte[]>(),
-                OneTimePreKeyIds = new List<uint>(),
-                ProtocolVersion = $"{ProtocolVersion.MAJOR_VERSION}.{ProtocolVersion.MINOR_VERSION}",
-                CreationTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            };
+            throw new ArgumentException(
+                "No cached key bundle found for the supplied identity key. " +
+                "Pass the recipient's full X3DHPublicBundle (serialized as UTF-8 JSON) as the " +
+                "recipientKey argument to CreateSessionAsync to register it, then retry.",
+                nameof(recipientKey));
         }
 
         #region IDisposable Implementation

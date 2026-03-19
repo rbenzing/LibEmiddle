@@ -23,7 +23,7 @@ public abstract class BaseMailboxTransport(ICryptoProvider cryptoProvider) : IMa
     /// <summary>
     /// Tracks whether this object has been disposed.
     /// </summary>
-    private bool _disposed;
+    private volatile bool _disposed;
 
     /// <summary>
     /// Event raised when new messages are received.
@@ -513,7 +513,9 @@ public abstract class BaseMailboxTransport(ICryptoProvider cryptoProvider) : IMa
                 // Stop any listening operations
                 try
                 {
-                    StopListeningAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+                    // SYNC-REQUIRED: Dispose(bool) cannot be async. Use Task.Run to avoid
+                    // deadlocks on sync contexts (ASP.NET, WPF, WinForms).
+                    Task.Run(() => StopListeningAsync()).GetAwaiter().GetResult();
                 }
                 catch (Exception ex)
                 {

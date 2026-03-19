@@ -1,4 +1,5 @@
 using LibEmiddle.Abstractions;
+using LibEmiddle.Core;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -15,7 +16,7 @@ namespace LibEmiddle.Storage
         private readonly JsonSerializerOptions _jsonOptions;
         private readonly ConcurrentDictionary<string, StorageMetadata> _metadataCache;
         private readonly Timer _cleanupTimer;
-        private bool _disposed = false;
+        private volatile bool _disposed = false;
 
         public string ProviderName => "Enhanced File Storage";
         public bool SupportsTransactions => false; // File system doesn't support true transactions
@@ -149,8 +150,9 @@ namespace LibEmiddle.Storage
                 var filePath = GetFilePath(key);
                 var metadataPath = GetMetadataPath(key);
 
-                // Ensure directory exists
+                // Ensure data and metadata directories exist
                 Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(metadataPath)!);
 
                 // Serialize and store the value
                 var json = JsonSerializer.Serialize(value, _jsonOptions);
@@ -283,21 +285,15 @@ namespace LibEmiddle.Storage
                                 // Backup existing file if it exists
                                 var filePath = GetFilePath(operation.Key);
                                 string? backupPath = null;
-                                
+
                                 if (File.Exists(filePath))
                                 {
                                     backupPath = filePath + ".backup";
                                     File.Copy(filePath, backupPath, true);
                                 }
 
-                                // Perform the set operation using reflection
-                                var method = typeof(EnhancedFileStorageProvider)
-                                    .GetMethod(nameof(SetAsync))!
-                                    .MakeGenericMethod(operation.ValueType);
-
-                                object?[] parameters = { operation.Key, operation.Value, operation.Expiry };
-                                var task = (Task<bool>)method.Invoke(this, parameters)!;
-                                var success = await task;
+                                // Perform the set operation using compile-time dispatch (no reflection)
+                                var success = await SetAsyncCore(operation.Key, operation.Value, operation.ValueType, operation.Expiry);
 
                                 if (!success)
                                     throw new InvalidOperationException($"Failed to set key: {operation.Key}");
@@ -422,6 +418,47 @@ namespace LibEmiddle.Storage
 
         #region Private Methods
 
+        /// <summary>
+        /// Non-generic set implementation used by BatchAsync to avoid runtime reflection.
+        /// Serializes <paramref name="value"/> using the supplied <paramref name="valueType"/>
+        /// so that no <c>MethodInfo.MakeGenericMethod</c> call is required.
+        /// </summary>
+        private async Task<bool> SetAsyncCore(string key, object value, Type valueType, TimeSpan? expiry)
+        {
+            try
+            {
+                var filePath = GetFilePath(key);
+                var metadataPath = GetMetadataPath(key);
+
+                Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+
+                // Serialize with the runtime Type — no generic type parameter needed
+                var json = JsonSerializer.Serialize(value, valueType, _jsonOptions);
+                await File.WriteAllTextAsync(filePath, json);
+
+                var metadata = new StorageMetadata
+                {
+                    Key = key,
+                    CreatedAt = DateTime.UtcNow,
+                    ModifiedAt = DateTime.UtcNow,
+                    ExpiresAt = expiry.HasValue ? DateTime.UtcNow.Add(expiry.Value) : null,
+                    SizeBytes = System.Text.Encoding.UTF8.GetByteCount(json),
+                    ValueType = valueType.FullName ?? valueType.Name
+                };
+
+                var metadataJson = JsonSerializer.Serialize(metadata, _jsonOptions);
+                await File.WriteAllTextAsync(metadataPath, metadataJson);
+
+                _metadataCache.AddOrUpdate(key, metadata, (k, old) => metadata);
+
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
         private string GetFilePath(string key)
         {
             var safeKey = string.Join("_", key.Split(Path.GetInvalidFileNameChars()));
@@ -477,23 +514,28 @@ namespace LibEmiddle.Storage
             }
         }
 
-        private void CleanupExpiredItems(object? state)
+        private async void CleanupExpiredItems(object? state)
         {
             try
             {
-                var expiredKeys = _metadataCache
-                    .Where(kvp => kvp.Value.IsExpired)
-                    .Select(kvp => kvp.Key)
-                    .ToList();
-
-                foreach (var key in expiredKeys)
-                {
-                    DeleteAsync(key).Wait();
-                }
+                await DoCleanupExpiredItemsAsync();
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore cleanup errors
+                LoggingManager.LogError(nameof(EnhancedFileStorageProvider), $"Timer callback error: {ex.Message}");
+            }
+        }
+
+        private async Task DoCleanupExpiredItemsAsync()
+        {
+            var expiredKeys = _metadataCache
+                .Where(kvp => kvp.Value.IsExpired)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in expiredKeys)
+            {
+                await DeleteAsync(key);
             }
         }
 
