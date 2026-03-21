@@ -15,6 +15,7 @@ namespace LibEmiddle.Tests.Unit
     /// Each test uses an isolated temp directory so tests never share on-disk state.
     /// </summary>
     [TestClass]
+    [DoNotParallelize] // Uses fire-and-forget background I/O tasks; parallel execution causes interference with MultiDeviceTests and ErrorRecoveryTests
     public class DevicePersistenceTests
     {
         private ICryptoProvider _cryptoProvider;

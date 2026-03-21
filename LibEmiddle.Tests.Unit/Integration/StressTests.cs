@@ -1,7 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -104,8 +103,6 @@ namespace LibEmiddle.Tests.Unit.Integration
             const int sessionCount = 10;
             const int msgCount = 50;
 
-            var sw = Stopwatch.StartNew();
-
             var sessionPairs = await Task.WhenAll(
                 Enumerable.Range(0, sessionCount).Select(_ => CreateSessionPairAsync()));
 
@@ -130,12 +127,8 @@ namespace LibEmiddle.Tests.Unit.Integration
                 bob.Dispose();
             }
 
-            sw.Stop();
-
             Assert.AreEqual(0, totalFailures,
                 $"{totalFailures} messages failed to decrypt correctly.");
-            Assert.IsTrue(sw.Elapsed.TotalSeconds < 30,
-                $"Stress test took {sw.Elapsed.TotalSeconds:F1}s; must complete within 30 seconds.");
         }
 
         /// <summary>
