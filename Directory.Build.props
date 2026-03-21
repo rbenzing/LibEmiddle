@@ -5,14 +5,13 @@
     <Copyright>Copyright © $(Company) $([System.DateTime]::Now.Year)</Copyright>
     <Authors>Russell Benzing</Authors>
     <Company>Russell Benzing Inc</Company>
-    <VersionPrefix>2.5.0</VersionPrefix>
+    <VersionPrefix>2.6.0</VersionPrefix>
     <VersionSuffix></VersionSuffix>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/rbenzing/LibEmiddle</PackageProjectUrl>
     <RepositoryUrl>https://github.com/rbenzing/LibEmiddle.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>encryption;e2ee;security;cryptography;libsodium</PackageTags>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <!-- Common build settings -->
