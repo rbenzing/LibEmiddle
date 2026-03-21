@@ -21,6 +21,7 @@ using LibEmiddle.Sessions;
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
+    [DoNotParallelize]  // Multi-device sync tests are sensitive to parallel execution with I/O-heavy tests
     public class ErrorRecoveryTests
     {
         private CryptoProvider _cryptoProvider;
