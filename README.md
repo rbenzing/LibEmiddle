@@ -4,7 +4,7 @@
 ![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
-![Version](https://img.shields.io/badge/version-2.5.0-blue)
+![Version](https://img.shields.io/badge/version-2.6.0-blue)
 
 A comprehensive, production-ready end-to-end encryption library for .NET applications implementing modern cryptographic protocols with a focus on security, privacy, and usability. Now with advanced features including post-quantum cryptography preparation, WebRTC transport, message batching, and enterprise-grade monitoring capabilities.
 
@@ -12,7 +12,7 @@ A comprehensive, production-ready end-to-end encryption library for .NET applica
 
 ```csharp
 // Install via NuGet
-// dotnet add package LibEmiddle --version 2.5.0
+// dotnet add package LibEmiddle --version 2.6.0
 
 using LibEmiddle.API;
 using LibEmiddle.Domain.Enums;
@@ -489,12 +489,12 @@ client.KeyRotated += (sender, args) =>
 
 ### NuGet Package
 ```bash
-dotnet add package LibEmiddle --version 2.5.0
+dotnet add package LibEmiddle --version 2.6.0
 ```
 
 ### Package Manager Console
 ```powershell
-Install-Package LibEmiddle -Version 2.5.0
+Install-Package LibEmiddle -Version 2.6.0
 ```
 
 ### Requirements

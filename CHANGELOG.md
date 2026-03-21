@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-03-21
+
 ### Added
 - **Bundle Caching**: `SessionPersistenceManager` now includes `SaveKeyBundleAsync()` and `LoadKeyBundleByIdentityKeyAsync()` for caching recipient X3DH key bundles to disk, enabling session creation from a bare identity key after the first exchange
 - **Password KDF Overload**: New `CryptoProvider.DeriveKeyFromPassword(string password, byte[] salt)` overload accepting a caller-supplied random salt for non-deterministic key derivation
