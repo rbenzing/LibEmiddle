@@ -52,7 +52,14 @@ jobs:
       run: dotnet build --no-restore --configuration ${{ matrix.configuration }} -p:Version=${{ steps.version.outputs.version }}
 
     - name: Test
-      run: dotnet test --no-build --configuration ${{ matrix.configuration }} --verbosity normal --collect:"XPlat Code Coverage"
+      run: dotnet test --no-build --configuration ${{ matrix.configuration }} --verbosity detailed --logger "trx;LogFileName=test-results.trx" --logger "console;verbosity=detailed" --collect:"XPlat Code Coverage"
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.configuration }}
+        path: "**/*.trx"
 
     - name: Upload coverage reports
       if: matrix.configuration == 'Release'
