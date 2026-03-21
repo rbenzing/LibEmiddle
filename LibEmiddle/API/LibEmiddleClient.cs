@@ -20,7 +20,7 @@ namespace LibEmiddle.API;
 /// capabilities with support for individual chats, group messaging, and multi-device synchronization.
 /// Updated to work with the consolidated GroupSession implementation.
 /// </summary>
-public sealed partial class LibEmiddleClient : ILibEmiddleClient
+public sealed partial class LibEmiddleClient : ILibEmiddleClient, IAsyncDisposable
 {
     private readonly LibEmiddleClientOptions _options;
     private readonly ICryptoProvider _cryptoProvider;
@@ -169,49 +169,92 @@ public sealed partial class LibEmiddleClient : ILibEmiddleClient
         }
     }
 
-    public void Dispose()
+    /// <summary>
+    /// Asynchronously releases all resources used by the client, including stopping
+    /// any active transport listening and mailbox polling before disposing components.
+    /// Callers should prefer <c>await using var client = …</c> over the synchronous <see cref="Dispose()"/>.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        await DisposeAsyncCore().ConfigureAwait(false);
+        Dispose(disposing: false);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Performs the asynchronous portion of disposal: stops listening and awaits
+    /// all async cleanup before the synchronous component disposal runs.
+    /// </summary>
+    private async ValueTask DisposeAsyncCore()
     {
         if (_disposed)
             return;
 
-        try
+        // Stop transport listening and mailbox polling asynchronously.
+        if (_isListening)
         {
-            // Stop listening first (synchronously for disposal)
-            if (_isListening)
+            try
             {
-                try
-                {
-                    // SYNC-REQUIRED: Dispose() cannot be async. Use Task.Run to avoid
-                    // deadlocks on sync contexts (ASP.NET, WPF, WinForms).
-                    Task.Run(() => _transport?.StopListeningAsync()).GetAwaiter().GetResult();
-                    _isListening = false;
-                }
-                catch (Exception ex)
-                {
-                    LoggingManager.LogError(nameof(LibEmiddleClient), $"Error stopping listening during disposal: {ex.Message}");
-                }
+                _mailboxManager?.Stop();
+                if (_transport != null)
+                    await _transport.StopListeningAsync().ConfigureAwait(false);
+                _isListening = false;
             }
-
-            // Dispose components in reverse order of creation
-            _mailboxManager?.Dispose();
-            _sessionManager?.Dispose();
-            _deviceManager?.Dispose();
-            _transport?.Dispose();
-            _keyManager?.Dispose();
-
-            // Dispose diagnostics system (v2.5)
-            if (_diagnostics.IsValueCreated && _diagnostics.Value is IDisposable disposableDiagnostics)
+            catch (Exception ex)
             {
-                disposableDiagnostics.Dispose();
+                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error stopping listening during async disposal: {ex.Message}");
             }
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>
+    /// Synchronously releases managed resources (when <paramref name="disposing"/> is
+    /// <c>true</c>) and marks the client as disposed.  No async calls are made here.
+    /// </summary>
+    private void Dispose(bool disposing)
+    {
+        if (_disposed)
+            return;
+
+        if (disposing)
         {
-            LoggingManager.LogError(nameof(LibEmiddleClient), $"Error during disposal: {ex.Message}");
+            try
+            {
+                // Dispose components in reverse order of creation.
+                // Async stop was already handled by DisposeAsyncCore (if called via DisposeAsync).
+                // When called directly from the synchronous Dispose() path, _isListening may
+                // still be true; we deliberately skip the async stop here to avoid blocking.
+                _mailboxManager?.Dispose();
+                _sessionManager?.Dispose();
+                _deviceManager?.Dispose();
+                _transport?.Dispose();
+                _keyManager?.Dispose();
+
+                // Dispose diagnostics system (v2.5)
+                if (_diagnostics.IsValueCreated && _diagnostics.Value is IDisposable disposableDiagnostics)
+                {
+                    disposableDiagnostics.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError(nameof(LibEmiddleClient), $"Error during disposal: {ex.Message}");
+            }
         }
 
         _disposed = true;
         LoggingManager.LogInformation(nameof(LibEmiddleClient), "LibEmiddle client disposed");
+    }
+
+    /// <summary>
+    /// Releases all resources used by the client synchronously.
+    /// Prefer <see cref="DisposeAsync"/> when an async context is available to
+    /// cleanly stop transport listening without blocking.
+    /// </summary>
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
     }
 }
 

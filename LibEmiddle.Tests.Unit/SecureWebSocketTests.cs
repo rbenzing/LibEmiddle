@@ -14,6 +14,7 @@ using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Transport;
 using LibEmiddle.Domain.Enums;
+using LibEmiddle.Domain.Exceptions;
 using LibEmiddle.Protocol;
 
 namespace LibEmiddle.Tests.Unit
@@ -428,7 +429,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Act & Assert: Message without session ID should be rejected
             // Note: The exception might be wrapped in a generic Exception
-            await Assert.ThrowsExceptionAsync<Exception>(() => client.ReceiveEncryptedMessageAsync());
+            await Assert.ThrowsExceptionAsync<LibEmiddleException>(() => client.ReceiveEncryptedMessageAsync());
         }
 
         /// <summary>

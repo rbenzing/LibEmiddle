@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Password KDF Overload**: New `CryptoProvider.DeriveKeyFromPassword(string password, byte[] salt)` overload accepting a caller-supplied random salt for non-deterministic key derivation
 - **Shared Key Conversion Helper**: New `LibEmiddle.Core.KeyConversion.ConvertEd25519PublicKeyToX25519()` consolidating duplicate Ed25519→X25519 conversion logic previously spread across `DeviceManager` and `DeviceLinkingService`
 - **Unit Tests**: Added 60+ new unit tests covering `MessageSigning`, `AES` detached encryption, `Nonce` thread-safety, `EnhancedFileStorageProvider`, `PostQuantumCrypto`, stub infrastructure visibility, and `SessionManager` bundle/group session paths
+- **Group Replay Protection**: `GroupSession` now detects and rejects duplicate messages using a per-sender `_seenMessageIds` set (capped at 1 000 entries) checked before decryption; replay attempts return `null` without exposing ciphertext errors
+- **Group Member-Removal Key Rotation**: `GroupSession.RemoveMemberAsync()` automatically rotates the chain key via `RotateKeyInternalAsync()` after each successful removal, ensuring forward secrecy for the remaining group; attempting to remove a non-member is a no-op and does not rotate the key
+- **Chat Session Replay Protection**: `ChatSession` tracks processed message IDs in a 500-entry FIFO ring buffer (`_processedMessageIds`); duplicate messages return `null` by default or throw `InvalidOperationException` when `throwOnReplay: true` is passed to `DecryptAsync`
+- **Device List Persistence**: New `DeviceStorage` class persists the linked-device list to an AES-GCM–encrypted file (fresh key and nonce per write, atomic temp-then-rename) so devices survive process restarts; `DeviceManager` accepts an optional `storagePath` and lazily loads the list on first access via double-checked locking
+- **`LibEmiddleException`**: New domain exception type (`LibEmiddle.Domain.Exceptions.LibEmiddleException`) inheriting from `Exception`, carrying a typed `ErrorCode` property (`LibEmiddleErrorCode` enum with 12 values: `Unknown`, `InvalidBundle`, `ReplayDetected`, `DecryptionFailed`, `TransportError`, `KeyNotFound`, `SessionNotFound`, `DeviceNotFound`, `OPKExhausted`, `InvalidKey`, `InvalidMessage`, `PermissionDenied`)
+- **Mailbox Listener Auto-Start**: `LibEmiddleClient.StartListeningAsync()` now automatically calls `_mailboxManager.Start()` so incoming-message polling begins without a separate call
+- **Sender Identity Routing**: `EncryptedMessage` now carries a `SenderIdentityKey` field; `ProcessChatMessageAsync` uses it for O(1) session lookup by sender key rather than iterating all sessions
+- **OPK Consumption Tracking**: `OPKManager.TryConsume()` marks one-time prekeys as consumed and triggers automatic replenishment when the available count falls below the configured threshold
+- **`IAsyncDisposable` on `LibEmiddleClient`**: `LibEmiddleClient` now implements `IAsyncDisposable` in addition to `IDisposable`, using the canonical `DisposeAsync → Dispose(true) → GC.SuppressFinalize` pattern for safe `await using` cleanup
 
 ### Changed
 - **Password Key Derivation**: Migrated from HKDF with a fixed static salt to **Argon2id** (via libsodium's `crypto_pwhash`) for memory-hard password-based key derivation (64 MB, 2 passes). The deterministic overload uses a fixed application-specific salt; the new overload accepts a random salt
@@ -20,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Batch Serialization**: Replaced reflection-based `MakeGenericMethod` in `BatchAsync` with the BCL's `JsonSerializer.Serialize(object?, Type, JsonSerializerOptions?)` overload, eliminating runtime reflection
 - **Disposal Guards**: Changed all `bool _disposed` fields to `volatile bool _disposed` across all `IDisposable` classes for correct thread-safe disposal checks
 - **Timer Callback**: `EnhancedFileStorageProvider.CleanupExpiredItems` refactored to `async void` + inner `DoCleanupExpiredItemsAsync()` pattern, eliminating the `.Wait()` call that could deadlock on synchronization contexts
+- **`SecureWebSocketClient` Exceptions**: Transport-layer failures now throw `LibEmiddleException` with `LibEmiddleErrorCode.TransportError` (wrapping the original exception as `InnerException`) instead of generic `Exception`, giving callers structured error handling
 
 ### Fixed
 - **AES-GCM Detached Decryption**: Corrected the P/Invoke signature for `crypto_aead_aes256gcm_decrypt_detached_afternm` in `Sodium.cs` — removed the erroneous `out ulong mlen_p` second parameter that does not exist in this libsodium entry point, which was causing all AES-GCM detached decryption to fail
@@ -28,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - **Argon2id Password Hardening**: The Argon2id KDF (64 MB memory, 2 iterations) is orders of magnitude more resistant to GPU/ASIC brute-force attacks than the previous HKDF-with-fixed-salt approach
+- **Group Replay Attack Prevention**: Each `GroupSession` maintains per-sender message ID sets; replayed or duplicated ciphertexts are silently dropped before decryption is attempted
+- **Post-Removal Forward Secrecy**: Removing a group member immediately generates a new cryptographically independent chain key; the removed member's previously held key material cannot decrypt any subsequent message
+- **Chat Replay Attack Prevention**: `ChatSession` rejects message-ID duplicates within a 500-message sliding window, preventing replay of captured ciphertexts
+- **Encrypted Device Persistence**: Linked-device lists are stored with AES-GCM authenticated encryption; any tampered or corrupted file is rejected at load time
 
 ## [2.5.1] - 2025-12-22
 

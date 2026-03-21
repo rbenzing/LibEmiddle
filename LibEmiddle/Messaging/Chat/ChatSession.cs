@@ -48,6 +48,13 @@ namespace LibEmiddle.Messaging.Chat
         private const int MaxTrackedMessages = 100;
         public ConcurrentDictionary<string, string> Metadata { get; } = new();
 
+        // Replay protection: track processed message IDs to reject duplicates.
+        // Protected by _sessionLock. Capped at MaxProcessedMessageIds to bound memory.
+        private readonly HashSet<string> _processedMessageIds = new();
+        private readonly Queue<string> _processedMessageIdOrder = new();
+        private const int MaxProcessedMessageIds = 500;
+        private readonly bool _throwOnReplay;
+
         // Services
         private readonly IDoubleRatchetProtocol _doubleRatchetProtocol;
 
@@ -71,7 +78,8 @@ namespace LibEmiddle.Messaging.Chat
             DoubleRatchetSession initialCryptoSession,
             byte[] remotePublicKey,
             byte[] localPublicKey,
-            IDoubleRatchetProtocol doubleRatchetProtocol)
+            IDoubleRatchetProtocol doubleRatchetProtocol,
+            bool throwOnReplay = false)
         {
             _cryptoSession = initialCryptoSession ?? throw new ArgumentNullException(nameof(initialCryptoSession));
             RemotePublicKey = remotePublicKey ?? throw new ArgumentNullException(nameof(remotePublicKey));
@@ -81,6 +89,9 @@ namespace LibEmiddle.Messaging.Chat
             SessionId = initialCryptoSession.SessionId;
             CreatedAt = DateTime.UtcNow;
             State = SessionState.Initialized;
+
+            // Replay protection mode
+            _throwOnReplay = throwOnReplay;
 
             // v2.0 behavior: async streaming and batching disabled
             _asyncStreamingEnabled = false;
@@ -94,7 +105,8 @@ namespace LibEmiddle.Messaging.Chat
             byte[] localPublicKey,
             IDoubleRatchetProtocol doubleRatchetProtocol,
             bool enableAsyncStreaming,
-            BatchingOptions? batchingOptions = null)
+            BatchingOptions? batchingOptions = null,
+            bool throwOnReplay = false)
         {
             _cryptoSession = initialCryptoSession ?? throw new ArgumentNullException(nameof(initialCryptoSession));
             RemotePublicKey = remotePublicKey ?? throw new ArgumentNullException(nameof(remotePublicKey));
@@ -104,6 +116,9 @@ namespace LibEmiddle.Messaging.Chat
             SessionId = initialCryptoSession.SessionId;
             CreatedAt = DateTime.UtcNow;
             State = SessionState.Initialized;
+
+            // Replay protection mode
+            _throwOnReplay = throwOnReplay;
 
             // v2.5 behavior: configure async streaming
             _asyncStreamingEnabled = enableAsyncStreaming;
@@ -335,6 +350,9 @@ namespace LibEmiddle.Messaging.Chat
                     return null;
                 }
 
+                // Stamp the sender's long-term identity key so the receiver can route O(1)
+                encryptedMessage.SenderIdentityKey = LocalPublicKey;
+
                 // Update state
                 _cryptoSession = updatedSession;
                 LastMessageSentAt = DateTime.UtcNow;
@@ -397,6 +415,24 @@ namespace LibEmiddle.Messaging.Chat
                     LoggingManager.LogDebug(nameof(ChatSession), $"Session {SessionId} auto-activated by receiving.");
                 }
 
+                // Replay protection: compute a dedup key for this message.
+                // Prefer the explicit MessageId; fall back to a hash of structural fields
+                // if MessageId is absent (e.g., messages from older versions of the library).
+                string messageDeduplicationKey = !string.IsNullOrEmpty(encryptedMessage.MessageId)
+                    ? encryptedMessage.MessageId!
+                    : ComputeMessageFallbackKey(encryptedMessage);
+
+                if (_processedMessageIds.Contains(messageDeduplicationKey))
+                {
+                    LoggingManager.LogWarning(nameof(ChatSession),
+                        $"Replayed message detected and dropped for session {SessionId} (id={messageDeduplicationKey}).");
+
+                    if (_throwOnReplay)
+                        throw new InvalidOperationException("Replay detected: message already processed.");
+
+                    return null;
+                }
+
                 // Perform decryption
                 var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(_cryptoSession, encryptedMessage);
 
@@ -405,6 +441,10 @@ namespace LibEmiddle.Messaging.Chat
                     LoggingManager.LogWarning(nameof(ChatSession), $"Decryption failed for message {encryptedMessage.MessageId}");
                     return null;
                 }
+
+                // Record message ID AFTER successful decryption to avoid poisoning the tracker
+                // with messages that failed authentication.
+                TrackProcessedMessageId(messageDeduplicationKey);
 
                 // Update state
                 _cryptoSession = updatedSession;
@@ -493,6 +533,50 @@ namespace LibEmiddle.Messaging.Chat
                 }
                 _messageHistory.Clear();
                 return count;
+            }
+        }
+
+        /// <summary>
+        /// Computes a deterministic fallback deduplication key for messages that carry no
+        /// explicit <see cref="EncryptedMessage.MessageId"/>.
+        /// The key is a hex-encoded SHA-256 hash of: SessionId | SenderMessageNumber | Nonce.
+        /// Must be called while <see cref="_sessionLock"/> is held.
+        /// </summary>
+        private static string ComputeMessageFallbackKey(EncryptedMessage message)
+        {
+            // Encode SessionId as UTF-8 bytes, then append message number (big-endian uint) and nonce.
+            var sessionIdBytes = System.Text.Encoding.UTF8.GetBytes(message.SessionId ?? string.Empty);
+            var messageNumberBytes = BitConverter.GetBytes(message.SenderMessageNumber);
+            if (BitConverter.IsLittleEndian)
+                Array.Reverse(messageNumberBytes);
+            var nonce = message.Nonce ?? Array.Empty<byte>();
+
+            var buffer = new byte[sessionIdBytes.Length + messageNumberBytes.Length + nonce.Length];
+            Buffer.BlockCopy(sessionIdBytes, 0, buffer, 0, sessionIdBytes.Length);
+            Buffer.BlockCopy(messageNumberBytes, 0, buffer, sessionIdBytes.Length, messageNumberBytes.Length);
+            Buffer.BlockCopy(nonce, 0, buffer, sessionIdBytes.Length + messageNumberBytes.Length, nonce.Length);
+
+            byte[] hash = SHA256.HashData(buffer);
+            return Convert.ToHexString(hash);
+        }
+
+        /// <summary>
+        /// Adds <paramref name="messageId"/> to the processed-ID tracker and evicts the
+        /// oldest entry when the tracker exceeds <see cref="MaxProcessedMessageIds"/>.
+        /// Must be called while <see cref="_sessionLock"/> is held.
+        /// </summary>
+        private void TrackProcessedMessageId(string messageId)
+        {
+            if (_processedMessageIds.Add(messageId))
+            {
+                _processedMessageIdOrder.Enqueue(messageId);
+
+                // Evict the oldest ID when the cap is exceeded
+                while (_processedMessageIdOrder.Count > MaxProcessedMessageIds)
+                {
+                    var oldest = _processedMessageIdOrder.Dequeue();
+                    _processedMessageIds.Remove(oldest);
+                }
             }
         }
 

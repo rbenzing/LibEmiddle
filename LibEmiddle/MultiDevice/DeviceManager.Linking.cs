@@ -93,6 +93,7 @@ public partial class DeviceManager
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(revocationMessage, nameof(revocationMessage));
         ArgumentNullException.ThrowIfNull(revocationMessage.RevokedDevicePublicKey, nameof(revocationMessage.RevokedDevicePublicKey));
+        EnsureStorageLoadedAsync().GetAwaiter().GetResult();
 
         try
         {
@@ -126,6 +127,9 @@ public partial class DeviceManager
                 {
                     SecureMemory.SecureClear(deviceInfo.PublicKey);
                 }
+
+                // Persist the updated list to disk (fire-and-forget, best-effort).
+                PersistDevicesFireAndForget();
             }
             else
             {

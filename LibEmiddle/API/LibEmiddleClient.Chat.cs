@@ -4,6 +4,7 @@ using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
+using LibEmiddle.Domain.Exceptions;
 using LibEmiddle.KeyManagement;
 using LibEmiddle.Messaging.Group;
 using LibEmiddle.MultiDevice;
@@ -17,21 +18,15 @@ namespace LibEmiddle.API;
 
 public sealed partial class LibEmiddleClient
 {
-    /// <summary>
-    /// Creates a new chat session with the specified recipient.
-    /// </summary>
-    /// <param name="recipientPublicKey">The recipient's public key</param>
-    /// <param name="recipientUserId">Optional user identifier for the recipient</param>
-    /// <param name="options">Optional chat session configuration</param>
-    /// <returns>The created chat session</returns>
+    /// <inheritdoc/>
     public async Task<IChatSession> CreateChatSessionAsync(
-        byte[] recipientPublicKey,
+        byte[] recipientIdentityKey,
         string? recipientUserId = null,
         ChatSessionOptions? options = null)
     {
         ThrowIfDisposed();
         EnsureInitialized();
-        ArgumentNullException.ThrowIfNull(recipientPublicKey);
+        ArgumentNullException.ThrowIfNull(recipientIdentityKey);
 
         try
         {
@@ -41,18 +36,100 @@ public sealed partial class LibEmiddleClient
                 options.RemoteUserId = recipientUserId;
             }
 
-            var session = await _sessionManager.CreateSessionAsync(recipientPublicKey, options);
-            if (session is IChatSession chatSession)
+            // Try to create session using cached bundle first.  If the cache miss
+            // throws (ArgumentException from GetOrCreateRecipientBundleAsync), attempt
+            // a transport fetch.  Any fetch failure is wrapped as KeyNotFound.
+            try
             {
-                LoggingManager.LogInformation(nameof(LibEmiddleClient), $"Created chat session {session.SessionId}");
-                return chatSession;
+                var session = await _sessionManager.CreateSessionAsync(recipientIdentityKey, options);
+                if (session is IChatSession chatSession)
+                {
+                    LoggingManager.LogInformation(nameof(LibEmiddleClient),
+                        $"Created chat session {session.SessionId} from local cache");
+                    return chatSession;
+                }
+                throw new InvalidOperationException("Failed to create chat session");
+            }
+            catch (ArgumentException)
+            {
+                // No locally cached bundle — try to fetch from the transport.
+                LoggingManager.LogInformation(nameof(LibEmiddleClient),
+                    "No cached bundle found; attempting transport fetch for recipient key");
             }
 
-            throw new InvalidOperationException("Failed to create chat session");
+            X3DHPublicBundle bundle;
+            try
+            {
+                bundle = await FetchRecipientKeyBundleAsync(recipientIdentityKey);
+            }
+            catch (Exception fetchEx)
+            {
+                throw new LibEmiddleException(
+                    "Cannot create chat session: no key bundle is available for the specified recipient. " +
+                    "Ensure the recipient has uploaded their bundle, or supply the bundle directly " +
+                    $"using the CreateChatSessionAsync(X3DHPublicBundle, ...) overload. Inner: {fetchEx.Message}",
+                    LibEmiddleErrorCode.KeyNotFound,
+                    fetchEx);
+            }
+
+            // Bundle has been fetched and cached by FetchRecipientKeyBundleAsync;
+            // create the session using the identity key from the returned bundle.
+            var fetchedSession = await _sessionManager.CreateSessionAsync(bundle.IdentityKey!, options);
+            if (fetchedSession is IChatSession fetchedChatSession)
+            {
+                LoggingManager.LogInformation(nameof(LibEmiddleClient),
+                    $"Created chat session {fetchedSession.SessionId} after transport fetch");
+                return fetchedChatSession;
+            }
+
+            throw new InvalidOperationException("Failed to create chat session after transport bundle fetch");
+        }
+        catch (LibEmiddleException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             LoggingManager.LogError(nameof(LibEmiddleClient), $"Failed to create chat session: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<IChatSession> CreateChatSessionAsync(
+        X3DHPublicBundle recipientBundle,
+        string? recipientUserId = null,
+        ChatSessionOptions? options = null)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        ArgumentNullException.ThrowIfNull(recipientBundle);
+
+        try
+        {
+            options ??= new ChatSessionOptions();
+            if (!string.IsNullOrEmpty(recipientUserId))
+            {
+                options.RemoteUserId = recipientUserId;
+            }
+
+            // Cache the bundle locally so the session manager can resolve it by identity key.
+            await _sessionManager.CacheRecipientBundleAsync(recipientBundle);
+
+            var session = await _sessionManager.CreateSessionAsync(recipientBundle.IdentityKey!, options);
+            if (session is IChatSession chatSession)
+            {
+                LoggingManager.LogInformation(nameof(LibEmiddleClient),
+                    $"Created chat session {session.SessionId} from supplied bundle");
+                return chatSession;
+            }
+
+            throw new InvalidOperationException("Failed to create chat session from supplied bundle");
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient),
+                $"Failed to create chat session from bundle: {ex.Message}");
             throw;
         }
     }
@@ -203,9 +280,13 @@ public sealed partial class LibEmiddleClient
 
     /// <summary>
     /// Processes a received encrypted chat message.
+    /// When the message contains a <see cref="EncryptedMessage.SenderIdentityKey"/> the
+    /// correct session is located in O(1) via the sender-key index maintained by
+    /// <see cref="SessionManager"/>. For legacy messages without that field the method
+    /// falls back to an O(n) scan over all active chat sessions.
     /// </summary>
     /// <param name="encryptedMessage">The encrypted message to process</param>
-    /// <returns>The decrypted message content</returns>
+    /// <returns>The decrypted message content, or null if no matching session was found</returns>
     public async Task<string?> ProcessChatMessageAsync(EncryptedMessage encryptedMessage)
     {
         ThrowIfDisposed();
@@ -214,32 +295,88 @@ public sealed partial class LibEmiddleClient
 
         try
         {
-            // Find the appropriate chat session
-            var sessionIds = await _sessionManager.ListSessionsAsync();
-
-            foreach (var sessionId in sessionIds)
+            // --- O(1) fast path: message carries the sender's identity key ---
+            if (encryptedMessage.SenderIdentityKey != null && encryptedMessage.SenderIdentityKey.Length > 0)
             {
-                if (sessionId != null && sessionId.StartsWith("chat-"))
+                if (_sessionManager.TryGetSessionIdBySenderKey(encryptedMessage.SenderIdentityKey, out var sessionId) &&
+                    sessionId != null)
                 {
                     try
                     {
                         var session = await _sessionManager.GetSessionAsync(sessionId);
                         if (session is IChatSession chatSession)
                         {
-                            // Try to decrypt with this session
-                            var decryptedMessage = await chatSession.DecryptAsync(encryptedMessage);
-                            if (decryptedMessage != null)
+                            var decrypted = await chatSession.DecryptAsync(encryptedMessage);
+                            if (decrypted != null)
                             {
                                 LoggingManager.LogInformation(nameof(LibEmiddleClient),
-                                    $"Decrypted message in chat session {sessionId}");
-                                return decryptedMessage;
+                                    $"Decrypted message via O(1) routing in chat session {sessionId}");
+                                return decrypted;
                             }
+
+                            // Decryption failed for the indexed session — reject without fallback
+                            // to avoid silently trying unrelated sessions.
+                            LoggingManager.LogWarning(nameof(LibEmiddleClient),
+                                $"Decryption failed for message in indexed session {sessionId}; rejecting message");
+                            return null;
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Continue trying other sessions if this one fails
+                        LoggingManager.LogError(nameof(LibEmiddleClient),
+                            $"Error decrypting message in indexed session {sessionId}: {ex.Message}");
+                        return null;
+                    }
+                }
+
+                // Sender key present but no index entry — unknown sender
+                LoggingManager.LogWarning(nameof(LibEmiddleClient),
+                    "Received message with SenderIdentityKey but no matching session found in index");
+                return null;
+            }
+
+            // --- O(n) fallback path: legacy messages without SenderIdentityKey ---
+            LoggingManager.LogDebug(nameof(LibEmiddleClient),
+                "Message has no SenderIdentityKey; falling back to O(n) session scan");
+
+            var sessionIds = await _sessionManager.ListSessionsAsync();
+
+            foreach (var sid in sessionIds)
+            {
+                if (sid != null && sid.StartsWith("chat-"))
+                {
+                    ISession? session = null;
+                    try
+                    {
+                        session = await _sessionManager.GetSessionAsync(sid);
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggingManager.LogWarning(nameof(LibEmiddleClient),
+                            $"Could not load session {sid} during fallback scan: {ex.Message}");
                         continue;
+                    }
+
+                    if (session is IChatSession chatSession)
+                    {
+                        string? decryptedMessage = null;
+                        try
+                        {
+                            decryptedMessage = await chatSession.DecryptAsync(encryptedMessage);
+                        }
+                        catch (Exception ex)
+                        {
+                            LoggingManager.LogDebug(nameof(LibEmiddleClient),
+                                $"Decryption attempt failed for session {sid}: {ex.Message}");
+                            continue;
+                        }
+
+                        if (decryptedMessage != null)
+                        {
+                            LoggingManager.LogInformation(nameof(LibEmiddleClient),
+                                $"Decrypted message via O(n) fallback in chat session {sid}");
+                            return decryptedMessage;
+                        }
                     }
                 }
             }

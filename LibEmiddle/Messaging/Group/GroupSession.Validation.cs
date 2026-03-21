@@ -34,7 +34,7 @@ public sealed partial class GroupSession
         }
 
         // Validate message sequence for replay protection
-        // First check for message ID replay (exact duplicate detection)
+        // Check message ID for exact duplicate detection (read-only — registration happens after successful decryption)
         if (!string.IsNullOrEmpty(message.MessageId))
         {
             string senderId = GetMemberId(message.SenderIdentityKey!);
@@ -47,44 +47,37 @@ public sealed partial class GroupSession
                     LoggingManager.LogSecurityEvent(nameof(GroupSession), "Message ID replay detected", isAlert: true);
                     return false;
                 }
-                senderMessageIds.Add(message.MessageId);
-
-                // Limit the size of the set to prevent memory issues (keep last 1000 message IDs)
-                if (senderMessageIds.Count > 1000)
-                {
-                    var oldestIds = senderMessageIds.Take(senderMessageIds.Count - 1000).ToList();
-                    foreach (var oldId in oldestIds)
-                    {
-                        senderMessageIds.Remove(oldId);
-                    }
-                }
+                // NOTE: Do NOT add to senderMessageIds here — that happens after successful decryption
             }
         }
 
-        // Extract iteration number from message ID for sequence tracking
-        long sequenceNumber = ExtractSequenceFromMessageId(message.MessageId) ?? message.Timestamp;
-        return ValidateMessageSequence(message.SenderIdentityKey!, sequenceNumber, message.Timestamp);
+        // When the message carries a MessageId the _seenMessageIds check above provides complete replay
+        // protection, so no additional sequence-order check is needed (and strict ordering would break
+        // legitimate out-of-order delivery in concurrent scenarios).
+        // Only apply sequence-order validation for legacy messages without a MessageId, where we fall
+        // back to using the timestamp as a proxy sequence number.
+        bool hasMessageId = !string.IsNullOrEmpty(message.MessageId);
+        long sequenceNumber = hasMessageId
+            ? (ExtractSequenceFromMessageId(message.MessageId) ?? message.Timestamp)
+            : message.Timestamp;
+        return ValidateMessageSequence(message.SenderIdentityKey!, sequenceNumber, message.Timestamp, enforceOrdering: !hasMessageId);
     }
 
-    private bool ValidateMessageSequence(byte[] senderKey, long sequence, long timestamp)
+    private bool ValidateMessageSequence(byte[] senderKey, long sequence, long timestamp, bool enforceOrdering = false)
     {
         string senderId = GetMemberId(senderKey);
 
-        // For concurrent scenarios, we use a more flexible approach
-        // Instead of strict sequence ordering, we track seen message IDs to prevent actual replays
-        // This allows for out-of-order processing while still preventing replay attacks
-
-        // Update the last seen sequence if this one is higher (for general tracking)
-        if (_lastSeenSequence.TryGetValue(senderId, out long lastSeen))
+        // Only enforce strict sequence ordering for the timestamp-based fallback path
+        // (messages without a MessageId).  When a MessageId is present, the _seenMessageIds
+        // set provides complete replay protection without requiring in-order delivery, allowing
+        // concurrent and out-of-order message delivery to work correctly.
+        if (enforceOrdering && _lastSeenSequence.TryGetValue(senderId, out long lastSeen))
         {
-            if (sequence > lastSeen)
+            if (sequence <= lastSeen)
             {
-                _lastSeenSequence[senderId] = sequence;
+                LoggingManager.LogSecurityEvent(nameof(GroupSession), "Sequence-number replay detected", isAlert: true);
+                return false;
             }
-        }
-        else
-        {
-            _lastSeenSequence[senderId] = sequence;
         }
 
         return ValidateMessageTimestamp(senderKey, timestamp);
@@ -107,6 +100,47 @@ public sealed partial class GroupSession
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Records a successfully decrypted message as seen, updating both the message-ID set and
+    /// the last-seen sequence number for the sender.  Must only be called after the plaintext
+    /// has been obtained, so that a decryption failure does not permanently block a legitimate
+    /// future retry of the same message.
+    /// </summary>
+    private void RecordMessageSeen(EncryptedGroupMessage message)
+    {
+        if (message.SenderIdentityKey == null || message.SenderIdentityKey.Length == 0)
+            return;
+
+        string senderId = GetMemberId(message.SenderIdentityKey);
+
+        // Register the message ID so subsequent presentations of the same message are rejected
+        if (!string.IsNullOrEmpty(message.MessageId))
+        {
+            var senderMessageIds = _seenMessageIds.GetOrAdd(senderId, _ => new HashSet<string>());
+            lock (senderMessageIds)
+            {
+                senderMessageIds.Add(message.MessageId);
+
+                // Cap the set at 1000 entries per sender to prevent unbounded memory growth
+                if (senderMessageIds.Count > 1000)
+                {
+                    var oldestIds = senderMessageIds.Take(senderMessageIds.Count - 1000).ToList();
+                    foreach (var oldId in oldestIds)
+                    {
+                        senderMessageIds.Remove(oldId);
+                    }
+                }
+            }
+        }
+
+        // Advance the last-seen sequence so that any equal-or-lower sequence is rejected in future
+        long sequenceNumber = ExtractSequenceFromMessageId(message.MessageId) ?? message.Timestamp;
+        _lastSeenSequence.AddOrUpdate(
+            senderId,
+            sequenceNumber,
+            (_, existing) => sequenceNumber > existing ? sequenceNumber : existing);
     }
 
     private bool HasPermission(GroupOperation operation)

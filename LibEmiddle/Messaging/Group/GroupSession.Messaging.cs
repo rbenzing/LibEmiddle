@@ -156,7 +156,13 @@ public sealed partial class GroupSession
                         encryptedMessage.Nonce,
                         associatedData);
 
-                    return Encoding.UTF8.GetString(decrypted);
+                    string plaintext = Encoding.UTF8.GetString(decrypted);
+
+                    // Register the message as seen ONLY after successful decryption so that a
+                    // transient decryption failure does not permanently block a legitimate retry.
+                    RecordMessageSeen(encryptedMessage);
+
+                    return plaintext;
                 }
                 finally
                 {

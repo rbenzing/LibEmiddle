@@ -1,4 +1,5 @@
-﻿using LibEmiddle.Domain.Enums;
+﻿using LibEmiddle.Abstractions;
+using LibEmiddle.Domain.Enums;
 using LibEmiddle.Domain;
 
 namespace LibEmiddle.API;
@@ -31,6 +32,13 @@ public sealed class LibEmiddleClientOptions
     /// Gets or sets the transport type to use for communication.
     /// </summary>
     public TransportType TransportType { get; set; } = TransportType.InMemory;
+
+    /// <summary>
+    /// Gets or sets a custom transport instance.  When set, this takes precedence over
+    /// <see cref="TransportType"/> and the transport is used directly without construction.
+    /// Intended primarily for testing and advanced scenarios.
+    /// </summary>
+    public IMailboxTransport? CustomTransport { get; set; } = null;
 
     /// <summary>
     /// Gets or sets the server endpoint URL for HTTP/WebSocket transports.

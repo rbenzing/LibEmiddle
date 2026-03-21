@@ -43,6 +43,10 @@ public sealed partial class LibEmiddleClient
 
         try
         {
+            // Start the mailbox manager polling BEFORE starting transport listening
+            // so that no messages are missed between the two start calls.
+            _mailboxManager.Start();
+
             await _transport.StartListeningAsync(_identityKeyPair.PublicKey, pollingInterval, cancellationToken);
             _isListening = true;
             LoggingManager.LogInformation(nameof(LibEmiddleClient), $"Started listening for messages with {pollingInterval}ms interval");
@@ -70,6 +74,9 @@ public sealed partial class LibEmiddleClient
 
         try
         {
+            // Stop the mailbox manager polling first, then stop the transport.
+            _mailboxManager.Stop();
+
             await _transport.StopListeningAsync();
             _isListening = false;
             LoggingManager.LogInformation(nameof(LibEmiddleClient), "Stopped listening for messages");

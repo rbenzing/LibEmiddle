@@ -134,6 +134,12 @@ public sealed partial class GroupSession
             CreationTimestamp = distribution.Timestamp
         };
 
+        // A new distribution message establishes a fresh key epoch for this sender.
+        // Reset replay-protection state so that messages in the new epoch (which start
+        // iteration counting from zero again) are not incorrectly rejected.
+        _lastSeenSequence.TryRemove(senderId, out _);
+        _seenMessageIds.TryRemove(senderId, out _);
+
         // Record join time if not already recorded
         RecordJoinTime(distribution.SenderIdentityKey);
 

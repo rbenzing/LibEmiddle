@@ -6,6 +6,7 @@ using LibEmiddle.Messaging.Chat;
 using LibEmiddle.Messaging.Group;
 using LibEmiddle.Protocol;
 using LibEmiddle.Core;
+using LibEmiddle.KeyManagement;
 
 namespace LibEmiddle.Sessions
 {
@@ -40,7 +41,43 @@ namespace LibEmiddle.Sessions
                 doubleRatchetProtocol,
                 cryptoProvider);
 
+        /// <summary>
+        /// Tracks consumed OPK IDs so that the same one-time prekey is never used twice.
+        /// The storage path for the consumed-ID list is co-located with the session storage.
+        /// </summary>
+        internal readonly OPKManager _opkManager = new OPKManager(sessionStoragePath ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LibEmiddle",
+            "Keys"));
+
+        /// <summary>
+        /// The caller's active local key bundle, held so that replenishment can reference
+        /// the existing OPK count. Updated via <see cref="RegisterLocalKeyBundleAsync"/>.
+        /// </summary>
+        private X3DHKeyBundle? _localKeyBundle;
+        private readonly object _localBundleLock = new object();
+
         private readonly ConcurrentDictionary<string, ISession> _activeSessions = new();
+
+        /// <summary>
+        /// Maps Base64(senderIdentityKey) → sessionId for O(1) incoming-message routing.
+        /// Populated whenever a chat session is created or loaded.
+        /// </summary>
+        private readonly ConcurrentDictionary<string, string> _senderKeyIndex = new();
+
+        /// <summary>
+        /// In-memory cache of recipient public bundles keyed by Base64(identityKey).
+        /// Each entry stores the bundle paired with its cache-insertion UTC timestamp.
+        /// Entries older than <see cref="BundleCacheTtl"/> are considered stale.
+        /// </summary>
+        private readonly ConcurrentDictionary<string, (X3DHPublicBundle Bundle, DateTime CachedAt)> _bundleCache = new();
+
+        /// <summary>
+        /// How long a bundle is considered fresh in the in-memory cache before it must be
+        /// re-fetched or re-loaded from disk.  Defaults to 72 hours.
+        /// </summary>
+        private static readonly TimeSpan BundleCacheTtl = TimeSpan.FromHours(72);
+
         private readonly SemaphoreSlim _operationLock = new(1, 1);
         private volatile bool _disposed;
 
@@ -107,6 +144,8 @@ namespace LibEmiddle.Sessions
                     if (chatSession != null)
                     {
                         _activeSessions[sessionId] = chatSession;
+                        if (chatSession is Messaging.Chat.ChatSession cs)
+                            IndexChatSession(cs);
                         return chatSession;
                     }
                 }
@@ -128,6 +167,10 @@ namespace LibEmiddle.Sessions
             // Cache in memory
             _activeSessions[session.SessionId] = session;
 
+            // Update sender-key routing index for chat sessions
+            if (session is Messaging.Chat.ChatSession cs)
+                IndexChatSession(cs);
+
             // Persist to disk based on session type
             if (session is IChatSession chatSession)
             {
@@ -147,8 +190,12 @@ namespace LibEmiddle.Sessions
             ThrowIfDisposed();
             ArgumentException.ThrowIfNullOrEmpty(sessionId, nameof(sessionId));
 
-            // Remove from memory
-            _activeSessions.TryRemove(sessionId, out _);
+            // Remove from memory and update sender-key index
+            if (_activeSessions.TryRemove(sessionId, out var removed) &&
+                removed is Messaging.Chat.ChatSession removedChat)
+            {
+                UnindexChatSession(removedChat);
+            }
 
             // Delete from disk
             return await _persistenceManager.DeleteSessionAsync(sessionId);
@@ -276,8 +323,9 @@ namespace LibEmiddle.Sessions
                     await chatSession.ActivateAsync();
                 }
 
-                // Cache the session
+                // Cache the session and update sender-key routing index
                 _activeSessions[chatSession.SessionId] = chatSession;
+                IndexChatSession(chatSession);
 
                 // Persist the session
                 await _persistenceManager.SaveChatSessionAsync(chatSession);
@@ -324,6 +372,39 @@ namespace LibEmiddle.Sessions
                     return null;
                 }
 
+                // Atomically check-and-mark the OPK as consumed BEFORE any key agreement work.
+                // TryConsume performs the Contains check and HashSet.Add inside a single lock
+                // acquisition, so two concurrent X3DH arrivals with the same OPK ID cannot both
+                // slip through the guard. Passing allKnownIds also triggers replenishment if
+                // the available count drops below the threshold.
+                if (initialMessageData.RecipientOneTimePreKeyId.HasValue)
+                {
+                    uint opkId = initialMessageData.RecipientOneTimePreKeyId.Value;
+                    IReadOnlyList<uint> allIds = recipientBundle.OneTimePreKeyIds;
+
+                    // Guard: if every known OPK in the bundle has been consumed, there are no
+                    // fresh keys to use. Throw so the caller can distinguish exhaustion from a
+                    // duplicate-OPK rejection.
+                    int available = _opkManager.GetAvailableCount(allIds);
+                    if (available == 0 && allIds.Count > 0)
+                    {
+                        throw new InvalidOperationException(
+                            "OPK exhausted: all one-time prekeys in the local bundle have been consumed. " +
+                            "Replenish the bundle before accepting new X3DH handshakes.");
+                    }
+
+                    if (!_opkManager.TryConsume(opkId, allIds))
+                    {
+                        LoggingManager.LogSecurityEvent("SessionManager",
+                            $"Rejected key-exchange: OPK {opkId} has already been consumed.",
+                            isAlert: true);
+                        return null;
+                    }
+
+                    LoggingManager.LogDebug("SessionManager",
+                        $"OPK {opkId} atomically consumed before key agreement.");
+                }
+
                 // Generate a unique session ID
                 string sessionId = $"chat-{Convert.ToBase64String(mailboxMessage.SenderKey).Substring(0, 8)}-{Guid.NewGuid():N}";
 
@@ -364,8 +445,9 @@ namespace LibEmiddle.Sessions
                     await chatSession.ActivateAsync();
                 }
 
-                // Cache the session
+                // Cache the session and update sender-key routing index
                 _activeSessions[chatSession.SessionId] = chatSession;
+                IndexChatSession(chatSession);
 
                 // Persist the session
                 await _persistenceManager.SaveChatSessionAsync(chatSession);
@@ -539,7 +621,10 @@ namespace LibEmiddle.Sessions
             try
             {
                 LoggingManager.LogInformation("SessionManager", $"Creating local X3DH key bundle with {numOneTimeKeys} one-time keys");
-                return await _x3dhProtocol.CreateKeyBundleAsync(_identityKeyPair, numOneTimeKeys);
+                var bundle = await _x3dhProtocol.CreateKeyBundleAsync(_identityKeyPair, numOneTimeKeys);
+                // Register the new bundle so OPK tracking has a reference to the current OPK list.
+                await RegisterLocalKeyBundleAsync(bundle);
+                return bundle;
             }
             catch (Exception ex)
             {
@@ -549,28 +634,213 @@ namespace LibEmiddle.Sessions
         }
 
         /// <summary>
+        /// Registers the current local X3DH key bundle with the OPK manager so that
+        /// consumed-OPK tracking can determine the available count and trigger replenishment.
+        /// Call this whenever the local bundle changes (e.g., after replenishment).
+        /// </summary>
+        /// <param name="bundle">The active local key bundle.</param>
+        public Task RegisterLocalKeyBundleAsync(X3DHKeyBundle bundle)
+        {
+            ArgumentNullException.ThrowIfNull(bundle);
+
+            lock (_localBundleLock)
+            {
+                _localKeyBundle = bundle;
+            }
+
+            // Configure the replenishment callback now that we have a bundle reference.
+            _opkManager.SetReplenishmentCallback(async count =>
+            {
+                await ReplenishOPKsAsync(count).ConfigureAwait(false);
+            });
+
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Returns the OPK IDs from the current local bundle that have not yet been consumed,
+        /// i.e., the IDs that are safe to publish in the public bundle.
+        /// </summary>
+        public IReadOnlyList<uint> GetAvailableOPKIds()
+        {
+            X3DHKeyBundle? bundle;
+            lock (_localBundleLock)
+            {
+                bundle = _localKeyBundle;
+            }
+
+            if (bundle == null)
+                return Array.Empty<uint>();
+
+            return _opkManager.FilterAvailable(bundle.OneTimePreKeyIds);
+        }
+
+        /// <summary>
+        /// Generates <paramref name="count"/> new X25519 OPKs and appends them to the
+        /// current local key bundle, then logs the updated available count.
+        /// </summary>
+        private async Task ReplenishOPKsAsync(int count)
+        {
+            X3DHKeyBundle? bundle;
+            lock (_localBundleLock)
+            {
+                bundle = _localKeyBundle;
+            }
+
+            if (bundle == null)
+            {
+                LoggingManager.LogWarning("SessionManager", "Cannot replenish OPKs: no local key bundle registered.");
+                return;
+            }
+
+            try
+            {
+                // Generate a temporary bundle that contains only the new OPKs.
+                var tempBundle = await _x3dhProtocol.CreateKeyBundleAsync(_identityKeyPair, count);
+
+                // Copy the new OPKs (public + private) into the existing bundle.
+                lock (_localBundleLock)
+                {
+                    for (int i = 0; i < tempBundle.OneTimePreKeyIds.Count; i++)
+                    {
+                        uint newId = tempBundle.OneTimePreKeyIds[i];
+                        byte[] newPublicKey = tempBundle.OneTimePreKeys[i];
+                        byte[]? newPrivateKey = tempBundle.GetOneTimePreKeyPrivate(newId);
+
+                        // Add the public key to the bundle's public list.
+                        bundle.OneTimePreKeys.Add(newPublicKey);
+                        bundle.OneTimePreKeyIds.Add(newId);
+
+                        // Add the private key — requires the ID already in the public list.
+                        if (newPrivateKey != null)
+                        {
+                            bundle.SetOneTimePreKeyPrivate(newId, newPrivateKey);
+                        }
+                    }
+                }
+
+                int available = _opkManager.GetAvailableCount(bundle.OneTimePreKeyIds);
+                LoggingManager.LogInformation("SessionManager",
+                    $"OPK replenishment complete: added {tempBundle.OneTimePreKeyIds.Count} new OPKs. Available: {available}");
+            }
+            catch (Exception ex)
+            {
+                LoggingManager.LogError("SessionManager", $"Failed to replenish OPKs: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Retrieves a recipient's key bundle by their identity key.
-        /// The bundle must have been previously received and cached via a call to
-        /// <see cref="CreateSessionAsync"/> that supplied a serialized <see cref="X3DHPublicBundle"/>.
+        /// Checks the in-memory TTL cache first, then falls back to disk persistence.
         /// </summary>
         /// <param name="recipientKey">The recipient's Ed25519 identity public key (32 bytes).</param>
         /// <returns>The cached <see cref="X3DHPublicBundle"/> for this identity key.</returns>
         /// <exception cref="ArgumentException">
         /// Thrown when no cached bundle is found for the given identity key.
         /// Obtain the recipient's full X3DHPublicBundle (IdentityKey + SignedPreKey + signature)
-        /// and pass it as UTF-8 JSON bytes to <see cref="CreateSessionAsync"/> first.
+        /// and pass it as UTF-8 JSON bytes to <see cref="CreateSessionAsync"/> first,
+        /// or call <c>FetchRecipientKeyBundleAsync</c> on the client when the transport supports it.
         /// </exception>
         private async Task<X3DHPublicBundle> GetOrCreateRecipientBundleAsync(byte[] recipientKey)
         {
+            // 1. Check in-memory bundle cache (with TTL enforcement)
+            string cacheKey = Convert.ToBase64String(recipientKey);
+            if (_bundleCache.TryGetValue(cacheKey, out var cached))
+            {
+                if (DateTime.UtcNow - cached.CachedAt < BundleCacheTtl)
+                {
+                    LoggingManager.LogDebug("SessionManager",
+                        $"Bundle cache hit for identity key {cacheKey[..Math.Min(8, cacheKey.Length)]}");
+                    return cached.Bundle;
+                }
+
+                // Entry is stale — remove it so it gets re-loaded below
+                _bundleCache.TryRemove(cacheKey, out _);
+            }
+
+            // 2. Fall back to disk persistence
             var bundle = await _persistenceManager.LoadKeyBundleByIdentityKeyAsync(recipientKey);
             if (bundle != null)
+            {
+                // Warm the in-memory cache
+                _bundleCache[cacheKey] = (bundle, DateTime.UtcNow);
                 return bundle;
+            }
 
             throw new ArgumentException(
                 "No cached key bundle found for the supplied identity key. " +
                 "Pass the recipient's full X3DHPublicBundle (serialized as UTF-8 JSON) as the " +
-                "recipientKey argument to CreateSessionAsync to register it, then retry.",
+                "recipientKey argument to CreateSessionAsync to register it, or call " +
+                "FetchRecipientKeyBundleAsync on the client when the transport supports it.",
                 nameof(recipientKey));
+        }
+
+        /// <summary>
+        /// Stores a recipient's public key bundle in both the in-memory TTL cache and
+        /// on-disk persistence so that subsequent <see cref="CreateSessionAsync"/> calls
+        /// with just the identity key can find it without a transport round-trip.
+        /// </summary>
+        /// <param name="bundle">The validated bundle to cache.</param>
+        public async Task CacheRecipientBundleAsync(X3DHPublicBundle bundle)
+        {
+            ArgumentNullException.ThrowIfNull(bundle);
+            if (bundle.IdentityKey == null || bundle.IdentityKey.Length == 0)
+                throw new ArgumentException("Bundle must have a non-empty identity key.", nameof(bundle));
+
+            string cacheKey = Convert.ToBase64String(bundle.IdentityKey);
+
+            // Update in-memory cache
+            _bundleCache[cacheKey] = (bundle, DateTime.UtcNow);
+
+            // Persist to disk so it survives process restarts
+            await _persistenceManager.SaveKeyBundleAsync(bundle);
+
+            LoggingManager.LogInformation("SessionManager",
+                $"Cached recipient bundle for identity key {cacheKey[..Math.Min(8, cacheKey.Length)]}");
+        }
+
+        /// <summary>
+        /// Attempts to find the session ID for an incoming message based on the
+        /// sender's identity key, enabling O(1) routing.
+        /// </summary>
+        /// <param name="senderIdentityKey">The sender's long-term identity public key.</param>
+        /// <param name="sessionId">The matching session ID, if found.</param>
+        /// <returns>True if a matching session was found; false otherwise.</returns>
+        public bool TryGetSessionIdBySenderKey(byte[] senderIdentityKey, out string? sessionId)
+        {
+            if (senderIdentityKey == null || senderIdentityKey.Length == 0)
+            {
+                sessionId = null;
+                return false;
+            }
+
+            string indexKey = Convert.ToBase64String(senderIdentityKey);
+            return _senderKeyIndex.TryGetValue(indexKey, out sessionId);
+        }
+
+        /// <summary>
+        /// Registers a chat session in the sender-key index so that incoming
+        /// messages from the remote peer can be routed in O(1).
+        /// </summary>
+        private void IndexChatSession(Messaging.Chat.ChatSession chatSession)
+        {
+            if (chatSession.RemotePublicKey != null && chatSession.RemotePublicKey.Length > 0)
+            {
+                string indexKey = Convert.ToBase64String(chatSession.RemotePublicKey);
+                _senderKeyIndex[indexKey] = chatSession.SessionId;
+            }
+        }
+
+        /// <summary>
+        /// Removes a chat session from the sender-key index.
+        /// </summary>
+        private void UnindexChatSession(Messaging.Chat.ChatSession chatSession)
+        {
+            if (chatSession.RemotePublicKey != null && chatSession.RemotePublicKey.Length > 0)
+            {
+                string indexKey = Convert.ToBase64String(chatSession.RemotePublicKey);
+                _senderKeyIndex.TryRemove(indexKey, out _);
+            }
         }
 
         #region IDisposable Implementation
@@ -604,7 +874,10 @@ namespace LibEmiddle.Sessions
                 }
 
                 _activeSessions.Clear();
+                _senderKeyIndex.Clear();
+                _bundleCache.Clear();
                 _persistenceManager?.Dispose();
+                _opkManager?.Dispose();
             }
 
             _disposed = true;

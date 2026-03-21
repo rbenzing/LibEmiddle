@@ -15,6 +15,7 @@ public partial class DeviceManager
     public int GetLinkedDeviceCount()
     {
         ThrowIfDisposed();
+        EnsureStorageLoadedAsync().GetAwaiter().GetResult();
         return _linkedDevices.Count;
     }
 
@@ -23,6 +24,7 @@ public partial class DeviceManager
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(devicePublicKey, nameof(devicePublicKey));
+        EnsureStorageLoadedAsync().GetAwaiter().GetResult();
 
         // Check if device was previously revoked
         if (IsDeviceRevoked(devicePublicKey))
@@ -59,9 +61,15 @@ public partial class DeviceManager
             _linkedDevices.TryAdd(keyBase64, deviceInfo);
 
             LoggingManager.LogInformation(nameof(DeviceManager), $"Successfully linked device {keyBase64}");
+
+            // Persist the updated list to disk (fire-and-forget, best-effort).
+            PersistDevicesFireAndForget();
         }
-        catch
+        catch (Exception ex)
         {
+            LoggingManager.LogError(nameof(DeviceManager),
+                $"Failed to add linked device: {ex.Message}");
+
             // Clear the normalized key if we didn't store it successfully
             if (normalizedKey != null)
             {
@@ -79,6 +87,7 @@ public partial class DeviceManager
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(devicePublicKey, nameof(devicePublicKey));
+        EnsureStorageLoadedAsync().GetAwaiter().GetResult();
 
         byte[]? normalizedKey = null;
         try
@@ -103,6 +112,10 @@ public partial class DeviceManager
                 }
 
                 LoggingManager.LogInformation(nameof(DeviceManager), $"Removed linked device {keyBase64}");
+
+                // Persist the updated list to disk (fire-and-forget, best-effort).
+                PersistDevicesFireAndForget();
+
                 return true;
             }
 
@@ -126,6 +139,8 @@ public partial class DeviceManager
 
         if (devicePublicKey.IsEmpty)
             return false;
+
+        EnsureStorageLoadedAsync().GetAwaiter().GetResult();
 
         byte[]? normalizedKey = null;
         try

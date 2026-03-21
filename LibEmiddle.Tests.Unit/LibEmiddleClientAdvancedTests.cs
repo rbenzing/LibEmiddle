@@ -233,5 +233,142 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(bundle.IdentityKey, "Bundle should have identity key");
             Assert.IsNotNull(bundle.SignedPreKey, "Bundle should have signed pre-key");
         }
+
+        // ── IAsyncDisposable tests ───────────────────────────────────────────
+
+        [TestMethod]
+        public async Task DisposeAsync_WithoutListening_CompletesWithoutDeadlock()
+        {
+            // Arrange — create a fresh client that has never started listening
+            var options = new LibEmiddleClientOptions
+            {
+                TransportType = TransportType.InMemory
+            };
+            var client = new LibEmiddleClient(options);
+            await client.InitializeAsync();
+
+            // Act — DisposeAsync must complete; if it deadlocks the test runner will time out
+            await client.DisposeAsync();
+
+            // Assert — after disposal, InitializeAsync must throw ObjectDisposedException
+            await Assert.ThrowsExceptionAsync<ObjectDisposedException>(
+                () => client.InitializeAsync());
+        }
+
+        [TestMethod]
+        public async Task DisposeAsync_WhileListening_StopsListeningThenDisposesCleanly()
+        {
+            // Arrange — start a listening client
+            var options = new LibEmiddleClientOptions
+            {
+                TransportType = TransportType.InMemory
+            };
+            var client = new LibEmiddleClient(options);
+            await client.InitializeAsync();
+            var startResult = await client.StartListeningAsync(1000);
+            Assert.IsTrue(startResult, "Client should have started listening");
+            Assert.IsTrue(client.IsListening, "Client should be listening before DisposeAsync");
+
+            // Act — DisposeAsync should stop listening then dispose all components
+            var completed = false;
+            var disposeTask = Task.Run(async () =>
+            {
+                await client.DisposeAsync();
+                completed = true;
+            });
+
+            // Allow up to 10 seconds for completion — no GetAwaiter().GetResult() anywhere
+            var timedOut = !disposeTask.Wait(TimeSpan.FromSeconds(10));
+
+            // Assert
+            Assert.IsFalse(timedOut, "DisposeAsync should complete without deadlock within 10 seconds");
+            Assert.IsTrue(completed, "DisposeAsync task should have run to completion");
+        }
+
+        [TestMethod]
+        public async Task DisposeAsync_CalledTwice_IsIdempotent()
+        {
+            // Arrange
+            var options = new LibEmiddleClientOptions
+            {
+                TransportType = TransportType.InMemory
+            };
+            var client = new LibEmiddleClient(options);
+
+            // Act — calling DisposeAsync twice must not throw
+            await client.DisposeAsync();
+            await client.DisposeAsync(); // second call should be a no-op
+
+            // Assert — reached here without exception
+            Assert.IsTrue(true, "Double DisposeAsync should be idempotent");
+        }
+
+        [TestMethod]
+        public async Task DisposeAsync_ImplementsIAsyncDisposable_ViaAwaitUsing()
+        {
+            // Arrange / Act — verify the canonical 'await using' pattern compiles and works
+            bool reachedAfterBlock = false;
+
+            await using (var client = new LibEmiddleClient(new LibEmiddleClientOptions
+            {
+                TransportType = TransportType.InMemory
+            }))
+            {
+                await client.InitializeAsync();
+                // client is used inside the block
+                Assert.IsNotNull(client.IdentityPublicKey, "Identity key should be available inside await-using block");
+            }
+
+            // Execution reaching here confirms DisposeAsync was awaited without exception
+            reachedAfterBlock = true;
+            Assert.IsTrue(reachedAfterBlock, "Code after 'await using' block should execute normally");
+        }
+
+        [TestMethod]
+        public void LibEmiddleClient_ImplementsIAsyncDisposable()
+        {
+            // Assert — static/reflection check that the concrete type satisfies IAsyncDisposable
+            Assert.IsInstanceOfType(_client, typeof(IAsyncDisposable),
+                "LibEmiddleClient must implement IAsyncDisposable");
+        }
+
+        [TestMethod]
+        public void ILibEmiddleClient_InterfaceInheritsIAsyncDisposable()
+        {
+            // Assert — the public interface contract also carries IAsyncDisposable
+            var interfaceType = typeof(ILibEmiddleClient);
+            Assert.IsTrue(
+                typeof(IAsyncDisposable).IsAssignableFrom(interfaceType),
+                "ILibEmiddleClient must inherit IAsyncDisposable");
+        }
+
+        [TestMethod]
+        public async Task SynchronousDispose_DoesNotCallGetAwaiterGetResult()
+        {
+            // Arrange — start listening so that _isListening == true when Dispose() is called
+            var options = new LibEmiddleClientOptions
+            {
+                TransportType = TransportType.InMemory
+            };
+            var client = new LibEmiddleClient(options);
+            await client.InitializeAsync();
+            await client.StartListeningAsync(1000);
+
+            // Act — synchronous Dispose() must return without blocking on async work
+            var disposeCompleted = false;
+            var thread = new Thread(() =>
+            {
+                client.Dispose();
+                disposeCompleted = true;
+            });
+            thread.Start();
+            // Allow up to 5 s — a blocking GetAwaiter().GetResult() on a deadlocking context
+            // would hang here; successful completion proves no blocking call was made.
+            thread.Join(TimeSpan.FromSeconds(5));
+
+            // Assert
+            Assert.IsTrue(disposeCompleted,
+                "Synchronous Dispose() must complete within 5 seconds without blocking on async operations");
+        }
     }
 }

@@ -15,6 +15,7 @@ using LibEmiddle.Abstractions;
 namespace LibEmiddle.Tests.Unit
 {
     [TestClass]
+    [DoNotParallelize]  // Multi-device crypto tests are sensitive to parallel execution with I/O-heavy tests
     public class MultiDeviceTests
     {
         private ICryptoProvider _cryptoProvider;

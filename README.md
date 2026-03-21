@@ -44,19 +44,22 @@ var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 - **Ed25519 & X25519** - Modern elliptic curve cryptography for digital signatures and key exchange
 - **Post-Quantum Cryptography** - Preparation for quantum-resistant algorithms (v2.5)
 - **Advanced Key Rotation** - Sophisticated key rotation policies and monitoring
+- **Replay Attack Protection** - Per-sender message ID deduplication in both chat and group sessions
+- **Post-Removal Forward Secrecy** - Group chain key rotated immediately on member removal
 
 ### 💬 Communication Patterns
 - **One-to-One Messaging** - Secure private conversations with forward secrecy
 - **Group Messaging** - Efficient encrypted group chats with advanced member management
-- **Multi-Device Support** - Seamless synchronization and device linking
+- **Multi-Device Support** - Seamless synchronization with encrypted persistent device list
 - **Asynchronous Communication** - Robust mailbox system with delivery and read receipts
 - **Message Batching** - Efficient bulk messaging with compression support (v2.5)
 - **Flexible Transport Layer** - HTTP and InMemory transports (WebRTC planned for v3.0)
 
 ### 🏗️ Architecture Highlights
-- **Unified Client API** - Single `LibEmiddleClient` for all operations
+- **Unified Client API** - Single `LibEmiddleClient` for all operations (`IAsyncDisposable` support)
 - **Modular Design** - Pluggable transport, storage, and crypto providers
 - **Session Management** - Automatic session persistence and recovery with backup capabilities
+- **Structured Exceptions** - `LibEmiddleException` with typed `LibEmiddleErrorCode` for precise error handling
 - **Event-Driven** - Real-time message handling with comprehensive events
 - **Feature Flags** - Gradual rollout and configuration of new capabilities (v2.5)
 - **Enterprise Monitoring** - Built-in diagnostics and resilience management (v2.5)

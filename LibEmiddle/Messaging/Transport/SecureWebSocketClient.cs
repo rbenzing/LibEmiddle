@@ -7,6 +7,7 @@ using System.Text.Json;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
+using LibEmiddle.Domain.Exceptions;
 using LibEmiddle.Protocol;
 
 namespace LibEmiddle.Messaging.Transport
@@ -169,7 +170,7 @@ namespace LibEmiddle.Messaging.Transport
                 ex is not CryptographicException)
             {
                 // Wrap unexpected errors
-                throw new Exception($"Error sending encrypted message: {ex.Message}", ex);
+                throw new LibEmiddleException($"Error sending encrypted message: {ex.Message}", LibEmiddleErrorCode.TransportError, ex);
             }
         }
 
@@ -335,7 +336,7 @@ namespace LibEmiddle.Messaging.Transport
                 ex is not CryptographicException)
             {
                 // Wrap unexpected errors
-                throw new Exception($"Error receiving encrypted message: {ex.Message}", ex);
+                throw new LibEmiddleException($"Error receiving encrypted message: {ex.Message}", LibEmiddleErrorCode.TransportError, ex);
             }
             finally
             {

@@ -20,6 +20,14 @@ namespace LibEmiddle.Domain
         public string SessionId { get; set; } = string.Empty;
 
         /// <summary>
+        /// Gets or sets the sender's long-term identity public key (Ed25519, 32 bytes).
+        /// Used for O(1) session routing on the receiver side.
+        /// Nullable for backwards compatibility with messages created before this field was added.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public byte[]? SenderIdentityKey { get; set; }
+
+        /// <summary>
         /// Gets or sets the sender's DH ratchet public key.
         /// Used for the Double Ratchet protocol.
         /// </summary>
@@ -63,6 +71,7 @@ namespace LibEmiddle.Domain
             {
                 MessageId = MessageId,
                 SessionId = SessionId,
+                SenderIdentityKey = SenderIdentityKey?.ToArray(),
                 SenderDHKey = SenderDHKey?.ToArray(),
                 SenderMessageNumber = SenderMessageNumber,
                 Ciphertext = Ciphertext?.ToArray(),
@@ -114,6 +123,7 @@ namespace LibEmiddle.Domain
             size += SessionId.Length * sizeof(char);
 
             // Byte arrays
+            size += SenderIdentityKey?.Length ?? 0;
             size += SenderDHKey?.Length ?? 0;
             size += Ciphertext?.Length ?? 0;
             size += Nonce?.Length ?? 0;
@@ -239,6 +249,12 @@ namespace LibEmiddle.Domain
                     message.SessionId = sessionId;
                 }
 
+                // Optional: SenderIdentityKey (new field, nullable for backwards compatibility)
+                if (dictionary.TryGetValue("SenderIdentityKey", out var senderIdentityKeyObj) && senderIdentityKeyObj is string senderIdentityKeyBase64)
+                {
+                    message.SenderIdentityKey = Convert.FromBase64String(senderIdentityKeyBase64);
+                }
+
                 return message;
             }
             catch (FormatException)
@@ -333,6 +349,11 @@ namespace LibEmiddle.Domain
                 ["SenderDHKey"] = Convert.ToBase64String(SenderDHKey),
                 ["Timestamp"] = Timestamp
             };
+
+            if (SenderIdentityKey != null && SenderIdentityKey.Length > 0)
+            {
+                dictionary["SenderIdentityKey"] = Convert.ToBase64String(SenderIdentityKey);
+            }
 
             if (!string.IsNullOrEmpty(MessageId))
             {

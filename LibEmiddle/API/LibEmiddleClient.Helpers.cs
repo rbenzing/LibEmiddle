@@ -67,6 +67,10 @@ public sealed partial class LibEmiddleClient
 
     private IMailboxTransport CreateTransport()
     {
+        // Allow callers to inject a custom transport (primarily for testing).
+        if (_options.CustomTransport != null)
+            return _options.CustomTransport;
+
         return _options.TransportType switch
         {
             TransportType.InMemory => new InMemoryMailboxTransport(_cryptoProvider),
@@ -86,15 +90,149 @@ public sealed partial class LibEmiddleClient
 
     private void OnMailboxMessageReceived(object? sender, MailboxMessageEventArgs e)
     {
+        // Always forward the raw event to client consumers first so they are notified
+        // regardless of whether internal routing succeeds.
         try
         {
-            // Forward the event to client consumers
             MessageReceived?.Invoke(this, e);
-            LoggingManager.LogDebug(nameof(LibEmiddleClient), $"Forwarded message received event for message {e.Message.Id}");
         }
         catch (Exception ex)
         {
-            LoggingManager.LogError(nameof(LibEmiddleClient), $"Error in message received event handler: {ex.Message}");
+            LoggingManager.LogError(nameof(LibEmiddleClient), $"Error notifying MessageReceived subscribers for message {e.Message.Id}: {ex.Message}");
+        }
+
+        // Route the incoming message to the appropriate processing path.
+        // Each case is fire-and-forget; errors are logged and swallowed so that
+        // one bad message never stops the polling loop.
+        _ = RouteIncomingMailboxMessageAsync(e.Message);
+    }
+
+    /// <summary>
+    /// Routes an incoming <see cref="MailboxMessage"/> to the correct processing method
+    /// based on its <see cref="MessageType"/>.
+    /// Errors are logged and swallowed — a single bad message must never halt polling.
+    /// </summary>
+    /// <param name="message">The incoming mailbox message.</param>
+    private async Task RouteIncomingMailboxMessageAsync(MailboxMessage message)
+    {
+        try
+        {
+            switch (message.Type)
+            {
+                case MessageType.Chat:
+                case MessageType.KeyExchange:
+                    await RouteChatMessageAsync(message);
+                    break;
+
+                case MessageType.GroupChat:
+                    await RouteGroupMessageAsync(message);
+                    break;
+
+                case MessageType.DeliveryReceipt:
+                case MessageType.ReadReceipt:
+                case MessageType.DeviceSync:
+                case MessageType.DeviceRevocation:
+                case MessageType.Control:
+                case MessageType.SenderKeyDistribution:
+                case MessageType.SenderKeyRequest:
+                case MessageType.PreKeyBundle:
+                case MessageType.FileTransfer:
+                    // These types are handled at a higher level (e.g., transport or device layer)
+                    // or are informational; no additional routing needed here.
+                    LoggingManager.LogDebug(nameof(LibEmiddleClient),
+                        $"Received message {message.Id} of type {message.Type} — no routing action");
+                    break;
+
+                default:
+                    LoggingManager.LogWarning(nameof(LibEmiddleClient),
+                        $"Received message {message.Id} with unrecognised type {message.Type} — skipping");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log and continue — do NOT rethrow.
+            LoggingManager.LogError(nameof(LibEmiddleClient),
+                $"Unhandled error routing message {message.Id} (type={message.Type}): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Routes a chat-type mailbox message to <see cref="ProcessChatMessageAsync"/>.
+    /// </summary>
+    private async Task RouteChatMessageAsync(MailboxMessage message)
+    {
+        try
+        {
+            var result = await ProcessChatMessageAsync(message.EncryptedPayload);
+            if (result != null)
+            {
+                LoggingManager.LogDebug(nameof(LibEmiddleClient),
+                    $"Routed and decrypted chat message {message.Id}");
+            }
+            else
+            {
+                LoggingManager.LogWarning(nameof(LibEmiddleClient),
+                    $"Chat message {message.Id} could not be decrypted (no matching session)");
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient),
+                $"Error processing chat message {message.Id}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Routes a group-chat mailbox message to <see cref="ProcessGroupMessageAsync"/>.
+    /// The <see cref="EncryptedGroupMessage"/> is reconstructed from the fields available
+    /// in the <see cref="MailboxMessage"/>: the ciphertext/nonce come from
+    /// <see cref="MailboxMessage.EncryptedPayload"/>, the group identifier comes from
+    /// <see cref="MailboxMessage.Metadata"/> (key <c>"GroupId"</c>), and the sender
+    /// identity key comes from <see cref="MailboxMessage.SenderKey"/>.
+    /// </summary>
+    private async Task RouteGroupMessageAsync(MailboxMessage message)
+    {
+        try
+        {
+            // Extract GroupId from message metadata.
+            string? groupId = null;
+            message.Metadata?.TryGetValue("GroupId", out groupId);
+
+            if (string.IsNullOrEmpty(groupId))
+            {
+                LoggingManager.LogWarning(nameof(LibEmiddleClient),
+                    $"Group message {message.Id} is missing GroupId metadata — cannot route");
+                return;
+            }
+
+            // Reconstruct EncryptedGroupMessage from mailbox message fields.
+            var encryptedGroupMessage = new EncryptedGroupMessage
+            {
+                MessageId = message.EncryptedPayload.MessageId ?? message.Id,
+                GroupId = groupId,
+                SenderIdentityKey = message.SenderKey,
+                Ciphertext = message.EncryptedPayload.Ciphertext ?? Array.Empty<byte>(),
+                Nonce = message.EncryptedPayload.Nonce ?? Array.Empty<byte>(),
+                Timestamp = message.Timestamp,
+            };
+
+            var result = await ProcessGroupMessageAsync(encryptedGroupMessage);
+            if (result != null)
+            {
+                LoggingManager.LogDebug(nameof(LibEmiddleClient),
+                    $"Routed and decrypted group message {message.Id} for group {groupId}");
+            }
+            else
+            {
+                LoggingManager.LogWarning(nameof(LibEmiddleClient),
+                    $"Group message {message.Id} for group {groupId} could not be decrypted");
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggingManager.LogError(nameof(LibEmiddleClient),
+                $"Error processing group message {message.Id}: {ex.Message}");
         }
     }
 

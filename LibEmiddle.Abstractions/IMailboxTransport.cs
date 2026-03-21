@@ -3,6 +3,32 @@
 namespace LibEmiddle.Abstractions;
 
 /// <summary>
+/// Optional capability interface for transports that support publishing and fetching
+/// X3DH key bundles. Implement this interface alongside <see cref="IMailboxTransport"/>
+/// to enable <c>UploadKeyBundleAsync</c> / <c>FetchRecipientKeyBundleAsync</c> on the client.
+/// </summary>
+public interface IKeyBundleTransport
+{
+    /// <summary>
+    /// Uploads the caller's public key bundle to the transport server so that
+    /// other parties can initiate X3DH sessions without a pre-cached bundle.
+    /// </summary>
+    /// <param name="bundle">The public bundle to publish.</param>
+    /// <returns>A task that completes when the bundle has been uploaded.</returns>
+    Task UploadKeyBundleAsync(X3DHPublicBundle bundle);
+
+    /// <summary>
+    /// Fetches the public key bundle for the specified recipient identity key.
+    /// </summary>
+    /// <param name="recipientIdentityKey">The Ed25519 identity public key of the recipient.</param>
+    /// <returns>
+    /// The recipient's <see cref="X3DHPublicBundle"/>, or <c>null</c> if no bundle is
+    /// registered for that identity key.  Callers must check for <c>null</c> before use.
+    /// </returns>
+    Task<X3DHPublicBundle> FetchKeyBundleAsync(byte[] recipientIdentityKey);
+}
+
+/// <summary>
 /// Defines the contract for mailbox transport implementations that handle
 /// sending, receiving, and managing encrypted messages through various transport mechanisms.
 /// </summary>
