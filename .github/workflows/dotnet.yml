@@ -94,3 +94,47 @@ jobs:
       with:
         name: nuget-packages
         path: ./packages/*.nupkg
+
+  github-release:
+    needs: package
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Determine Version
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Download Package Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: nuget-packages
+        path: ./packages
+
+    - name: Extract changelog for this version
+      id: changelog
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        # Extract the section for this version from CHANGELOG.md
+        NOTES=$(awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
+        # Write to a file to preserve newlines
+        echo "$NOTES" > release_notes.md
+        echo "Release notes extracted for v$VERSION"
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        name: v${{ steps.version.outputs.version }}
+        body_path: release_notes.md
+        draft: false
+        prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+        files: ./packages/*.nupkg
