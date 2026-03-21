@@ -169,7 +169,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
-            var secondDeviceKeyPair = Sodium.GenerateX25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create manager
             using var manager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
@@ -215,7 +215,7 @@ namespace LibEmiddle.Tests.Unit
 
             // 1. Generate key pairs
             var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
-            var secondDeviceKeyPair = Sodium.GenerateX25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             Trace.TraceWarning($"Generated keys - Main device pub key length: {mainDeviceKeyPair.PublicKey.Length}, Second device pub key length: {secondDeviceKeyPair.PublicKey.Length}");
 
@@ -259,7 +259,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
-            var secondDeviceKeyPair = Sodium.GenerateX25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create managers
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
@@ -319,9 +319,9 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange - Create a main device and multiple secondary devices
             var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
-            var secondDeviceKeyPair = Sodium.GenerateX25519KeyPair();
-            var thirdDeviceKeyPair = Sodium.GenerateX25519KeyPair();
-            var fourthDeviceKeyPair = Sodium.GenerateX25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var thirdDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var fourthDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create device manager for main device
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
@@ -357,8 +357,8 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange - Create devices
             var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
-            var secondDeviceKeyPair = Sodium.GenerateX25519KeyPair();
-            var thirdDeviceKeyPair = Sodium.GenerateX25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
+            var thirdDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create device manager for main device
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
@@ -395,7 +395,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var mainDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
-            var secondDeviceKeyPair = Sodium.GenerateX25519KeyPair();
+            var secondDeviceKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create device manager
             var mainDeviceManager = new DeviceManager(mainDeviceKeyPair, _deviceLinkingService, _cryptoProvider);
@@ -426,7 +426,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var identityKeyPair = Sodium.GenerateEd25519KeyPair();
-            var deviceToRevokeKeyPair = Sodium.GenerateX25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
             const string revocationReason = "Device compromised";
 
             // Act - Create revocation message
@@ -463,7 +463,7 @@ namespace LibEmiddle.Tests.Unit
         {
             // Arrange
             var identityKeyPair = Sodium.GenerateEd25519KeyPair();
-            var deviceToRevokeKeyPair = Sodium.GenerateX25519KeyPair();
+            var deviceToRevokeKeyPair = Sodium.GenerateEd25519KeyPair();
 
             // Create a device manager
             var deviceManager = new DeviceManager(identityKeyPair, _deviceLinkingService, _cryptoProvider);
