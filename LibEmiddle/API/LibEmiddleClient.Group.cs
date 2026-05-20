@@ -288,11 +288,11 @@ public sealed partial class LibEmiddleClient
             LoggingManager.LogDebug(nameof(LibEmiddleClient), $"Retrieved group info for {groupId}");
             return groupSession;
         }
-        catch (Exception ex)
+        catch (KeyNotFoundException)
         {
-            LoggingManager.LogError(nameof(LibEmiddleClient),
-                $"Failed to get group info for {groupId}: {ex.Message}");
+            // Group not found — expected path when joining a new group, not an error
             return null;
         }
+        // All other exceptions (ObjectDisposedException, InvalidOperationException, etc.) propagate
     }
 }
