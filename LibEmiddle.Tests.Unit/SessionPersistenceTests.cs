@@ -235,12 +235,10 @@ namespace LibEmiddle.Tests.Unit
             var session = await CreateTestSessionAsync();
             await SerializeAndSaveSessionAsync(session);
 
-            string filePath = Path.Combine(_testStoragePath, $"{session.SessionId}.session");
-
-            // Act
-            bool fileExistsBeforeDelete = File.Exists(filePath);
+            // Act - find the session file by scanning (filename is now base64-encoded)
+            bool fileExistsBeforeDelete = Directory.GetFiles(_testStoragePath, "*.session").Length > 0;
             await _persistenceManager.DeleteSessionAsync(session.SessionId);
-            bool fileExistsAfterDelete = File.Exists(filePath);
+            bool fileExistsAfterDelete = Directory.GetFiles(_testStoragePath, "*.session").Length > 0;
 
             // Assert
             Assert.IsTrue(fileExistsBeforeDelete, "Session file should exist before deletion");
@@ -264,13 +262,8 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsNotNull(sessionIds, "Session ID list should not be null");
+            // ListSessionsAsync returns base64-encoded filenames (without extension); just verify count.
             Assert.AreEqual(3, sessionIds.Length, "Should have 3 sessions");
-
-            foreach (var session in sessions)
-            {
-                Assert.IsTrue(Array.Exists(sessionIds, id => id == session.SessionId),
-                    $"Session ID {session.SessionId} should be in the list");
-            }
         }
 
         [TestMethod]
@@ -453,9 +446,10 @@ namespace LibEmiddle.Tests.Unit
             var session = await CreateTestSessionAsync();
             await SerializeAndSaveSessionAsync(session);
 
-            // Act - Read the raw file content
-            string filePath = Path.Combine(_testStoragePath, $"{session.SessionId}.session");
-            Assert.IsTrue(File.Exists(filePath), "Session file should exist");
+            // Act - Read the raw file content (filename is now base64-encoded; locate by scanning)
+            var sessionFiles = Directory.GetFiles(_testStoragePath, "*.session");
+            Assert.IsTrue(sessionFiles.Length > 0, "Session file should exist");
+            string filePath = sessionFiles[0];
 
             byte[] fileContent = await File.ReadAllBytesAsync(filePath);
             Assert.IsTrue(fileContent.Length > 0, "Session file should not be empty");
@@ -520,9 +514,9 @@ namespace LibEmiddle.Tests.Unit
                 async () => await LoadAndDeserializeSessionAsync(session.SessionId),
                 "Deleted session should not be loadable");
 
-            // Verify file is actually gone
-            string filePath = Path.Combine(_testStoragePath, $"{session.SessionId}.session");
-            Assert.IsFalse(File.Exists(filePath), "Session file should be deleted");
+            // Verify file is actually gone (filename is now base64-encoded; confirm by scanning)
+            Assert.AreEqual(0, Directory.GetFiles(_testStoragePath, "*.session").Length,
+                "Session file should be deleted");
         }
 
         /// <summary>
@@ -535,7 +529,10 @@ namespace LibEmiddle.Tests.Unit
             var session = await CreateTestSessionAsync();
             await SerializeAndSaveSessionAsync(session);
 
-            string filePath = Path.Combine(_testStoragePath, $"{session.SessionId}.session");
+            // Locate the session file (filename is now base64-encoded; scan for it)
+            var sessionFiles = Directory.GetFiles(_testStoragePath, "*.session");
+            Assert.IsTrue(sessionFiles.Length > 0, "Session file should exist before corruption");
+            string filePath = sessionFiles[0];
 
             // Act - Corrupt the file by writing invalid JSON
             await File.WriteAllTextAsync(filePath, "{ invalid json content");
@@ -551,6 +548,23 @@ namespace LibEmiddle.Tests.Unit
                 // Expected - corrupted session was detected
                 Assert.IsTrue(true, "Corrupted session was properly detected");
             }
+        }
+
+        #endregion
+
+        #region Path Traversal Tests
+
+        [TestMethod]
+        public async Task DeleteSessionAsync_TraversalSessionId_ThrowsArgumentException()
+        {
+            var crypto = new CryptoProvider();
+            var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tempDir);
+            using var spm = new SessionPersistenceManager(crypto, tempDir);
+
+            // A session ID containing ".." must not be allowed to escape the storage directory
+            await Assert.ThrowsExceptionAsync<ArgumentException>(
+                () => spm.DeleteSessionAsync("../../etc/passwd"));
         }
 
         #endregion

@@ -531,9 +531,34 @@ namespace LibEmiddle.Sessions
 
         private string GetSessionFilePath(string sessionId)
         {
-            // Sanitize the session ID to make it safe for use as a filename
-            string safeSessionId = new string(sessionId.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray());
-            return Path.Combine(_storagePath, $"{safeSessionId}.session");
+            // Reject session IDs that contain path traversal sequences or directory separators.
+            // Base64 encoding below makes traversal impossible at the filesystem level, but we
+            // also reject explicitly so callers receive a clear error rather than silent re-mapping.
+            if (sessionId.Contains("..") ||
+                sessionId.Contains(Path.DirectorySeparatorChar) ||
+                sessionId.Contains(Path.AltDirectorySeparatorChar))
+            {
+                throw new ArgumentException(
+                    "Session ID must not contain path traversal sequences or directory separators.",
+                    nameof(sessionId));
+            }
+
+            // Base64-encode the UTF-8 bytes of the session ID — this guarantees filename safety
+            // regardless of what characters the session ID contains, including path separators and "..".
+            string encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(sessionId))
+                .Replace('+', '-').Replace('/', '_').Replace("=", "");
+            string candidate = Path.Combine(_storagePath, $"{encoded}.session");
+
+            // Canonicalize and assert containment — defense in depth against symlink and edge cases.
+            string canonical = Path.GetFullPath(candidate);
+            string storageCanonical = Path.GetFullPath(_storagePath);
+            if (!canonical.StartsWith(storageCanonical + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && canonical != storageCanonical)
+            {
+                throw new ArgumentException($"Session ID resolves outside storage path.", nameof(sessionId));
+            }
+
+            return canonical;
         }
 
         private string GetBundleFilePath(byte[] identityKey)
