@@ -162,7 +162,7 @@ namespace LibEmiddle.Sessions
                 // return the chat session
                 return chatSession;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LoggingManager.LogError(nameof(SessionPersistenceManager), $"Failed to load chat session {sessionId}: {ex.Message}");
                 return null;
