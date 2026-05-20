@@ -223,7 +223,7 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void X3DHKeyBundle_ClearPrivateKeys_ZeroesViaSecureClear()
+        public void X3DHKeyBundle_ClearPrivateKeys_SetsIdentityKeyToNull()
         {
             var bundle = new X3DHKeyBundle();
             // ED25519_PRIVATE_KEY_SIZE = 64

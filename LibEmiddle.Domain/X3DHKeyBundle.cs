@@ -290,18 +290,21 @@ namespace LibEmiddle.Domain
         {
             if (_identityKeyPrivate != null)
             {
+                // Domain layer cannot reference LibEmiddle.Core; ZeroMemory is the BCL equivalent of SecureMemory.SecureClear.
                 CryptographicOperations.ZeroMemory(_identityKeyPrivate);
                 _identityKeyPrivate = null;
             }
 
             if (_signedPreKeyPrivate != null)
             {
+                // Domain layer cannot reference LibEmiddle.Core; ZeroMemory is the BCL equivalent of SecureMemory.SecureClear.
                 CryptographicOperations.ZeroMemory(_signedPreKeyPrivate);
                 _signedPreKeyPrivate = null;
             }
 
             foreach (var key in _oneTimePreKeysPrivate.Values)
             {
+                // Domain layer cannot reference LibEmiddle.Core; ZeroMemory is the BCL equivalent of SecureMemory.SecureClear.
                 CryptographicOperations.ZeroMemory(key);
             }
             _oneTimePreKeysPrivate.Clear();

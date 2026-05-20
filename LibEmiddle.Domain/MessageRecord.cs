@@ -71,10 +71,9 @@ namespace LibEmiddle.Domain
         /// </para>
         /// <para>
         /// The byte arrays on the associated <see cref="EncryptedMessage"/> (Ciphertext,
-        /// Nonce, SenderDHKey) are overwritten with zeros via
-        /// <see cref="Array.Clear(Array)"/> so their contents cannot be read from a heap dump
-        /// after this call returns.  The <see cref="EncryptedMessage"/> reference is then
-        /// set to <c>null</c>.
+        /// Nonce, SenderDHKey) are overwritten with zeros so their contents cannot be read
+        /// from a heap dump after this call returns.  The <see cref="EncryptedMessage"/>
+        /// reference is then set to <c>null</c>.
         /// </para>
         /// </summary>
         public void SecureWipe()
@@ -94,6 +93,7 @@ namespace LibEmiddle.Domain
                 finally
                 {
                     if (contentBytes != null)
+                        // Domain layer cannot reference LibEmiddle.Core; ZeroMemory is the BCL equivalent of SecureMemory.SecureClear.
                         CryptographicOperations.ZeroMemory(contentBytes);
                 }
                 Content = null;
@@ -104,18 +104,21 @@ namespace LibEmiddle.Domain
             {
                 if (EncryptedMessage.Ciphertext != null)
                 {
+                    // Domain layer cannot reference LibEmiddle.Core; ZeroMemory is the BCL equivalent of SecureMemory.SecureClear.
                     CryptographicOperations.ZeroMemory(EncryptedMessage.Ciphertext);
                     EncryptedMessage.Ciphertext = null;
                 }
 
                 if (EncryptedMessage.Nonce != null)
                 {
+                    // Domain layer cannot reference LibEmiddle.Core; ZeroMemory is the BCL equivalent of SecureMemory.SecureClear.
                     CryptographicOperations.ZeroMemory(EncryptedMessage.Nonce);
                     EncryptedMessage.Nonce = null;
                 }
 
                 if (EncryptedMessage.SenderDHKey != null)
                 {
+                    // Domain layer cannot reference LibEmiddle.Core; ZeroMemory is the BCL equivalent of SecureMemory.SecureClear.
                     CryptographicOperations.ZeroMemory(EncryptedMessage.SenderDHKey);
                     EncryptedMessage.SenderDHKey = null;
                 }

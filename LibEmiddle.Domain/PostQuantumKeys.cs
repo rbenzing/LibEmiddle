@@ -232,6 +232,7 @@ namespace LibEmiddle.Domain
             // Clear existing key data
             if (KeyData.Length > 0)
             {
+                // Domain layer cannot reference LibEmiddle.Core; ZeroMemory is the BCL equivalent of SecureMemory.SecureClear.
                 CryptographicOperations.ZeroMemory(KeyData);
             }
 
@@ -319,6 +320,7 @@ namespace LibEmiddle.Domain
                 // Securely clear the key material
                 if (KeyData.Length > 0)
                 {
+                    // Domain layer cannot reference LibEmiddle.Core; ZeroMemory is the BCL equivalent of SecureMemory.SecureClear.
                     CryptographicOperations.ZeroMemory(KeyData);
                 }
 
