@@ -8,6 +8,7 @@ using LibEmiddle.KeyManagement;
 using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.VisualStudio.TestPlatform.ObjectModel.DataCollection;
 
 namespace LibEmiddle.Tests.Unit
@@ -228,6 +229,26 @@ namespace LibEmiddle.Tests.Unit
 
             // Cleanup
             await _keyManager.DeleteKeyAsync(keyId);
+        }
+
+        /// <summary>
+        /// Tests that concurrent store/retrieve operations do not deadlock with SemaphoreSlim
+        /// </summary>
+        [TestMethod]
+        public async Task KeyManager_ConcurrentCacheAccess_DoesNotDeadlock()
+        {
+            // 20 concurrent tasks each store and retrieve a unique key
+            var tasks = Enumerable.Range(0, 20).Select(i => Task.Run(async () =>
+            {
+                var keyId = $"concurrent-test-key-{i}";
+                var keyData = new byte[32];
+                System.Security.Cryptography.RandomNumberGenerator.Fill(keyData);
+                await _keyManager.StoreKeyAsync(keyId, keyData);
+                var retrieved = await _keyManager.RetrieveKeyAsync(keyId);
+                Assert.IsNotNull(retrieved, $"Key {keyId} should be retrievable after store");
+            }));
+
+            await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(10));
         }
 
         #endregion

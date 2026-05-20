@@ -17,7 +17,7 @@ namespace LibEmiddle.KeyManagement
         private readonly ConcurrentDictionary<string, CachedKey> _keyCache = new();
         private readonly TimeSpan _cacheExpiration = TimeSpan.FromMinutes(10);
         private readonly Timer _cacheCleanupTimer;
-        private readonly object _cacheLock = new object();
+        private readonly SemaphoreSlim _cacheLock = new SemaphoreSlim(1, 1);
         private volatile bool _disposed;
 
         /// <summary>
@@ -87,7 +87,7 @@ namespace LibEmiddle.KeyManagement
                 // If storage was successful, update the cache
                 if (success)
                 {
-                    CacheKey(keyId, key);
+                    await CacheKeyAsync(keyId, key).ConfigureAwait(false);
                 }
 
                 return success;
@@ -108,7 +108,8 @@ namespace LibEmiddle.KeyManagement
             try
             {
                 // Check the cache first with secure handling
-                lock (_cacheLock)
+                await _cacheLock.WaitAsync().ConfigureAwait(false);
+                try
                 {
                     if (_keyCache.TryGetValue(keyId, out CachedKey? cachedKey))
                     {
@@ -124,6 +125,10 @@ namespace LibEmiddle.KeyManagement
                         }
                     }
                 }
+                finally
+                {
+                    _cacheLock.Release();
+                }
 
                 // Not in cache, retrieve from storage
                 byte[]? key = await _cryptoProvider.RetrieveKeyAsync(keyId, password);
@@ -131,7 +136,7 @@ namespace LibEmiddle.KeyManagement
                 // If key was found, update the cache
                 if (key != null)
                 {
-                    CacheKey(keyId, key);
+                    await CacheKeyAsync(keyId, key).ConfigureAwait(false);
                 }
 
                 if (key == null)
@@ -162,12 +167,17 @@ namespace LibEmiddle.KeyManagement
             try
             {
                 // Remove from cache with secure disposal
-                lock (_cacheLock)
+                await _cacheLock.WaitAsync().ConfigureAwait(false);
+                try
                 {
                     if (_keyCache.TryRemove(keyId, out CachedKey? cachedKey))
                     {
                         cachedKey.Dispose();
                     }
+                }
+                finally
+                {
+                    _cacheLock.Release();
                 }
 
                 // Delete from storage
@@ -314,9 +324,10 @@ namespace LibEmiddle.KeyManagement
         /// </summary>
         /// <param name="keyId">The identifier for the key.</param>
         /// <param name="key">The key to cache.</param>
-        private void CacheKey(string keyId, byte[] key)
+        private async Task CacheKeyAsync(string keyId, byte[] key)
         {
-            lock (_cacheLock)
+            await _cacheLock.WaitAsync().ConfigureAwait(false);
+            try
             {
                 // Remove existing cached key if present
                 if (_keyCache.TryRemove(keyId, out CachedKey? existingKey))
@@ -327,6 +338,10 @@ namespace LibEmiddle.KeyManagement
                 // Store new cached key with expiration
                 _keyCache[keyId] = new CachedKey(key, _cacheExpiration);
             }
+            finally
+            {
+                _cacheLock.Release();
+            }
         }
 
         /// <summary>
@@ -336,7 +351,8 @@ namespace LibEmiddle.KeyManagement
         {
             try
             {
-                lock (_cacheLock)
+                _cacheLock.Wait();
+                try
                 {
                     var expiredKeys = new List<string>();
 
@@ -357,6 +373,10 @@ namespace LibEmiddle.KeyManagement
                             cachedKey.Dispose();
                         }
                     }
+                }
+                finally
+                {
+                    _cacheLock.Release();
                 }
             }
             catch (Exception ex)
@@ -388,7 +408,8 @@ namespace LibEmiddle.KeyManagement
                 _cacheCleanupTimer.Dispose();
 
                 // Clear and dispose the key cache securely
-                lock (_cacheLock)
+                _cacheLock.Wait();
+                try
                 {
                     foreach (var cachedKey in _keyCache.Values)
                     {
@@ -396,8 +417,13 @@ namespace LibEmiddle.KeyManagement
                     }
                     _keyCache.Clear();
                 }
+                finally
+                {
+                    _cacheLock.Release();
+                }
 
-                // Dispose the key storage
+                // Dispose the semaphore and key storage
+                _cacheLock.Dispose();
                 _keyStorage.Dispose();
             }
 

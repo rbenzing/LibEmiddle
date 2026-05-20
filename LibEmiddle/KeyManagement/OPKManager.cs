@@ -32,7 +32,7 @@ namespace LibEmiddle.KeyManagement
         // -----------------------------------------------------------------------
 
         private readonly string _storageFilePath;
-        private readonly object _lock = new object();
+        private readonly SemaphoreSlim _lock = new SemaphoreSlim(1, 1);
         private readonly HashSet<uint> _consumedIds;
 
         // Replenishment callback — kept as null until set; called on a background task.
@@ -86,9 +86,14 @@ namespace LibEmiddle.KeyManagement
         public bool IsConsumed(uint opkId)
         {
             ThrowIfDisposed();
-            lock (_lock)
+            _lock.Wait();
+            try
             {
                 return _consumedIds.Contains(opkId);
+            }
+            finally
+            {
+                _lock.Release();
             }
         }
 
@@ -112,13 +117,18 @@ namespace LibEmiddle.KeyManagement
             ThrowIfDisposed();
             bool added;
             int availableCount;
-            lock (_lock)
+            _lock.Wait();
+            try
             {
                 // HashSet.Add returns false when the element is already present.
                 // Both the check and the insertion happen inside one lock acquisition,
                 // so two concurrent arrivals with the same OPK ID cannot both succeed.
                 added = _consumedIds.Add(opkId);
                 availableCount = ComputeAvailableCount(allKnownIds);
+            }
+            finally
+            {
+                _lock.Release();
             }
 
             if (added)
@@ -154,10 +164,15 @@ namespace LibEmiddle.KeyManagement
             bool changed;
             int availableCount;
 
-            lock (_lock)
+            _lock.Wait();
+            try
             {
                 changed = _consumedIds.Add(opkId);
                 availableCount = ComputeAvailableCount(allKnownIds);
+            }
+            finally
+            {
+                _lock.Release();
             }
 
             if (changed)
@@ -181,7 +196,8 @@ namespace LibEmiddle.KeyManagement
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(allIds);
 
-            lock (_lock)
+            _lock.Wait();
+            try
             {
                 var result = new List<uint>(allIds.Count);
                 foreach (uint id in allIds)
@@ -190,6 +206,10 @@ namespace LibEmiddle.KeyManagement
                         result.Add(id);
                 }
                 return result;
+            }
+            finally
+            {
+                _lock.Release();
             }
         }
 
@@ -200,9 +220,14 @@ namespace LibEmiddle.KeyManagement
         public int GetAvailableCount(IReadOnlyList<uint>? allKnownIds)
         {
             ThrowIfDisposed();
-            lock (_lock)
+            _lock.Wait();
+            try
             {
                 return ComputeAvailableCount(allKnownIds);
+            }
+            finally
+            {
+                _lock.Release();
             }
         }
 
@@ -214,9 +239,14 @@ namespace LibEmiddle.KeyManagement
             get
             {
                 ThrowIfDisposed();
-                lock (_lock)
+                _lock.Wait();
+                try
                 {
                     return _consumedIds.Count;
+                }
+                finally
+                {
+                    _lock.Release();
                 }
             }
         }
@@ -255,9 +285,14 @@ namespace LibEmiddle.KeyManagement
             try
             {
                 List<uint> snapshot;
-                lock (_lock)
+                _lock.Wait();
+                try
                 {
                     snapshot = new List<uint>(_consumedIds);
+                }
+                finally
+                {
+                    _lock.Release();
                 }
 
                 string json = JsonSerializer.Serialize(snapshot);
@@ -337,10 +372,11 @@ namespace LibEmiddle.KeyManagement
         // IDisposable
         // -----------------------------------------------------------------------
 
-        /// <summary>Disposes the manager (no-op: no unmanaged resources).</summary>
+        /// <summary>Disposes the manager and releases resources.</summary>
         public void Dispose()
         {
             _disposed = true;
+            _lock.Dispose();
         }
     }
 }
