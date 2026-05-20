@@ -11,9 +11,6 @@ namespace LibEmiddle.Crypto
     /// </summary>
     internal static class AES
     {
-        // Size of the AES-GCM state for precomputation
-        private const int StateSize = 512; // Must be aligned to 16 bytes
-
         /// <summary>
         /// Encrypts data using AES-GCM with libsodium
         /// </summary>
@@ -40,48 +37,8 @@ namespace LibEmiddle.Crypto
             // Prepare additional data if provided
             byte[] ad = additionalData ?? Array.Empty<byte>();
 
-            // Allocate output buffer for ciphertext
-            byte[] ciphertext = new byte[plaintext.Length + Constants.AUTH_TAG_SIZE];
-
-            // Use unsafe and fixed for better performance and safety
-            unsafe
-            {
-                // Stack allocate the state to avoid heap allocation
-                Span<byte> stateBuffer = stackalloc byte[StateSize];
-
-                fixed (byte* pState = stateBuffer)
-                fixed (byte* pKey = key)
-                fixed (byte* pPlaintext = plaintext)
-                fixed (byte* pCiphertext = ciphertext)
-                fixed (byte* pNonce = nonce)
-                fixed (byte* pAd = ad)
-                {
-                    IntPtr state = (IntPtr)pState;
-
-                    // Precompute the key expansion
-                    int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key);
-                    if (result != 0)
-                    {
-                        throw new InvalidOperationException("Failed to initialize AES-GCM state");
-                    }
-
-                    // Encrypt using libsodium
-                    result = Sodium.crypto_aead_aes256gcm_encrypt_afternm(
-                        ciphertext, out ulong cipherLength,
-                        plaintext, (ulong)plaintext.Length,
-                        ad, (ulong)ad.Length,
-                        null, // nsec is always null for AES-GCM
-                        nonce,
-                        state);
-
-                    if (result != 0)
-                    {
-                        throw new InvalidOperationException("Encryption failed");
-                    }
-
-                    return ciphertext;
-                }
-            }
+            // Delegate unsafe pinning to Sodium wrapper
+            return Sodium.AesGcmEncrypt(plaintext, key, nonce, ad, Constants.AUTH_TAG_SIZE);
         }
 
         /// <summary>
@@ -112,59 +69,23 @@ namespace LibEmiddle.Crypto
             // Prepare additional data if provided
             byte[] ad = additionalData ?? [];
 
-            // Allocate output buffer for plaintext
-            byte[] plaintext = new byte[ciphertextWithTag.Length - Constants.AUTH_TAG_SIZE];
-
             try
             {
-                // Use unsafe and fixed for better performance and safety
-                unsafe
+                // Delegate unsafe pinning to Sodium wrapper
+                byte[] plaintext = Sodium.AesGcmDecrypt(
+                    ciphertextWithTag, key, nonce, ad, Constants.AUTH_TAG_SIZE,
+                    out ulong plaintextLength);
+
+                // Create a properly sized result array if needed
+                if (plaintextLength < (ulong)plaintext.Length)
                 {
-                    // Stack allocate the state to avoid heap allocation
-                    Span<byte> stateBuffer = stackalloc byte[StateSize];
-
-                    fixed (byte* pState = stateBuffer)
-                    fixed (byte* pKey = key)
-                    fixed (byte* pPlaintext = plaintext)
-                    fixed (byte* pCiphertext = ciphertextWithTag)
-                    fixed (byte* pNonce = nonce)
-                    fixed (byte* pAd = ad)
-                    {
-                        IntPtr state = (IntPtr)pState;
-
-                        // Precompute the key expansion
-                        int result = Sodium.crypto_aead_aes256gcm_beforenm(state, key);
-                        if (result != 0)
-                        {
-                            throw new InvalidOperationException("Failed to initialize AES-GCM state");
-                        }
-
-                        // Decrypt using libsodium
-                        result = Sodium.crypto_aead_aes256gcm_decrypt_afternm(
-                            plaintext, out ulong plaintextLength,
-                            null, // nsec is always null for AES-GCM
-                            ciphertextWithTag, (ulong)ciphertextWithTag.Length,
-                            ad, (ulong)ad.Length,
-                            nonce,
-                            state);
-
-                        if (result != 0)
-                        {
-                            throw new CryptographicException("Authentication failed. The data may have been tampered with or the wrong key was used.");
-                        }
-
-                        // Create a properly sized result array if needed
-                        if (plaintextLength < (ulong)plaintext.Length)
-                        {
-                            byte[] resizedPlaintext = new byte[plaintextLength];
-                            plaintext.AsSpan(0, (int)plaintextLength).CopyTo(resizedPlaintext);
-                            SecureMemory.SecureClear(plaintext); // Clear the original buffer
-                            return resizedPlaintext;
-                        }
-
-                        return plaintext;
-                    }
+                    byte[] resizedPlaintext = new byte[plaintextLength];
+                    plaintext.AsSpan(0, (int)plaintextLength).CopyTo(resizedPlaintext);
+                    SecureMemory.SecureClear(plaintext); // Clear the original buffer
+                    return resizedPlaintext;
                 }
+
+                return plaintext;
             }
             catch (CryptographicException)
             {
@@ -261,7 +182,7 @@ namespace LibEmiddle.Crypto
         /// <exception cref="ArgumentException">If inputs have invalid lengths or are empty.</exception>
         /// <exception cref="PlatformNotSupportedException">If AES-GCM or libsodium is unavailable.</exception>
         /// <exception cref="CryptographicException">If encryption fails or tag length mismatches.</exception>
-        public static unsafe byte[] AESEncryptDetached(
+        public static byte[] AESEncryptDetached(
             ReadOnlySpan<byte> plaintext,
             ReadOnlySpan<byte> key,
             ReadOnlySpan<byte> nonce,
@@ -276,39 +197,8 @@ namespace LibEmiddle.Crypto
             if (nonce.Length != Constants.NONCE_SIZE)
                 throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long", nameof(nonce));
 
-            // 2) Stack-allocate state
-            Span<byte> stateStorage = stackalloc byte[StateSize];
-
-            // 3) Allocate output buffers
-            byte[] ciphertext = new byte[plaintext.Length];
-            tag = new byte[Constants.AUTH_TAG_SIZE];
-
-            // 4) Expand key and encrypt
-            fixed (byte* pState = stateStorage)
-            {
-                IntPtr statePtr = (IntPtr)pState;
-
-                int rc = Sodium.crypto_aead_aes256gcm_beforenm(statePtr, key);
-                if (rc != 0)
-                    throw new InvalidOperationException("AES-GCM key schedule failed");
-
-                rc = Sodium.crypto_aead_aes256gcm_encrypt_detached_afternm(
-                    ciphertext,         // c
-                    tag,                // mac
-                    out ulong maclen,   // maclen_p
-                    plaintext,          // m
-                    (ulong)plaintext.Length,
-                    additionalData,     // ad
-                    (ulong)additionalData.Length,
-                    null,               // nsec
-                    nonce,              // npub
-                    statePtr            // ctx
-                );
-                if (rc != 0 || maclen != (ulong)tag.Length)
-                    throw new CryptographicException("AES-GCM detached encryption failed");
-            }
-
-            return ciphertext;
+            // Delegate unsafe pinning to Sodium wrapper
+            return Sodium.AesGcmEncryptDetached(plaintext, key, nonce, additionalData, Constants.AUTH_TAG_SIZE, out tag);
         }
 
         /// <summary>
@@ -323,7 +213,7 @@ namespace LibEmiddle.Crypto
         /// <exception cref="ArgumentException">If inputs have invalid lengths or are empty.</exception>
         /// <exception cref="PlatformNotSupportedException">If AES-GCM or libsodium is unavailable.</exception>
         /// <exception cref="CryptographicException">If decryption fails or tag mismatch occurs.</exception>
-        public static unsafe byte[] AESDecryptDetached(
+        public static byte[] AESDecryptDetached(
             ReadOnlySpan<byte> ciphertext,
             ReadOnlySpan<byte> tag,
             ReadOnlySpan<byte> key,
@@ -340,37 +230,8 @@ namespace LibEmiddle.Crypto
             if (nonce.Length != Constants.NONCE_SIZE)
                 throw new ArgumentException($"Nonce must be {Constants.NONCE_SIZE} bytes long", nameof(nonce));
 
-            // 2) Stack-allocate state
-            Span<byte> stateStorage = stackalloc byte[StateSize];
-
-            // 3) Allocate plaintext buffer
-            byte[] plaintext = new byte[ciphertext.Length];
-
-            // 4) Expand key and decrypt
-            fixed (byte* pState = stateStorage)
-            {
-                IntPtr statePtr = (IntPtr)pState;
-
-                int rc = Sodium.crypto_aead_aes256gcm_beforenm(statePtr, key);
-                if (rc != 0)
-                    throw new InvalidOperationException("AES-GCM key schedule failed");
-
-                rc = Sodium.crypto_aead_aes256gcm_decrypt_detached_afternm(
-                    plaintext,            // m
-                    default,              // nsec (always null)
-                    ciphertext,           // c
-                    (ulong)ciphertext.Length,
-                    tag,                  // mac
-                    additionalData,       // ad
-                    (ulong)additionalData.Length,
-                    nonce,                // npub
-                    statePtr             // ctx
-                );
-                if (rc != 0)
-                    throw new CryptographicException("AES-GCM detached decryption failed");
-            }
-
-            return plaintext;
+            // Delegate unsafe pinning to Sodium wrapper
+            return Sodium.AesGcmDecryptDetached(ciphertext, tag, key, nonce, additionalData);
         }
     }
 }

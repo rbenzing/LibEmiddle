@@ -352,6 +352,175 @@ public sealed partial class Sodium
         ReadOnlySpan<byte> npub,       // const unsigned char *npub (nonce)
         IntPtr ctx);         // const crypto_aead_aes256gcm_state *ctx
 
+    // Size of the AES-GCM state for precomputation (must be 512 bytes, aligned to 16 bytes)
+    internal const int AesGcmStateSize = 512;
+
+    /// <summary>
+    /// Performs AES-GCM combined (ciphertext + tag) encryption using a stackalloc state buffer.
+    /// Moves all unsafe/fixed pinning here so callers need no unsafe keyword.
+    /// </summary>
+    internal static byte[] AesGcmEncrypt(
+        ReadOnlySpan<byte> plaintext,
+        ReadOnlySpan<byte> key,
+        ReadOnlySpan<byte> nonce,
+        ReadOnlySpan<byte> additionalData,
+        int authTagSize)
+    {
+        byte[] ciphertext = new byte[plaintext.Length + authTagSize];
+        unsafe
+        {
+            Span<byte> stateBuffer = stackalloc byte[AesGcmStateSize];
+            fixed (byte* pState = stateBuffer)
+            {
+                IntPtr state = (IntPtr)pState;
+
+                int result = crypto_aead_aes256gcm_beforenm(state, key);
+                if (result != 0)
+                    throw new InvalidOperationException("Failed to initialize AES-GCM state");
+
+                result = crypto_aead_aes256gcm_encrypt_afternm(
+                    ciphertext, out _,
+                    plaintext, (ulong)plaintext.Length,
+                    additionalData, (ulong)additionalData.Length,
+                    default,
+                    nonce,
+                    state);
+
+                if (result != 0)
+                    throw new InvalidOperationException("Encryption failed");
+            }
+        }
+        return ciphertext;
+    }
+
+    /// <summary>
+    /// Performs AES-GCM combined (ciphertext + tag) decryption using a stackalloc state buffer.
+    /// Moves all unsafe/fixed pinning here so callers need no unsafe keyword.
+    /// Returns the actual plaintext length via <paramref name="plaintextLength"/>.
+    /// </summary>
+    internal static byte[] AesGcmDecrypt(
+        ReadOnlySpan<byte> ciphertextWithTag,
+        ReadOnlySpan<byte> key,
+        ReadOnlySpan<byte> nonce,
+        ReadOnlySpan<byte> additionalData,
+        int authTagSize,
+        out ulong plaintextLength)
+    {
+        byte[] plaintext = new byte[ciphertextWithTag.Length - authTagSize];
+        ulong capturedLength = 0;
+        unsafe
+        {
+            Span<byte> stateBuffer = stackalloc byte[AesGcmStateSize];
+            fixed (byte* pState = stateBuffer)
+            {
+                IntPtr state = (IntPtr)pState;
+
+                int result = crypto_aead_aes256gcm_beforenm(state, key);
+                if (result != 0)
+                    throw new InvalidOperationException("Failed to initialize AES-GCM state");
+
+                result = crypto_aead_aes256gcm_decrypt_afternm(
+                    plaintext, out capturedLength,
+                    default,
+                    ciphertextWithTag, (ulong)ciphertextWithTag.Length,
+                    additionalData, (ulong)additionalData.Length,
+                    nonce,
+                    state);
+
+                if (result != 0)
+                    throw new System.Security.Cryptography.CryptographicException(
+                        "Authentication failed. The data may have been tampered with or the wrong key was used.");
+            }
+        }
+        plaintextLength = capturedLength;
+        return plaintext;
+    }
+
+    /// <summary>
+    /// Performs AES-GCM detached encryption (separate ciphertext and tag) using a stackalloc state buffer.
+    /// Moves all unsafe/fixed pinning here so callers need no unsafe keyword.
+    /// </summary>
+    internal static byte[] AesGcmEncryptDetached(
+        ReadOnlySpan<byte> plaintext,
+        ReadOnlySpan<byte> key,
+        ReadOnlySpan<byte> nonce,
+        ReadOnlySpan<byte> additionalData,
+        int authTagSize,
+        out byte[] tag)
+    {
+        byte[] ciphertext = new byte[plaintext.Length];
+        tag = new byte[authTagSize];
+        unsafe
+        {
+            Span<byte> stateBuffer = stackalloc byte[AesGcmStateSize];
+            fixed (byte* pState = stateBuffer)
+            {
+                IntPtr statePtr = (IntPtr)pState;
+
+                int rc = crypto_aead_aes256gcm_beforenm(statePtr, key);
+                if (rc != 0)
+                    throw new InvalidOperationException("AES-GCM key schedule failed");
+
+                rc = crypto_aead_aes256gcm_encrypt_detached_afternm(
+                    ciphertext,
+                    tag,
+                    out ulong maclen,
+                    plaintext,
+                    (ulong)plaintext.Length,
+                    additionalData,
+                    (ulong)additionalData.Length,
+                    default,
+                    nonce,
+                    statePtr);
+
+                if (rc != 0 || maclen != (ulong)authTagSize)
+                    throw new System.Security.Cryptography.CryptographicException("AES-GCM detached encryption failed");
+            }
+        }
+        return ciphertext;
+    }
+
+    /// <summary>
+    /// Performs AES-GCM detached decryption (separate ciphertext and tag) using a stackalloc state buffer.
+    /// Moves all unsafe/fixed pinning here so callers need no unsafe keyword.
+    /// </summary>
+    internal static byte[] AesGcmDecryptDetached(
+        ReadOnlySpan<byte> ciphertext,
+        ReadOnlySpan<byte> tag,
+        ReadOnlySpan<byte> key,
+        ReadOnlySpan<byte> nonce,
+        ReadOnlySpan<byte> additionalData)
+    {
+        byte[] plaintext = new byte[ciphertext.Length];
+        unsafe
+        {
+            Span<byte> stateBuffer = stackalloc byte[AesGcmStateSize];
+            fixed (byte* pState = stateBuffer)
+            {
+                IntPtr statePtr = (IntPtr)pState;
+
+                int rc = crypto_aead_aes256gcm_beforenm(statePtr, key);
+                if (rc != 0)
+                    throw new InvalidOperationException("AES-GCM key schedule failed");
+
+                rc = crypto_aead_aes256gcm_decrypt_detached_afternm(
+                    plaintext,
+                    default,
+                    ciphertext,
+                    (ulong)ciphertext.Length,
+                    tag,
+                    additionalData,
+                    (ulong)additionalData.Length,
+                    nonce,
+                    statePtr);
+
+                if (rc != 0)
+                    throw new System.Security.Cryptography.CryptographicException("AES-GCM detached decryption failed");
+            }
+        }
+        return plaintext;
+    }
+
     #endregion
 
     #region Memory operations
