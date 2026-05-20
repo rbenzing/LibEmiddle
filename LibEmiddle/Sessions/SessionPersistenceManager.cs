@@ -38,7 +38,7 @@ namespace LibEmiddle.Sessions
         /// <summary>
         /// Saves a chat session to persistent storage.
         /// </summary>
-        public async Task<bool> SaveChatSessionAsync(IChatSession session)
+        public async Task<bool> SaveChatSessionAsync(IChatSession session, CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(session, nameof(session));
 
@@ -66,13 +66,13 @@ namespace LibEmiddle.Sessions
             dto.CryptoState = SerializeDoubleRatchetSession(drSession);
 
             // Encrypt and save the session
-            return await EncryptAndSaveSessionAsync(dto);
+            return await EncryptAndSaveSessionAsync(dto, ct);
         }
 
         /// <summary>
         /// Saves a group session to persistent storage using the new consolidated GroupSession.
         /// </summary>
-        public async Task<bool> SaveGroupSessionAsync(IGroupSession session)
+        public async Task<bool> SaveGroupSessionAsync(IGroupSession session, CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(session, nameof(session));
 
@@ -105,9 +105,9 @@ namespace LibEmiddle.Sessions
                 dto.GroupState = groupState;
 
                 // Encrypt and save the session
-                return await EncryptAndSaveSessionAsync(dto);
+                return await EncryptAndSaveSessionAsync(dto, ct);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LoggingManager.LogError(nameof(SessionPersistenceManager),
                     $"Failed to save group session {session.SessionId}: {ex.Message}");
@@ -120,13 +120,14 @@ namespace LibEmiddle.Sessions
         /// </summary>
         public async Task<ChatSession?> LoadChatSessionAsync(
             string sessionId,
-            IDoubleRatchetProtocol doubleRatchetProtocol)
+            IDoubleRatchetProtocol doubleRatchetProtocol,
+            CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
             ArgumentNullException.ThrowIfNull(doubleRatchetProtocol, nameof(doubleRatchetProtocol));
 
             // Load and decrypt the session data
-            var dto = await LoadAndDecryptSessionAsync(sessionId);
+            var dto = await LoadAndDecryptSessionAsync(sessionId, ct);
             if (dto == null || dto.SessionType != SessionType.Individual)
                 return null;
 
@@ -172,14 +173,14 @@ namespace LibEmiddle.Sessions
         /// Loads group session state as a string for the new consolidated GroupSession.
         /// This method is used by SessionManager to restore GroupSession state.
         /// </summary>
-        public async Task<string?> LoadGroupSessionStateAsync(string sessionId)
+        public async Task<string?> LoadGroupSessionStateAsync(string sessionId, CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
 
             try
             {
                 // Load and decrypt the session data
-                var dto = await LoadAndDecryptSessionAsync(sessionId);
+                var dto = await LoadAndDecryptSessionAsync(sessionId, ct);
                 if (dto?.SessionType != SessionType.Group || string.IsNullOrEmpty(dto.GroupState))
                 {
                     LoggingManager.LogWarning(nameof(SessionPersistenceManager),
@@ -189,7 +190,7 @@ namespace LibEmiddle.Sessions
 
                 return dto.GroupState;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LoggingManager.LogError(nameof(SessionPersistenceManager),
                     $"Failed to load group session state {sessionId}: {ex.Message}");
@@ -203,7 +204,8 @@ namespace LibEmiddle.Sessions
         /// </summary>
         public async Task<IGroupSession?> LoadGroupSessionAsync(
             string sessionId,
-            KeyPair identityKeyPair)
+            KeyPair identityKeyPair,
+            CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
             ArgumentNullException.ThrowIfNull(identityKeyPair, nameof(identityKeyPair));
@@ -211,7 +213,7 @@ namespace LibEmiddle.Sessions
             try
             {
                 // Load the group state using the new method
-                string? groupState = await LoadGroupSessionStateAsync(sessionId);
+                string? groupState = await LoadGroupSessionStateAsync(sessionId, ct);
                 if (string.IsNullOrEmpty(groupState))
                     return null;
 
@@ -238,7 +240,7 @@ namespace LibEmiddle.Sessions
 
                 return groupSession;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LoggingManager.LogError(nameof(SessionPersistenceManager),
                     $"Failed to load group session {sessionId}: {ex.Message}");
@@ -249,40 +251,47 @@ namespace LibEmiddle.Sessions
         /// <summary>
         /// Deletes a session from persistent storage.
         /// </summary>
-        public async Task<bool> DeleteSessionAsync(string sessionId)
+        public async Task<bool> DeleteSessionAsync(string sessionId, CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
 
             string filePath = GetSessionFilePath(sessionId);
 
-            await _ioLock.WaitAsync();
+            bool lockAcquired = false;
             try
             {
+                await _ioLock.WaitAsync(ct).ConfigureAwait(false);
+                lockAcquired = true;
+
                 if (!File.Exists(filePath))
                     return false;
 
                 KeyStorage.SecureDeleteFile(filePath);
                 return true;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LoggingManager.LogError(nameof(SessionPersistenceManager), $"Failed to delete session {sessionId}: {ex.Message}");
                 return false;
             }
             finally
             {
-                _ioLock.Release();
+                if (lockAcquired)
+                    _ioLock.Release();
             }
         }
 
         /// <summary>
         /// Lists all available session IDs in storage.
         /// </summary>
-        public async Task<string?[]> ListSessionsAsync()
+        public async Task<string?[]> ListSessionsAsync(CancellationToken ct = default)
         {
-            await _ioLock.WaitAsync();
+            bool lockAcquired = false;
             try
             {
+                await _ioLock.WaitAsync(ct).ConfigureAwait(false);
+                lockAcquired = true;
+
                 if (!Directory.Exists(_storagePath))
                     return Array.Empty<string>();
 
@@ -294,20 +303,21 @@ namespace LibEmiddle.Sessions
 
                 return sessionIds ?? Array.Empty<string>();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LoggingManager.LogError(nameof(SessionPersistenceManager), $"Failed to list sessions: {ex.Message}");
                 return Array.Empty<string>();
             }
             finally
             {
-                _ioLock.Release();
+                if (lockAcquired)
+                    _ioLock.Release();
             }
         }
 
         #region Helper Methods
 
-        private async Task<bool> EncryptAndSaveSessionAsync(SerializedSessionData dto)
+        private async Task<bool> EncryptAndSaveSessionAsync(SerializedSessionData dto, CancellationToken ct = default)
         {
             // Serialize to JSON
             string json = JsonSerialization.Serialize(dto);
@@ -337,9 +347,12 @@ namespace LibEmiddle.Sessions
                 // Write to file
                 string filePath = GetSessionFilePath(dto.SessionId);
 
-                await _ioLock.WaitAsync();
+                bool lockAcquired = false;
                 try
                 {
+                    await _ioLock.WaitAsync(ct).ConfigureAwait(false);
+                    lockAcquired = true;
+
                     // Write metadata and encrypted data using binary approach
                     using (var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
                     using (var writer = new BinaryWriter(fs))
@@ -368,10 +381,11 @@ namespace LibEmiddle.Sessions
                 }
                 finally
                 {
-                    _ioLock.Release();
+                    if (lockAcquired)
+                        _ioLock.Release();
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LoggingManager.LogError(nameof(SessionPersistenceManager), $"Failed to save session {dto.SessionId}: {ex.Message}");
                 return false;
@@ -383,13 +397,16 @@ namespace LibEmiddle.Sessions
             }
         }
 
-        private async Task<SerializedSessionData?> LoadAndDecryptSessionAsync(string sessionId)
+        private async Task<SerializedSessionData?> LoadAndDecryptSessionAsync(string sessionId, CancellationToken ct = default)
         {
             string filePath = GetSessionFilePath(sessionId);
 
-            await _ioLock.WaitAsync();
+            bool lockAcquired = false;
             try
             {
+                await _ioLock.WaitAsync(ct).ConfigureAwait(false);
+                lockAcquired = true;
+
                 if (!File.Exists(filePath))
                     return null;
 
@@ -439,14 +456,15 @@ namespace LibEmiddle.Sessions
                     SecureMemory.SecureClear(key);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LoggingManager.LogError(nameof(SessionPersistenceManager), $"Failed to load session {sessionId}: {ex.Message}");
                 return null;
             }
             finally
             {
-                _ioLock.Release();
+                if (lockAcquired)
+                    _ioLock.Release();
             }
         }
 
@@ -454,7 +472,7 @@ namespace LibEmiddle.Sessions
         /// Saves a recipient's public key bundle indexed by their Ed25519 identity key.
         /// Bundles are public information and are stored as plain JSON.
         /// </summary>
-        public async Task SaveKeyBundleAsync(X3DHPublicBundle bundle)
+        public async Task SaveKeyBundleAsync(X3DHPublicBundle bundle, CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(bundle, nameof(bundle));
             if (bundle.IdentityKey == null || bundle.IdentityKey.Length == 0)
@@ -463,14 +481,17 @@ namespace LibEmiddle.Sessions
             string filePath = GetBundleFilePath(bundle.IdentityKey);
             string json = JsonSerialization.Serialize(bundle);
 
-            await _ioLock.WaitAsync();
+            bool lockAcquired = false;
             try
             {
-                await File.WriteAllTextAsync(filePath, json, System.Text.Encoding.UTF8);
+                await _ioLock.WaitAsync(ct).ConfigureAwait(false);
+                lockAcquired = true;
+                await File.WriteAllTextAsync(filePath, json, System.Text.Encoding.UTF8, ct);
             }
             finally
             {
-                _ioLock.Release();
+                if (lockAcquired)
+                    _ioLock.Release();
             }
         }
 
@@ -478,29 +499,33 @@ namespace LibEmiddle.Sessions
         /// Loads a previously saved recipient bundle by their Ed25519 identity key.
         /// Returns null if no bundle was found.
         /// </summary>
-        public async Task<X3DHPublicBundle?> LoadKeyBundleByIdentityKeyAsync(byte[] identityKey)
+        public async Task<X3DHPublicBundle?> LoadKeyBundleByIdentityKeyAsync(byte[] identityKey, CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(identityKey, nameof(identityKey));
 
             string filePath = GetBundleFilePath(identityKey);
 
-            await _ioLock.WaitAsync();
+            bool lockAcquired = false;
             try
             {
+                await _ioLock.WaitAsync(ct).ConfigureAwait(false);
+                lockAcquired = true;
+
                 if (!File.Exists(filePath))
                     return null;
 
-                string json = await File.ReadAllTextAsync(filePath, System.Text.Encoding.UTF8);
+                string json = await File.ReadAllTextAsync(filePath, System.Text.Encoding.UTF8, ct);
                 return JsonSerialization.Deserialize<X3DHPublicBundle>(json);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LoggingManager.LogError(nameof(SessionPersistenceManager), $"Failed to load key bundle: {ex.Message}");
                 return null;
             }
             finally
             {
-                _ioLock.Release();
+                if (lockAcquired)
+                    _ioLock.Release();
             }
         }
 

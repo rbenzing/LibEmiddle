@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
 using LibEmiddle.Core;
@@ -550,6 +551,78 @@ namespace LibEmiddle.Tests.Unit
                 // Expected - corrupted session was detected
                 Assert.IsTrue(true, "Corrupted session was properly detected");
             }
+        }
+
+        #endregion
+
+        #region CancellationToken Tests
+
+        [TestMethod]
+        public async Task DeleteSessionAsync_CancelledToken_ThrowsOperationCanceled()
+        {
+            var crypto = new CryptoProvider();
+            var spm = new SessionPersistenceManager(crypto, Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()));
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            // TaskCanceledException (subclass of OperationCanceledException) is thrown by SemaphoreSlim.WaitAsync
+            // when a pre-cancelled token is passed.
+            bool threw = false;
+            try
+            {
+                await spm.DeleteSessionAsync("test-session-id", cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                threw = true;
+            }
+            Assert.IsTrue(threw, "Expected OperationCanceledException (or subclass) to be thrown");
+        }
+
+        [TestMethod]
+        public async Task ListSessionsAsync_CancelledToken_ThrowsOperationCanceled()
+        {
+            var crypto = new CryptoProvider();
+            var spm = new SessionPersistenceManager(crypto, Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()));
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            bool threw = false;
+            try
+            {
+                await spm.ListSessionsAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                threw = true;
+            }
+            Assert.IsTrue(threw, "Expected OperationCanceledException (or subclass) to be thrown");
+        }
+
+        [TestMethod]
+        public async Task SaveKeyBundleAsync_CancelledToken_ThrowsOperationCanceled()
+        {
+            var crypto = new CryptoProvider();
+            var spm = new SessionPersistenceManager(crypto, Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()));
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            var bundle = new LibEmiddle.Domain.X3DHPublicBundle
+            {
+                IdentityKey = new byte[32]
+            };
+            System.Security.Cryptography.RandomNumberGenerator.Fill(bundle.IdentityKey);
+
+            bool threw = false;
+            try
+            {
+                await spm.SaveKeyBundleAsync(bundle, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                threw = true;
+            }
+            Assert.IsTrue(threw, "Expected OperationCanceledException (or subclass) to be thrown");
         }
 
         #endregion
