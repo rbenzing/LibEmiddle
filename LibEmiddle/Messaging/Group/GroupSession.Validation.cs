@@ -38,17 +38,14 @@ public sealed partial class GroupSession
         if (!string.IsNullOrEmpty(message.MessageId))
         {
             string senderId = GetMemberId(message.SenderIdentityKey!);
-            var senderMessageIds = _seenMessageIds.GetOrAdd(senderId, _ => new HashSet<string>());
+            var senderMessageIds = _seenMessageIds.GetOrAdd(senderId, _ => new ConcurrentDictionary<string, byte>());
 
-            lock (senderMessageIds)
+            if (senderMessageIds.ContainsKey(message.MessageId))
             {
-                if (senderMessageIds.Contains(message.MessageId))
-                {
-                    LoggingManager.LogSecurityEvent(nameof(GroupSession), "Message ID replay detected", isAlert: true);
-                    return false;
-                }
-                // NOTE: Do NOT add to senderMessageIds here — that happens after successful decryption
+                LoggingManager.LogSecurityEvent(nameof(GroupSession), "Message ID replay detected", isAlert: true);
+                return false;
             }
+            // NOTE: Do NOT add to senderMessageIds here — that happens after successful decryption
         }
 
         // When the message carries a MessageId the _seenMessageIds check above provides complete replay
@@ -118,19 +115,16 @@ public sealed partial class GroupSession
         // Register the message ID so subsequent presentations of the same message are rejected
         if (!string.IsNullOrEmpty(message.MessageId))
         {
-            var senderMessageIds = _seenMessageIds.GetOrAdd(senderId, _ => new HashSet<string>());
-            lock (senderMessageIds)
-            {
-                senderMessageIds.Add(message.MessageId);
+            var senderMessageIds = _seenMessageIds.GetOrAdd(senderId, _ => new ConcurrentDictionary<string, byte>());
+            senderMessageIds.TryAdd(message.MessageId, 0);
 
-                // Cap the set at 1000 entries per sender to prevent unbounded memory growth
-                if (senderMessageIds.Count > 1000)
+            // Cap the set at 1000 entries per sender to prevent unbounded memory growth
+            if (senderMessageIds.Count > 1000)
+            {
+                var oldestIds = senderMessageIds.Keys.Take(senderMessageIds.Count - 1000).ToList();
+                foreach (var oldId in oldestIds)
                 {
-                    var oldestIds = senderMessageIds.Take(senderMessageIds.Count - 1000).ToList();
-                    foreach (var oldId in oldestIds)
-                    {
-                        senderMessageIds.Remove(oldId);
-                    }
+                    senderMessageIds.TryRemove(oldId, out _);
                 }
             }
         }

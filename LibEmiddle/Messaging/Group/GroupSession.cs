@@ -36,7 +36,7 @@ public sealed partial class GroupSession : IGroupSession, ISession, IDisposable
     // Message tracking for replay protection
     private readonly ConcurrentDictionary<string, long> _lastSeenSequence = new();
     private readonly ConcurrentDictionary<string, long> _joinTimestamps = new();
-    private readonly ConcurrentDictionary<string, HashSet<string>> _seenMessageIds = new();
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _seenMessageIds = new();
 
     // Enhanced Group Management
     private readonly ConcurrentDictionary<string, GroupInvitation> _activeInvitations = new();

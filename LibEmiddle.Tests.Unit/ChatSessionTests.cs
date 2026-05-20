@@ -1,5 +1,6 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using LibEmiddle.Core;
@@ -401,6 +402,17 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert - try to use the session, should throw ObjectDisposedException
             await Assert.ThrowsExceptionAsync<ObjectDisposedException>(() => _aliceChatSession.ActivateAsync());
+        }
+
+        [TestMethod]
+        public async Task ChatSession_ConcurrentHistoryAccess_DoesNotDeadlock()
+        {
+            var tasks = Enumerable.Range(0, 10).Select(_ => Task.Run(() =>
+            {
+                var history = _aliceChatSession.GetMessageHistory(10, 0);
+                Assert.IsNotNull(history);
+            }));
+            await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(5));
         }
 
         [TestMethod]

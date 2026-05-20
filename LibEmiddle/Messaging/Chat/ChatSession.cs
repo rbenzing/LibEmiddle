@@ -45,6 +45,7 @@ namespace LibEmiddle.Messaging.Chat
 
         // Collections
         private readonly List<MessageRecord> _messageHistory = new();
+        private readonly SemaphoreSlim _historyLock = new(1, 1);
         private const int MaxTrackedMessages = 100;
         public ConcurrentDictionary<string, string> Metadata { get; } = new();
 
@@ -499,9 +500,14 @@ namespace LibEmiddle.Messaging.Chat
         public IReadOnlyCollection<MessageRecord> GetMessageHistory(int limit = 100, int startIndex = 0)
         {
             ThrowIfDisposed();
-            lock (_messageHistory)
+            _historyLock.Wait();
+            try
             {
                 return _messageHistory.Skip(Math.Max(0, startIndex)).Take(Math.Max(0, limit)).ToList().AsReadOnly();
+            }
+            finally
+            {
+                _historyLock.Release();
             }
         }
 
@@ -509,9 +515,14 @@ namespace LibEmiddle.Messaging.Chat
         public int GetMessageCount()
         {
             ThrowIfDisposed();
-            lock (_messageHistory)
+            _historyLock.Wait();
+            try
             {
                 return _messageHistory.Count;
+            }
+            finally
+            {
+                _historyLock.Release();
             }
         }
 
@@ -524,7 +535,8 @@ namespace LibEmiddle.Messaging.Chat
 
         private int ClearMessageHistoryInternal()
         {
-            lock (_messageHistory)
+            _historyLock.Wait();
+            try
             {
                 int count = _messageHistory.Count;
                 foreach (var record in _messageHistory)
@@ -533,6 +545,10 @@ namespace LibEmiddle.Messaging.Chat
                 }
                 _messageHistory.Clear();
                 return count;
+            }
+            finally
+            {
+                _historyLock.Release();
             }
         }
 
@@ -601,11 +617,8 @@ namespace LibEmiddle.Messaging.Chat
         {
             ThrowIfDisposed();
             if (string.IsNullOrEmpty(key)) throw new ArgumentException("Metadata key cannot be null or empty.", nameof(key));
-            // Dictionary is not thread-safe by default, lock if concurrent access is possible
-            lock (_sessionLock) // Or use ConcurrentDictionary for Metadata
-            {
-                Metadata[key] = value;
-            }
+            // Metadata is a ConcurrentDictionary — writes are already thread-safe without locking.
+            Metadata[key] = value;
         }
 
         /// <summary> Raises the StateChanged event. </summary>
@@ -890,7 +903,17 @@ namespace LibEmiddle.Messaging.Chat
                 }
                 finally
                 {
-                    // Dispose the semaphore outside of any lock usage
+                    // Dispose the history semaphore
+                    try
+                    {
+                        _historyLock.Dispose();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Already disposed
+                    }
+
+                    // Dispose the session semaphore outside of any lock usage
                     try
                     {
                         lockToDispose?.Dispose();

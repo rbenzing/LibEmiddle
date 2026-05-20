@@ -55,7 +55,7 @@ namespace LibEmiddle.Sessions
         /// the existing OPK count. Updated via <see cref="RegisterLocalKeyBundleAsync"/>.
         /// </summary>
         private X3DHKeyBundle? _localKeyBundle;
-        private readonly object _localBundleLock = new object();
+        private readonly SemaphoreSlim _localBundleLock = new(1, 1);
 
         private readonly ConcurrentDictionary<string, ISession> _activeSessions = new();
 
@@ -643,9 +643,14 @@ namespace LibEmiddle.Sessions
         {
             ArgumentNullException.ThrowIfNull(bundle);
 
-            lock (_localBundleLock)
+            _localBundleLock.Wait();
+            try
             {
                 _localKeyBundle = bundle;
+            }
+            finally
+            {
+                _localBundleLock.Release();
             }
 
             // Configure the replenishment callback now that we have a bundle reference.
@@ -664,9 +669,14 @@ namespace LibEmiddle.Sessions
         public IReadOnlyList<uint> GetAvailableOPKIds()
         {
             X3DHKeyBundle? bundle;
-            lock (_localBundleLock)
+            _localBundleLock.Wait();
+            try
             {
                 bundle = _localKeyBundle;
+            }
+            finally
+            {
+                _localBundleLock.Release();
             }
 
             if (bundle == null)
@@ -682,9 +692,14 @@ namespace LibEmiddle.Sessions
         private async Task ReplenishOPKsAsync(int count)
         {
             X3DHKeyBundle? bundle;
-            lock (_localBundleLock)
+            await _localBundleLock.WaitAsync().ConfigureAwait(false);
+            try
             {
                 bundle = _localKeyBundle;
+            }
+            finally
+            {
+                _localBundleLock.Release();
             }
 
             if (bundle == null)
@@ -699,7 +714,8 @@ namespace LibEmiddle.Sessions
                 var tempBundle = await _x3dhProtocol.CreateKeyBundleAsync(_identityKeyPair, count);
 
                 // Copy the new OPKs (public + private) into the existing bundle.
-                lock (_localBundleLock)
+                await _localBundleLock.WaitAsync().ConfigureAwait(false);
+                try
                 {
                     for (int i = 0; i < tempBundle.OneTimePreKeyIds.Count; i++)
                     {
@@ -717,6 +733,10 @@ namespace LibEmiddle.Sessions
                             bundle.SetOneTimePreKeyPrivate(newId, newPrivateKey);
                         }
                     }
+                }
+                finally
+                {
+                    _localBundleLock.Release();
                 }
 
                 int available = _opkManager.GetAvailableCount(bundle.OneTimePreKeyIds);
@@ -866,6 +886,7 @@ namespace LibEmiddle.Sessions
             if (disposing)
             {
                 _operationLock.Dispose();
+                _localBundleLock.Dispose();
 
                 // Dispose all active sessions
                 foreach (var session in _activeSessions.Values)
