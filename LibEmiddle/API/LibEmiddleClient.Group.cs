@@ -118,24 +118,17 @@ public sealed partial class LibEmiddleClient
 
         try
         {
-            // Check if we're already in this group
-            try
+            // Check if we're already in this group — GetGroupInfoAsync returns null if not found
+            var existingSession = await GetGroupInfoAsync(distribution.GroupId);
+            if (existingSession != null)
             {
-                var existingSession = await GetGroupAsync(distribution.GroupId);
-                if (existingSession != null)
+                // Process the distribution message to update our keys
+                if (existingSession is GroupSession groupSession)
                 {
-                    // Process the distribution message to update our keys
-                    if (existingSession is GroupSession groupSession)
-                    {
-                        groupSession.ProcessDistributionMessage(distribution);
-                        await _sessionManager.SaveSessionAsync(existingSession);
-                    }
-                    return existingSession;
+                    groupSession.ProcessDistributionMessage(distribution);
+                    await _sessionManager.SaveSessionAsync(existingSession);
                 }
-            }
-            catch (KeyNotFoundException)
-            {
-                // Group doesn't exist, we'll create it
+                return existingSession;
             }
 
             // Create a new group session

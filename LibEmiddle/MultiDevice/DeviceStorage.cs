@@ -97,7 +97,12 @@ internal sealed class DeviceStorage : IDisposable
                 if (!keyStored)
                 {
                     // If we cannot store the key the file is unreadable — remove it.
-                    try { if (File.Exists(_filePath)) File.Delete(_filePath); } catch { /* best-effort */ }
+                    try { if (File.Exists(_filePath)) File.Delete(_filePath); }
+                    catch (Exception ex)
+                    {
+                        LoggingManager.LogWarning(nameof(DeviceStorage),
+                            $"Best-effort cleanup failed for {_filePath}: {ex.Message}");
+                    }
                     LoggingManager.LogError(nameof(DeviceStorage),
                         "Failed to store encryption key for device list; file removed.");
                     return false;
@@ -248,7 +253,12 @@ internal sealed class DeviceStorage : IDisposable
                 $"Atomic write failed for {targetPath}: {ex.Message}");
 
             // Best-effort cleanup of the temp file.
-            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* ignore */ }
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); }
+            catch (Exception cleanupEx)
+            {
+                LoggingManager.LogWarning(nameof(DeviceStorage),
+                    $"Temp file cleanup failed for {tempPath}: {cleanupEx.Message}");
+            }
             return false;
         }
     }

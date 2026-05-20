@@ -84,9 +84,15 @@ namespace LibEmiddle.Messaging.Transport
                     {
                         Task.WaitAll(new[] { _pollingTask, _sendingTask }, TimeSpan.FromSeconds(5));
                     }
-                    catch (AggregateException)
+                    catch (AggregateException aex)
                     {
-                        // Tasks may be canceled
+                        var faults = aex.InnerExceptions.Where(e => e is not OperationCanceledException).ToList();
+                        if (faults.Count > 0)
+                        {
+                            LoggingManager.LogWarning(nameof(MailboxManager),
+                                $"Background tasks faulted during stop: {string.Join("; ", faults.Select(e => e.Message))}");
+                        }
+                        // Cancelled tasks are expected on shutdown — no log needed
                     }
                 }
             }
