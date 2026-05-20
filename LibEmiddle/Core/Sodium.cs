@@ -353,7 +353,7 @@ public sealed partial class Sodium
         IntPtr ctx);         // const crypto_aead_aes256gcm_state *ctx
 
     // Size of the AES-GCM state for precomputation (must be 512 bytes, aligned to 16 bytes)
-    internal const int AesGcmStateSize = 512;
+    private const int AesGcmStateSize = 512;
 
     /// <summary>
     /// Performs AES-GCM combined (ciphertext + tag) encryption using a stackalloc state buffer.
@@ -366,6 +366,7 @@ public sealed partial class Sodium
         ReadOnlySpan<byte> additionalData,
         int authTagSize)
     {
+        Initialize();
         byte[] ciphertext = new byte[plaintext.Length + authTagSize];
         unsafe
         {
@@ -406,6 +407,7 @@ public sealed partial class Sodium
         int authTagSize,
         out ulong plaintextLength)
     {
+        Initialize();
         byte[] plaintext = new byte[ciphertextWithTag.Length - authTagSize];
         ulong capturedLength = 0;
         unsafe
@@ -448,6 +450,7 @@ public sealed partial class Sodium
         int authTagSize,
         out byte[] tag)
     {
+        Initialize();
         byte[] ciphertext = new byte[plaintext.Length];
         tag = new byte[authTagSize];
         unsafe
@@ -491,6 +494,7 @@ public sealed partial class Sodium
         ReadOnlySpan<byte> nonce,
         ReadOnlySpan<byte> additionalData)
     {
+        Initialize();
         byte[] plaintext = new byte[ciphertext.Length];
         unsafe
         {
