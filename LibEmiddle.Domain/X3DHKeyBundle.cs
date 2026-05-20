@@ -1,4 +1,6 @@
-﻿namespace LibEmiddle.Domain
+﻿using System.Security.Cryptography;
+
+namespace LibEmiddle.Domain
 {
     /// <summary>
     /// Represents a complete X3DH key bundle containing both public and private components
@@ -288,22 +290,19 @@
         {
             if (_identityKeyPrivate != null)
             {
-                // Zero out all bytes in the array for security
-                Array.Clear(_identityKeyPrivate, 0, _identityKeyPrivate.Length);
+                CryptographicOperations.ZeroMemory(_identityKeyPrivate);
                 _identityKeyPrivate = null;
             }
 
             if (_signedPreKeyPrivate != null)
             {
-                // Zero out all bytes in the array for security
-                Array.Clear(_signedPreKeyPrivate, 0, _signedPreKeyPrivate.Length);
+                CryptographicOperations.ZeroMemory(_signedPreKeyPrivate);
                 _signedPreKeyPrivate = null;
             }
 
             foreach (var key in _oneTimePreKeysPrivate.Values)
             {
-                // Zero out all bytes in the array for security
-                Array.Clear(key, 0, key.Length);
+                CryptographicOperations.ZeroMemory(key);
             }
             _oneTimePreKeysPrivate.Clear();
         }

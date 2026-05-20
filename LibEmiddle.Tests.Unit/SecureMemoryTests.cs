@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
 using LibEmiddle.Core;
+using LibEmiddle.Domain;
 
 namespace LibEmiddle.Tests.Unit
 {
@@ -219,6 +220,22 @@ namespace LibEmiddle.Tests.Unit
 
             // Test returning null buffer
             SecureMemory.ReturnBuffer(null); // Should not throw
+        }
+
+        [TestMethod]
+        public void X3DHKeyBundle_ClearPrivateKeys_ZeroesViaSecureClear()
+        {
+            var bundle = new X3DHKeyBundle();
+            // ED25519_PRIVATE_KEY_SIZE = 64
+            byte[] identityPriv = new byte[64];
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(identityPriv);
+            }
+            bundle.SetIdentityKeyPrivate(identityPriv);
+            bundle.ClearPrivateKeys();
+            Assert.IsNull(bundle.GetIdentityKeyPrivate(),
+                "Private identity key must be null after ClearPrivateKeys");
         }
 
         #region Security Vulnerability Tests

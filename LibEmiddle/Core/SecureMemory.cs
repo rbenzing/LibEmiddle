@@ -279,6 +279,8 @@ namespace LibEmiddle.Core
                     }
                     else
                     {
+                        // Non-byte struct arrays: sodium_memzero cannot be applied to generic T.
+                        // Array.Clear is the only available path here; accept the limitation.
                         Array.Clear(_array, 0, _array.Length);
                     }
                     _disposed = true;

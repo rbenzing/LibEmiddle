@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Security.Cryptography;
+using System.Text;
 
 namespace LibEmiddle.Domain
 {
@@ -93,9 +94,7 @@ namespace LibEmiddle.Domain
                 finally
                 {
                     if (contentBytes != null)
-                    {
-                        Array.Clear(contentBytes, 0, contentBytes.Length);
-                    }
+                        CryptographicOperations.ZeroMemory(contentBytes);
                 }
                 Content = null;
             }
@@ -105,19 +104,19 @@ namespace LibEmiddle.Domain
             {
                 if (EncryptedMessage.Ciphertext != null)
                 {
-                    Array.Clear(EncryptedMessage.Ciphertext, 0, EncryptedMessage.Ciphertext.Length);
+                    CryptographicOperations.ZeroMemory(EncryptedMessage.Ciphertext);
                     EncryptedMessage.Ciphertext = null;
                 }
 
                 if (EncryptedMessage.Nonce != null)
                 {
-                    Array.Clear(EncryptedMessage.Nonce, 0, EncryptedMessage.Nonce.Length);
+                    CryptographicOperations.ZeroMemory(EncryptedMessage.Nonce);
                     EncryptedMessage.Nonce = null;
                 }
 
                 if (EncryptedMessage.SenderDHKey != null)
                 {
-                    Array.Clear(EncryptedMessage.SenderDHKey, 0, EncryptedMessage.SenderDHKey.Length);
+                    CryptographicOperations.ZeroMemory(EncryptedMessage.SenderDHKey);
                     EncryptedMessage.SenderDHKey = null;
                 }
 

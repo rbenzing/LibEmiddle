@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using LibEmiddle.Domain.Enums;
 
 namespace LibEmiddle.Domain
@@ -227,13 +228,13 @@ namespace LibEmiddle.Domain
         {
             if (IsDisposed)
                 throw new ObjectDisposedException(nameof(PostQuantumPrivateKey));
-            
+
             // Clear existing key data
             if (KeyData.Length > 0)
             {
-                Array.Clear(KeyData, 0, KeyData.Length);
+                CryptographicOperations.ZeroMemory(KeyData);
             }
-            
+
             KeyData = keyData.ToArray();
         }
 
@@ -318,9 +319,9 @@ namespace LibEmiddle.Domain
                 // Securely clear the key material
                 if (KeyData.Length > 0)
                 {
-                    Array.Clear(KeyData, 0, KeyData.Length);
+                    CryptographicOperations.ZeroMemory(KeyData);
                 }
-                
+
                 KeyData = Array.Empty<byte>();
                 Parameters.Clear();
                 IsDisposed = true;
