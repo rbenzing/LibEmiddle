@@ -1391,7 +1391,7 @@ public sealed partial class Sodium
         // Check against known small-order points
         foreach (var smallOrder in SMALL_ORDER_POINTS)
         {
-            if (x25519PublicKey.SequenceEqual(smallOrder))
+            if (SecureMemory.SecureCompare(x25519PublicKey, smallOrder))
                 return false;
         }
 

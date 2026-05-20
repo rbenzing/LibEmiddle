@@ -779,5 +779,25 @@ namespace LibEmiddle.Tests.Unit
         }
 
         #endregion
+
+        #region SecureCompare Tests
+
+        /// <summary>
+        /// Tests that SecureCompare correctly identifies equal and differing keys.
+        /// </summary>
+        [TestMethod]
+        public void SecureCompare_EqualKeys_ReturnsTrue()
+        {
+            var key = new byte[32];
+            System.Security.Cryptography.RandomNumberGenerator.Fill(key);
+            var key2 = (byte[])key.Clone();
+            Assert.IsTrue(LibEmiddle.Core.SecureMemory.SecureCompare(key, key2),
+                "SecureCompare must return true for byte-identical keys");
+            key2[0] ^= 0xFF;
+            Assert.IsFalse(LibEmiddle.Core.SecureMemory.SecureCompare(key, key2),
+                "SecureCompare must return false for differing keys");
+        }
+
+        #endregion
     }
 }

@@ -591,7 +591,7 @@ namespace LibEmiddle.Sessions
             foreach (var kv in _activeSessions)
             {
                 if (kv.Value is Messaging.Chat.ChatSession cs &&
-                    cs.RemotePublicKey.AsSpan().SequenceEqual(recipientPublicKey))
+                    SecureMemory.SecureCompare(cs.RemotePublicKey, recipientPublicKey))
                 {
                     return cs;
                 }
