@@ -58,24 +58,24 @@ namespace LibEmiddle.Storage
             return wrapper?.Value;
         }
 
-        public async Task<bool> DeleteAsync(string key)
+        public Task<bool> DeleteAsync(string key)
         {
             var result = _storage.TryRemove(key, out _);
-            return await Task.FromResult(result);
+            return Task.FromResult(result);
         }
 
-        public async Task<bool> ExistsAsync(string key)
+        public Task<bool> ExistsAsync(string key)
         {
             if (_storage.TryGetValue(key, out var item))
             {
                 if (item.Metadata.IsExpired)
                 {
                     _storage.TryRemove(key, out _);
-                    return await Task.FromResult(false);
+                    return Task.FromResult(false);
                 }
-                return await Task.FromResult(true);
+                return Task.FromResult(true);
             }
-            return await Task.FromResult(false);
+            return Task.FromResult(false);
         }
 
         public async Task<List<string>> ListKeysAsync(string keyPrefix)
@@ -84,17 +84,17 @@ namespace LibEmiddle.Storage
             return keys.ToList();
         }
 
-        public async Task ClearAllAsync()
+        public Task ClearAllAsync()
         {
             _storage.Clear();
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
 
         #endregion
 
         #region IEnhancedStorageProvider Implementation (v2.5)
 
-        public async Task<bool> SetAsync<T>(string key, T value, TimeSpan? expiry = null) where T : class
+        public Task<bool> SetAsync<T>(string key, T value, TimeSpan? expiry = null) where T : class
         {
             try
             {
@@ -122,15 +122,15 @@ namespace LibEmiddle.Storage
                     return item;
                 });
 
-                return await Task.FromResult(true);
+                return Task.FromResult(true);
             }
             catch (Exception)
             {
-                return await Task.FromResult(false);
+                return Task.FromResult(false);
             }
         }
 
-        public async Task<T?> GetAsync<T>(string key) where T : class
+        public Task<T?> GetAsync<T>(string key) where T : class
         {
             try
             {
@@ -139,22 +139,22 @@ namespace LibEmiddle.Storage
                     if (item.Metadata.IsExpired)
                     {
                         _storage.TryRemove(key, out _);
-                        return await Task.FromResult<T?>(null);
+                        return Task.FromResult<T?>(null);
                     }
 
                     var result = JsonSerializer.Deserialize<T>(item.Data, _jsonOptions);
-                    return await Task.FromResult(result);
+                    return Task.FromResult(result);
                 }
 
-                return await Task.FromResult<T?>(null);
+                return Task.FromResult<T?>(null);
             }
             catch (Exception)
             {
-                return await Task.FromResult<T?>(null);
+                return Task.FromResult<T?>(null);
             }
         }
 
-        public async Task<IEnumerable<string>> GetKeysAsync(string pattern = "*")
+        public Task<IEnumerable<string>> GetKeysAsync(string pattern = "*")
         {
             try
             {
@@ -174,15 +174,15 @@ namespace LibEmiddle.Storage
                     }
                 }
 
-                return await Task.FromResult<IEnumerable<string>>(validKeys);
+                return Task.FromResult<IEnumerable<string>>(validKeys);
             }
             catch (Exception)
             {
-                return await Task.FromResult(Enumerable.Empty<string>());
+                return Task.FromResult(Enumerable.Empty<string>());
             }
         }
 
-        public async Task<StorageMetadata?> GetMetadataAsync(string key)
+        public Task<StorageMetadata?> GetMetadataAsync(string key)
         {
             try
             {
@@ -191,17 +191,17 @@ namespace LibEmiddle.Storage
                     if (item.Metadata.IsExpired)
                     {
                         _storage.TryRemove(key, out _);
-                        return await Task.FromResult<StorageMetadata?>(null);
+                        return Task.FromResult<StorageMetadata?>(null);
                     }
 
-                    return await Task.FromResult<StorageMetadata?>(item.Metadata);
+                    return Task.FromResult<StorageMetadata?>(item.Metadata);
                 }
 
-                return await Task.FromResult<StorageMetadata?>(null);
+                return Task.FromResult<StorageMetadata?>(null);
             }
             catch (Exception)
             {
-                return await Task.FromResult<StorageMetadata?>(null);
+                return Task.FromResult<StorageMetadata?>(null);
             }
         }
 
@@ -265,7 +265,7 @@ namespace LibEmiddle.Storage
             }
         }
 
-        public async Task<StorageStatistics> GetStatisticsAsync()
+        public Task<StorageStatistics> GetStatisticsAsync()
         {
             try
             {
@@ -293,11 +293,11 @@ namespace LibEmiddle.Storage
                         ["ConcurrentDictionarySize"] = _storage.Count
                     }
                 };
-                return await Task.FromResult(result);
+                return Task.FromResult(result);
             }
             catch (Exception)
             {
-                return await Task.FromResult(new StorageStatistics());
+                return Task.FromResult(new StorageStatistics());
             }
         }
 
