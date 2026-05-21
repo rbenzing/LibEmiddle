@@ -298,7 +298,24 @@ namespace LibEmiddle.Sessions
                 var files = Directory.GetFiles(_storagePath, "*.session");
                 var sessionIds = files
                     .Select(Path.GetFileNameWithoutExtension)
-                    .Where(id => !string.IsNullOrEmpty(id))
+                    .Where(name => !string.IsNullOrEmpty(name))
+                    .Select(name =>
+                    {
+                        try
+                        {
+                            // Reverse the URL-safe base64 encoding applied in GetSessionFilePath
+                            string padded = name!.Replace('-', '+').Replace('_', '/');
+                            int pad = padded.Length % 4;
+                            if (pad != 0) padded += new string('=', 4 - pad);
+                            return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(padded));
+                        }
+                        catch
+                        {
+                            return null; // skip files with non-base64 names (e.g. leftover from old format)
+                        }
+                    })
+                    .Where(id => id != null)
+                    .Cast<string>()
                     .ToArray();
 
                 return sessionIds ?? Array.Empty<string>();

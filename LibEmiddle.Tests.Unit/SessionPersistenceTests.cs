@@ -262,8 +262,15 @@ namespace LibEmiddle.Tests.Unit
 
             // Assert
             Assert.IsNotNull(sessionIds, "Session ID list should not be null");
-            // ListSessionsAsync returns base64-encoded filenames (without extension); just verify count.
             Assert.AreEqual(3, sessionIds.Length, "Should have 3 sessions");
+
+            // Verify the returned IDs match the original session IDs (not base64-encoded filenames)
+            var returnedIds = new HashSet<string>(sessionIds.Where(id => id != null)!);
+            foreach (var session in sessions)
+            {
+                Assert.IsTrue(returnedIds.Contains(session.SessionId),
+                    $"Session ID '{session.SessionId}' should be present in the listed session IDs");
+            }
         }
 
         [TestMethod]
