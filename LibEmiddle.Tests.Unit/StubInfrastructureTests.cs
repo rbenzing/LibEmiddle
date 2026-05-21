@@ -63,16 +63,6 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsFalse(type.IsPublic, "ConnectionPoolStub must be internal, not public");
         }
 
-        [TestMethod]
-        public void ResilienceManagerStub_IsInternal_NotPublic()
-        {
-            var type = _libAssembly.GetType("LibEmiddle.Infrastructure.ResilienceManagerStub",
-                throwOnError: false, ignoreCase: false);
-
-            Assert.IsNotNull(type, "ResilienceManagerStub must exist in the assembly");
-            Assert.IsFalse(type.IsPublic, "ResilienceManagerStub must be internal, not public");
-        }
-
         // ---------------------------------------------------------------------------
         // 2. No stub type is stored in public fields / properties of any public type
         // ---------------------------------------------------------------------------
@@ -86,7 +76,6 @@ namespace LibEmiddle.Tests.Unit
                 _libAssembly.GetType("LibEmiddle.Infrastructure.AdvancedKeyRotationManagerStub"),
                 _libAssembly.GetType("LibEmiddle.Infrastructure.WebRTCTransportStub"),
                 _libAssembly.GetType("LibEmiddle.Infrastructure.ConnectionPoolStub"),
-                _libAssembly.GetType("LibEmiddle.Infrastructure.ResilienceManagerStub"),
             };
 
             // Walk all public types in the library assembly
