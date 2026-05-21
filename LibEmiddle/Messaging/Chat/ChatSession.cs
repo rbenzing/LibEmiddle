@@ -343,8 +343,18 @@ namespace LibEmiddle.Messaging.Chat
                 }
 
                 // Perform encryption; throws LibEmiddleException on failure
-                var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.Encrypt(
-                    _cryptoSession, message, RotationStrategy);
+                DoubleRatchetSession updatedSession;
+                EncryptedMessage encryptedMessage;
+                try
+                {
+                    (updatedSession, encryptedMessage) = _doubleRatchetProtocol.Encrypt(
+                        _cryptoSession, message, RotationStrategy);
+                }
+                catch (LibEmiddleException ex)
+                {
+                    LoggingManager.LogError(nameof(ChatSession), $"Encryption failed: {ex.Message}");
+                    return null;
+                }
 
                 // Stamp the sender's long-term identity key so the receiver can route O(1)
                 encryptedMessage.SenderIdentityKey = LocalPublicKey;
