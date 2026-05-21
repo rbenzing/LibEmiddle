@@ -334,13 +334,13 @@ namespace LibEmiddle.Tests.Unit
             client.SetSession(_testSession);
 
             // Act & Assert: Old message should be rejected as potential replay attack
-            // Note: The actual exception might be SecurityException or CryptographicException depending on where the validation occurs
+            // Note: The actual exception might be SecurityException, CryptographicException, or LibEmiddleException
             try
             {
                 await client.ReceiveEncryptedMessageAsync();
                 Assert.Fail("Expected an exception to be thrown for replay attack");
             }
-            catch (Exception ex) when (ex is SecurityException || ex is CryptographicException)
+            catch (Exception ex) when (ex is SecurityException || ex is CryptographicException || ex is LibEmiddle.Domain.Exceptions.LibEmiddleException || (ex.InnerException is LibEmiddle.Domain.Exceptions.LibEmiddleException))
             {
                 // Expected - replay attack was detected
                 Assert.IsTrue(true, "Replay attack was properly detected");

@@ -232,7 +232,7 @@ namespace LibEmiddle.Tests.Unit
             for (int i = 0; i < 5; i++)
             {
                 var message = $"Test message {i}";
-                var (updatedSession, encryptedMessage) = doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, encryptedMessage) = doubleRatchetProtocol.Encrypt(
                     currentSession,
                     message,
                     KeyRotationStrategy.Standard
@@ -266,7 +266,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 try
                 {
-                    var (_, decryptedMessage) = doubleRatchetProtocol.DecryptAsync(
+                    var (_, decryptedMessage) = doubleRatchetProtocol.Decrypt(
                         compromisedSession,
                         encryptedMessages[i]
                     );

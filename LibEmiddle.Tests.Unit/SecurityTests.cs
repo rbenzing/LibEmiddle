@@ -66,7 +66,7 @@ namespace LibEmiddle.Tests.Unit
             string message3 = "Message 3";
 
             // Alice sends message 1
-            var (aliceSession1, encryptedMessage1) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message1);
+            var (aliceSession1, encryptedMessage1) = _doubleRatchetProtocol.Encrypt(aliceSession, message1);
             Assert.IsNotNull(aliceSession1, "Alice's session should be updated after encryption");
             Assert.IsNotNull(encryptedMessage1, "Encrypted message should not be null");
 
@@ -75,12 +75,12 @@ namespace LibEmiddle.Tests.Unit
             encryptedMessage1.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             // Bob receives message 1
-            var (bobSession1, decryptedMessage1) = _doubleRatchetProtocol.DecryptAsync(bobSession, encryptedMessage1);
+            var (bobSession1, decryptedMessage1) = _doubleRatchetProtocol.Decrypt(bobSession, encryptedMessage1);
             Assert.IsNotNull(bobSession1, "Bob's session should be updated after decryption");
             Assert.IsNotNull(decryptedMessage1, "Decrypted message should not be null");
 
             // Bob sends message 2
-            var (bobSession2, encryptedMessage2) = _doubleRatchetProtocol.EncryptAsync(bobSession1, message2);
+            var (bobSession2, encryptedMessage2) = _doubleRatchetProtocol.Encrypt(bobSession1, message2);
             Assert.IsNotNull(bobSession2, "Bob's session should be updated after encryption");
             Assert.IsNotNull(encryptedMessage2, "Encrypted message should not be null");
 
@@ -89,7 +89,7 @@ namespace LibEmiddle.Tests.Unit
             encryptedMessage2.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             // Alice receives message 2
-            var (aliceSession2, decryptedMessage2) = _doubleRatchetProtocol.DecryptAsync(aliceSession1, encryptedMessage2);
+            var (aliceSession2, decryptedMessage2) = _doubleRatchetProtocol.Decrypt(aliceSession1, encryptedMessage2);
             Assert.IsNotNull(aliceSession2, "Alice's session should be updated after decryption");
             Assert.IsNotNull(decryptedMessage2, "Decrypted message should not be null");
 
@@ -118,7 +118,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Continue the conversation
-            var (aliceSession3, encryptedMessage3) = _doubleRatchetProtocol.EncryptAsync(aliceSession2, message3);
+            var (aliceSession3, encryptedMessage3) = _doubleRatchetProtocol.Encrypt(aliceSession2, message3);
             Assert.IsNotNull(aliceSession3, "Alice's session should be updated after encryption");
             Assert.IsNotNull(encryptedMessage3, "Encrypted message should not be null");
 
@@ -126,7 +126,7 @@ namespace LibEmiddle.Tests.Unit
             encryptedMessage3.MessageId = Guid.NewGuid().ToString("N");
             encryptedMessage3.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-            var (bobSession3, decryptedMessage3) = _doubleRatchetProtocol.DecryptAsync(bobSession2, encryptedMessage3);
+            var (bobSession3, decryptedMessage3) = _doubleRatchetProtocol.Decrypt(bobSession2, encryptedMessage3);
             Assert.IsNotNull(bobSession3, "Bob's session should be updated after decryption");
             Assert.IsNotNull(decryptedMessage3, "Decrypted message should not be null");
 
@@ -154,12 +154,7 @@ namespace LibEmiddle.Tests.Unit
                 SkippedMessageKeys = new Dictionary<SkippedMessageKey, byte[]>()
             };
 
-            // An attacker shouldn't be able to decrypt previous messages using the compromised session
-            var (resultSession1, resultMessage1) = _doubleRatchetProtocol.DecryptAsync(compromisedBobSession, savedEncryptedMessage1);
-            var (resultSession2, resultMessage2) = _doubleRatchetProtocol.DecryptAsync(compromisedBobSession, savedEncryptedMessage2);
-
-            // Assert
-            // Check that legitimate recipients could decrypt messages
+            // Assert - Check that legitimate recipients could decrypt messages
             Assert.IsNotNull(decryptedMessage1, "Message 1 should be decrypted by legitimate recipient");
             Assert.IsNotNull(decryptedMessage2, "Message 2 should be decrypted by legitimate recipient");
             Assert.IsNotNull(decryptedMessage3, "Message 3 should be decrypted by legitimate recipient");
@@ -168,11 +163,14 @@ namespace LibEmiddle.Tests.Unit
             Assert.AreEqual(message2, decryptedMessage2, "Message 2 content should match original");
             Assert.AreEqual(message3, decryptedMessage3, "Message 3 content should match original");
 
-            // Check that compromised session can't decrypt previous messages
-            Assert.IsNull(resultSession1, "Should not be able to decrypt message 1 with compromised session");
-            Assert.IsNull(resultMessage1, "Should not be able to decrypt message 1 with compromised session");
-            Assert.IsNull(resultSession2, "Should not be able to decrypt message 2 with compromised session");
-            Assert.IsNull(resultMessage2, "Should not be able to decrypt message 2 with compromised session");
+            // An attacker shouldn't be able to decrypt previous messages using the compromised session —
+            // now the protocol throws LibEmiddleException on failure rather than returning null.
+            Assert.ThrowsException<LibEmiddle.Domain.Exceptions.LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(compromisedBobSession, savedEncryptedMessage1),
+                "Should not be able to decrypt message 1 with compromised session");
+            Assert.ThrowsException<LibEmiddle.Domain.Exceptions.LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(compromisedBobSession, savedEncryptedMessage2),
+                "Should not be able to decrypt message 2 with compromised session");
         }
 
         #endregion
@@ -260,7 +258,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Alice encrypts a message
             string message = "Secret message that should be tamper-proof";
-            var (_, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+            var (_, encryptedMessage) = _doubleRatchetProtocol.Encrypt(aliceSession, message);
 
             // Add security fields
             encryptedMessage.MessageId = Guid.NewGuid().ToString("N");
@@ -309,15 +307,13 @@ namespace LibEmiddle.Tests.Unit
                 SkippedMessageKeys = new Dictionary<SkippedMessageKey, byte[]>()
             };
 
-            // Act - Attempt to decrypt the tampered message
-            var (resultSession, resultMessage) = _doubleRatchetProtocol.DecryptAsync(bobSessionForTampered, tamperedMessage);
-
-            // Assert - Check that tampering was detected by verifying null returns
-            Assert.IsNull(resultSession, "Tampered message should result in null session");
-            Assert.IsNull(resultMessage, "Tampered message should result in null decrypted message");
+            // Act - Attempt to decrypt the tampered message — now throws LibEmiddleException
+            Assert.ThrowsException<LibEmiddle.Domain.Exceptions.LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(bobSessionForTampered, tamperedMessage),
+                "Tampered message should throw LibEmiddleException");
 
             // Additional verification - make sure the original message still decrypts properly
-            var (validSession, validMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession, encryptedMessage);
+            var (validSession, validMessage) = _doubleRatchetProtocol.Decrypt(bobSession, encryptedMessage);
 
             Assert.IsNotNull(validSession, "Original message should decrypt successfully");
             Assert.IsNotNull(validMessage, "Original message should decrypt successfully");

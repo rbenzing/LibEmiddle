@@ -149,7 +149,7 @@ namespace LibEmiddle.Tests.Unit
             };
 
             _mockDoubleRatchetProtocol
-                .Setup(dr => dr.EncryptAsync(It.IsAny<DoubleRatchetSession>(), It.IsAny<string>(), It.IsAny<KeyRotationStrategy>()))
+                .Setup(dr => dr.Encrypt(It.IsAny<DoubleRatchetSession>(), It.IsAny<string>(), It.IsAny<KeyRotationStrategy>()))
                 .Returns((doubleRatchetSession, dummyEncryptedMessage));
 
             // Setup reflection access to _sessions field for the test
@@ -375,7 +375,7 @@ namespace LibEmiddle.Tests.Unit
                 };
 
                 _mockDoubleRatchetProtocol
-                    .Setup(dr => dr.EncryptAsync(It.IsAny<DoubleRatchetSession>(), It.IsAny<string>(), It.IsAny<KeyRotationStrategy>()))
+                    .Setup(dr => dr.Encrypt(It.IsAny<DoubleRatchetSession>(), It.IsAny<string>(), It.IsAny<KeyRotationStrategy>()))
                     .Returns((doubleRatchetSession, dummyEncryptedMessage));
 
                 // Setup reflection access to _sessions field for the test

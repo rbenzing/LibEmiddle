@@ -107,22 +107,8 @@ namespace LibEmiddle.Messaging.Transport
 
             try
             {
-                // Encrypt the message
-                var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(_session, message);
-
-                // Validate the encryption result
-                if (updatedSession is null)
-                {
-                    throw new CryptographicException("Encryption failed: null session returned.");
-                }
-
-                if (encryptedMessage is null ||
-                    encryptedMessage.Ciphertext is null ||
-                    encryptedMessage.Nonce is null ||
-                    encryptedMessage.SenderDHKey is null)
-                {
-                    throw new CryptographicException("Encryption failed: incomplete encrypted message returned.");
-                }
+                // Encrypt the message; throws LibEmiddleException on failure
+                var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.Encrypt(_session, message);
 
                 // Update session only after successful encryption
                 _session = updatedSession;
@@ -133,10 +119,10 @@ namespace LibEmiddle.Messaging.Transport
                 // Convert encrypted message to transportable format using our standardized serialization
                 var messageData = new
                 {
-                    ciphertext = Convert.ToBase64String(encryptedMessage.Ciphertext),
-                    nonce = Convert.ToBase64String(encryptedMessage.Nonce),
+                    ciphertext = Convert.ToBase64String(encryptedMessage.Ciphertext!),
+                    nonce = Convert.ToBase64String(encryptedMessage.Nonce!),
                     messageNumber = encryptedMessage.SenderMessageNumber,
-                    senderDHKey = Convert.ToBase64String(encryptedMessage.SenderDHKey),
+                    senderDHKey = Convert.ToBase64String(encryptedMessage.SenderDHKey!),
                     timestamp = encryptedMessage.Timestamp,
                     messageId = encryptedMessage.MessageId,
                     sessionId = encryptedMessage.SessionId
@@ -298,18 +284,10 @@ namespace LibEmiddle.Messaging.Transport
                     throw new SecurityException("Message validation failed.");
                 }
 
-                var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(_session, encryptedMessage);
+                // Decrypt; throws LibEmiddleException on failure
+                var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.Decrypt(_session, encryptedMessage);
 
-                // Only update the session if decryption was successful
-                if (updatedSession != null)
-                {
-                    _session = updatedSession;
-                }
-                else
-                {
-                    // Log decryption failure but don't throw - might want to return null instead
-                    throw new CryptographicException("Decryption produced a null session.");
-                }
+                _session = updatedSession;
 
                 return decryptedMessage;
             }

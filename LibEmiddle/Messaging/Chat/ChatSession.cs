@@ -6,6 +6,7 @@ using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
+using LibEmiddle.Domain.Exceptions;
 using LibEmiddle.Messaging.Batching;
 
 namespace LibEmiddle.Messaging.Chat
@@ -341,15 +342,9 @@ namespace LibEmiddle.Messaging.Chat
                     LoggingManager.LogDebug(nameof(ChatSession), $"Session {SessionId} auto-activated by sending.");
                 }
 
-                // Perform encryption
-                var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(
+                // Perform encryption; throws LibEmiddleException on failure
+                var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.Encrypt(
                     _cryptoSession, message, RotationStrategy);
-
-                if (updatedSession == null || encryptedMessage == null)
-                {
-                    LoggingManager.LogError(nameof(ChatSession), $"Encryption failed for session {SessionId}.");
-                    return null;
-                }
 
                 // Stamp the sender's long-term identity key so the receiver can route O(1)
                 encryptedMessage.SenderIdentityKey = LocalPublicKey;
@@ -434,12 +429,17 @@ namespace LibEmiddle.Messaging.Chat
                     return null;
                 }
 
-                // Perform decryption
-                var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(_cryptoSession, encryptedMessage);
-
-                if (updatedSession == null)
+                // Perform decryption; throws LibEmiddleException on crypto/auth failure
+                DoubleRatchetSession updatedSession;
+                string decryptedMessage;
+                try
                 {
-                    LoggingManager.LogWarning(nameof(ChatSession), $"Decryption failed for message {encryptedMessage.MessageId}");
+                    (updatedSession, decryptedMessage) = _doubleRatchetProtocol.Decrypt(_cryptoSession, encryptedMessage);
+                }
+                catch (LibEmiddleException libEx)
+                {
+                    LoggingManager.LogWarning(nameof(ChatSession),
+                        $"Decryption failed for message {encryptedMessage.MessageId}: {libEx.Message}");
                     return null;
                 }
 

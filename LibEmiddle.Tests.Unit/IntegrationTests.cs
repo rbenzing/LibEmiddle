@@ -100,7 +100,7 @@ public class IntegrationTests
 
         // Step 6: Alice encrypts a message to Bob
         string initialMessage = "Hello Bob, this is Alice!";
-        var (aliceUpdatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(
+        var (aliceUpdatedSession, encryptedMessage) = _doubleRatchetProtocol.Encrypt(
             aliceSession,
             initialMessage);
 
@@ -112,7 +112,7 @@ public class IntegrationTests
         Assert.AreEqual(sessionId, encryptedMessage.SessionId, "Message should have correct session ID");
 
         // Step 7: Bob decrypts Alice's message
-        var (bobUpdatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(
+        var (bobUpdatedSession, decryptedMessage) = _doubleRatchetProtocol.Decrypt(
             bobSession,
             encryptedMessage);
 
@@ -122,7 +122,7 @@ public class IntegrationTests
 
         // Step 8: Bob replies to Alice
         string replyMessage = "Hi Alice, Bob here!";
-        var (bobRepliedSession, bobReplyEncrypted) = _doubleRatchetProtocol.EncryptAsync(
+        var (bobRepliedSession, bobReplyEncrypted) = _doubleRatchetProtocol.Encrypt(
             bobUpdatedSession,
             replyMessage);
 
@@ -130,7 +130,7 @@ public class IntegrationTests
         Assert.IsNotNull(bobReplyEncrypted, "Bob's encrypted reply should not be null");
 
         // Step 9: Alice decrypts Bob's reply
-        var (aliceFinalSession, aliceDecryptedReply) = _doubleRatchetProtocol.DecryptAsync(
+        var (aliceFinalSession, aliceDecryptedReply) = _doubleRatchetProtocol.Decrypt(
             aliceUpdatedSession,
             bobReplyEncrypted);
 
@@ -144,7 +144,7 @@ public class IntegrationTests
 
         // Verify forward secrecy - each message should use different message keys
         string secondMessage = "This is Alice's second message!";
-        var (aliceSession2, encryptedMessage2) = _doubleRatchetProtocol.EncryptAsync(
+        var (aliceSession2, encryptedMessage2) = _doubleRatchetProtocol.Encrypt(
             aliceFinalSession,
             secondMessage);
 
@@ -453,22 +453,20 @@ public class IntegrationTests
             SenderMessageNumber = 0
         };
 
-        // The DecryptAsync should handle invalid messages gracefully
+        // The Decrypt now throws on failure — ArgumentException for malformed, LibEmiddleException for crypto failures
         try
         {
-            var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(
-                aliceSession,
-                invalidMessage);
-
-            // If no exception is thrown, both should be null
-            Assert.IsNull(updatedSession, "Should not return updated session for invalid message");
-            Assert.IsNull(decryptedMessage, "Should not return decrypted message for invalid message");
+            _doubleRatchetProtocol.Decrypt(aliceSession, invalidMessage);
+            Assert.Fail("Expected an exception for an invalid/incomplete message");
         }
         catch (ArgumentException ex)
         {
-            // It's acceptable for the protocol to throw ArgumentException for malformed messages
             Assert.IsTrue(ex.Message.Contains("incomplete") || ex.Message.Contains("invalid"),
                 "Exception should indicate message is incomplete or invalid");
+        }
+        catch (LibEmiddle.Domain.Exceptions.LibEmiddleException)
+        {
+            // Also acceptable — protocol detected the bad message
         }
 
         // Test 2: Message with wrong session ID
@@ -481,26 +479,19 @@ public class IntegrationTests
             SenderMessageNumber = 1
         };
 
-        var (wrongSessionUpdated, wrongSessionDecrypted) = _doubleRatchetProtocol.DecryptAsync(
-            aliceSession,
-            wrongSessionMessage);
-
-        Assert.IsNull(wrongSessionUpdated, "Should not return updated session for wrong session ID");
-        Assert.IsNull(wrongSessionDecrypted, "Should not return decrypted message for wrong session ID");
+        Assert.ThrowsException<LibEmiddle.Domain.Exceptions.LibEmiddleException>(
+            () => _doubleRatchetProtocol.Decrypt(aliceSession, wrongSessionMessage),
+            "Wrong session ID should throw LibEmiddleException");
 
         // Test 3: Null message handling
         try
         {
-            var (nullUpdated, nullDecrypted) = _doubleRatchetProtocol.DecryptAsync(
-                aliceSession,
-                null!);
-
-            Assert.IsNull(nullUpdated, "Should not return updated session for null message");
-            Assert.IsNull(nullDecrypted, "Should not return decrypted message for null message");
+            _doubleRatchetProtocol.Decrypt(aliceSession, null!);
+            Assert.Fail("Expected ArgumentNullException for null message");
         }
         catch (ArgumentNullException)
         {
-            // It's acceptable to throw ArgumentNullException for null input
+            // Expected
         }
 
         // Clean up

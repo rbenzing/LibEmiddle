@@ -35,7 +35,8 @@ namespace LibEmiddle.Abstractions
         /// <param name="message">The plaintext message to encrypt.</param>
         /// <param name="rotationStrategy">The key rotation strategy to use.</param>
         /// <returns>A tuple containing the updated session state and the encrypted message.</returns>
-        (DoubleRatchetSession?, EncryptedMessage?) EncryptAsync(DoubleRatchetSession session, string message, KeyRotationStrategy rotationStrategy = KeyRotationStrategy.Standard);
+        /// <exception cref="LibEmiddle.Domain.Exceptions.LibEmiddleException">Thrown when encryption fails.</exception>
+        (DoubleRatchetSession, EncryptedMessage) Encrypt(DoubleRatchetSession session, string message, KeyRotationStrategy rotationStrategy = KeyRotationStrategy.Standard);
 
         /// <summary>
         /// Decrypts a message using the Double Ratchet protocol.
@@ -43,6 +44,7 @@ namespace LibEmiddle.Abstractions
         /// <param name="session">The current Double Ratchet session state.</param>
         /// <param name="encryptedMessage">The encrypted message to decrypt.</param>
         /// <returns>A tuple containing the updated session state and the decrypted message.</returns>
-        (DoubleRatchetSession?, string?) DecryptAsync(DoubleRatchetSession session, EncryptedMessage encryptedMessage);
+        /// <exception cref="LibEmiddle.Domain.Exceptions.LibEmiddleException">Thrown when decryption fails, session ID mismatches, or timestamp is invalid.</exception>
+        (DoubleRatchetSession, string) Decrypt(DoubleRatchetSession session, EncryptedMessage encryptedMessage);
     }
 }

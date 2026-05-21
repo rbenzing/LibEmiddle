@@ -143,7 +143,7 @@ namespace LibEmiddle.Tests.Unit
                 string message = $"Test message {i}";
                 originalMessages.Add(message);
 
-                var (updatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, encrypted) = _doubleRatchetProtocol.Encrypt(
                     currentSession, message);
 
                 AddSecurityFields(encrypted, sessionId);
@@ -155,7 +155,7 @@ namespace LibEmiddle.Tests.Unit
             var currentBobSession = bobSession;
             for (int i = messageCount - 1; i >= 0; i--)
             {
-                var (updatedSession, decrypted) = _doubleRatchetProtocol.DecryptAsync(
+                var (updatedSession, decrypted) = _doubleRatchetProtocol.Decrypt(
                     currentBobSession, encryptedMessages[i]);
 
                 Assert.IsNotNull(decrypted, $"Failed to decrypt message {i} out of order");
@@ -327,17 +327,17 @@ namespace LibEmiddle.Tests.Unit
 
             // Alice sends a valid message
             string validMessage = "This is a valid message";
-            var (aliceSession1, validEncrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, validMessage);
+            var (aliceSession1, validEncrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, validMessage);
             AddSecurityFields(validEncrypted, sessionId);
 
             // First, decrypt the valid message to establish the session properly
-            var (bobSession1, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession, validEncrypted);
+            var (bobSession1, decryptedMessage) = _doubleRatchetProtocol.Decrypt(bobSession, validEncrypted);
             Assert.IsNotNull(bobSession1, "Valid message should decrypt successfully");
             Assert.AreEqual(validMessage, decryptedMessage, "Decrypted content should match original");
 
             // Now create a second valid message
             string secondMessage = "This is the second valid message";
-            var (aliceSession2, secondEncrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession1, secondMessage);
+            var (aliceSession2, secondEncrypted) = _doubleRatchetProtocol.Encrypt(aliceSession1, secondMessage);
             AddSecurityFields(secondEncrypted, sessionId);
 
             // Create an invalid message by corrupting the second message
@@ -353,20 +353,18 @@ namespace LibEmiddle.Tests.Unit
             };
 
             // Act
-            // First try to decrypt the invalid message
-            var (bobSessionAfterFailure, failedMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession1, invalidEncrypted);
+            // First try to decrypt the invalid message — now throws LibEmiddleException on failure.
+            // Because the session is deep-cloned before any mutation, the original bobSession1 is unchanged.
+            Assert.ThrowsException<LibEmiddle.Domain.Exceptions.LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(bobSession1, invalidEncrypted),
+                "Invalid (corrupted) message should throw LibEmiddleException");
 
-            // Then decrypt the valid second message using the session state before the failure
-            var sessionToUse = bobSessionAfterFailure ?? bobSession1;
-            var (bobSessionAfterSuccess, successMessage) = _doubleRatchetProtocol.DecryptAsync(sessionToUse, secondEncrypted);
+            // Then decrypt the valid second message using the original session (unchanged after the failure)
+            var (bobSessionAfterSuccess, successMessage) = _doubleRatchetProtocol.Decrypt(bobSession1, secondEncrypted);
 
             // Assert
-            Assert.IsNull(failedMessage, "Invalid message should not decrypt");
             Assert.IsNotNull(successMessage, "Valid message should decrypt successfully");
             Assert.AreEqual(secondMessage, successMessage, "Decrypted content should match original");
-
-            // The first decryption failed, so the session should remain unchanged for the second decryption
-            Assert.IsNull(bobSessionAfterFailure, "Failed decryption should return null session");
         }
 
         [TestMethod]
@@ -914,7 +912,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Verify the restored session can be used for communication
             string testMessage = "Message after session restoration";
-            var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(restoredSession, testMessage);
+            var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.Encrypt(restoredSession, testMessage);
 
             Assert.IsNotNull(updatedSession, "Should get valid updated session after encryption");
             Assert.IsNotNull(encryptedMessage, "Should be able to encrypt new message with restored session");

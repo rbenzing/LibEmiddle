@@ -6,6 +6,7 @@ using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain.Enums;
 using LibEmiddle.Domain;
+using LibEmiddle.Domain.Exceptions;
 
 namespace LibEmiddle.Protocol
 {
@@ -185,7 +186,7 @@ namespace LibEmiddle.Protocol
         /// <param name="message">The plaintext message to encrypt</param>
         /// <param name="rotationStrategy">The key rotation strategy to use</param>
         /// <returns>A tuple containing the updated session state and the encrypted message</returns>
-        public (DoubleRatchetSession?, EncryptedMessage?) EncryptAsync(
+        public (DoubleRatchetSession, EncryptedMessage) Encrypt(
             DoubleRatchetSession session,
             string message,
             KeyRotationStrategy rotationStrategy = KeyRotationStrategy.Standard)
@@ -282,10 +283,10 @@ namespace LibEmiddle.Protocol
 
                 return (updatedSession, encryptedMessage);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not LibEmiddleException)
             {
                 LoggingManager.LogError(nameof(DoubleRatchetProtocol), $"Encryption failed: {ex.Message}");
-                return (null, null);
+                throw new LibEmiddleException($"Message encryption failed: {ex.Message}", LibEmiddleErrorCode.DecryptionFailed, ex);
             }
         }
 
@@ -295,7 +296,7 @@ namespace LibEmiddle.Protocol
         /// <param name="session">The current Double Ratchet session state</param>
         /// <param name="encryptedMessage">The encrypted message to decrypt</param>
         /// <returns>A tuple containing the updated session state and the decrypted message</returns>
-        public (DoubleRatchetSession?, string?) DecryptAsync(
+        public (DoubleRatchetSession, string) Decrypt(
             DoubleRatchetSession session,
             EncryptedMessage encryptedMessage)
                 {
@@ -313,18 +314,22 @@ namespace LibEmiddle.Protocol
 
                     try
                     {
-                        // Check session ID match inside try-catch to return null on mismatch
+                        // Check session ID match
                         if (encryptedMessage.SessionId != session.SessionId)
                         {
                             LoggingManager.LogWarning(nameof(DoubleRatchetProtocol), "Message session ID does not match current session");
-                            return (null, null);
+                            throw new LibEmiddleException(
+                                $"Message session ID '{encryptedMessage.SessionId}' does not match session '{session.SessionId}'.",
+                                LibEmiddleErrorCode.InvalidMessage);
                         }
 
                         // Validate timestamp to reject negative timestamps and extremely old/future messages
                         if (encryptedMessage.Timestamp < 0)
                         {
                             LoggingManager.LogWarning(nameof(DoubleRatchetProtocol), "Message has negative timestamp");
-                            return (null, null);
+                            throw new LibEmiddleException(
+                                "Message has a negative timestamp and was rejected.",
+                                LibEmiddleErrorCode.InvalidMessage);
                         }
 
                         // Check for extremely future timestamps (more than 1 hour in the future)
@@ -332,7 +337,9 @@ namespace LibEmiddle.Protocol
                         if (encryptedMessage.Timestamp > currentTime + (60 * 60 * 1000))
                         {
                             LoggingManager.LogWarning(nameof(DoubleRatchetProtocol), "Message timestamp is too far in the future");
-                            return (null, null);
+                            throw new LibEmiddleException(
+                                "Message timestamp is more than 1 hour in the future and was rejected.",
+                                LibEmiddleErrorCode.InvalidMessage);
                         }
                         // Check if this is a message we've already decrypted by looking in the skipped message keys
                         SkippedMessageKey skippedMessageKeyId = new SkippedMessageKey(
@@ -439,10 +446,10 @@ namespace LibEmiddle.Protocol
 
                         return (updatedSession, decryptedMessage);
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not LibEmiddleException)
                     {
                         LoggingManager.LogError(nameof(DoubleRatchetProtocol), $"Decryption failed: {ex.Message}");
-                        return (null, null);
+                        throw new LibEmiddleException($"Message decryption failed: {ex.Message}", LibEmiddleErrorCode.DecryptionFailed, ex);
                     }
                 }
 
@@ -507,8 +514,8 @@ namespace LibEmiddle.Protocol
             // Storing skipped keys from the old chain requires the caller to NOT have reset
             // ReceiveMessageNumber yet (so we know the actual old message number range).
             // The caller resets ReceiveMessageNumber = 0 before calling this method, so we
-            // cannot implement this safely here without restructuring DecryptAsync.
-            // This is intentionally left as a no-op until DecryptAsync passes the old
+            // cannot implement this safely here without restructuring Decrypt.
+            // This is intentionally left as a no-op until Decrypt passes the old
             // ReceiveMessageNumber in. Out-of-order message delivery on chain transitions
             // is tracked as a separate improvement item.
 

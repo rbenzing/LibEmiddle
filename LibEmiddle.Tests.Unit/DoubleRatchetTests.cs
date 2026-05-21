@@ -9,6 +9,7 @@ using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain.Enums;
+using LibEmiddle.Domain.Exceptions;
 using LibEmiddle.Protocol;
 using LibEmiddle.Abstractions;
 
@@ -83,14 +84,14 @@ namespace LibEmiddle.Tests.Unit
             string originalMessage = "Hello, secure world!";
 
             // Act - Alice encrypts a message for Bob
-            var (aliceUpdatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(
+            var (aliceUpdatedSession, encryptedMessage) = _doubleRatchetProtocol.Encrypt(
                 aliceSession, originalMessage);
 
             // Add security fields
             AddSecurityFields(encryptedMessage, sessionId);
 
             // Bob decrypts the message
-            var (bobUpdatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(
+            var (bobUpdatedSession, decryptedMessage) = _doubleRatchetProtocol.Decrypt(
                 bobSession, encryptedMessage);
 
             // Assert
@@ -120,7 +121,7 @@ namespace LibEmiddle.Tests.Unit
             {
                 // Encrypt a message (which performs a ratchet step)
                 string message = $"Test message {i}";
-                var (updatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, encrypted) = _doubleRatchetProtocol.Encrypt(
                     currentAliceSession, message);
 
                 // Ensure we got a valid encrypted message
@@ -162,7 +163,7 @@ namespace LibEmiddle.Tests.Unit
                 string message = $"Test message {i}";
                 originalMessages.Add(message);
 
-                var (updatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, encrypted) = _doubleRatchetProtocol.Encrypt(
                     currentSession, message);
 
                 AddSecurityFields(encrypted, sessionId);
@@ -176,7 +177,7 @@ namespace LibEmiddle.Tests.Unit
 
             for (int i = messageCount - 1; i >= 0; i--)
             {
-                var (updatedSession, decrypted) = _doubleRatchetProtocol.DecryptAsync(
+                var (updatedSession, decrypted) = _doubleRatchetProtocol.Decrypt(
                     currentSession, encryptedMessages[i]);
 
                 // We expect this to work with the new Double Ratchet implementation
@@ -201,31 +202,25 @@ namespace LibEmiddle.Tests.Unit
             var (aliceSession, bobSession, sessionId) = CreateTestSessionsAsync();
 
             string message = "This message will expire";
-            var (_, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+            var (_, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, message);
 
             // Set timestamp to 10 minutes in the past (beyond the 5 minute threshold)
             encrypted.MessageId = Guid.NewGuid().ToString("N");
             encrypted.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 10 * 60 * 1000;
             encrypted.SessionId = sessionId;
 
-            // Act
-            var (resultSession, resultMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
-
-            // Assert - The actual behavior depends on implementation, but either:
-            // 1. The decryption will fail and return null results
-            // 2. Or the protocol might still decrypt but log a warning
-
-            // For this test, we check what the implementation we're testing actually does
-            if (resultSession == null || resultMessage == null)
+            // Act & Assert - The protocol accepts past timestamps (only future ones are rejected);
+            // a 10-minute-old message is within the acceptable window.
+            // Either succeeds or throws LibEmiddleException — both are valid outcomes.
+            try
             {
-                // If implementation rejects expired messages
-                Assert.IsNull(resultSession, "Session should be null for expired message");
-                Assert.IsNull(resultMessage, "Decrypted message should be null for expired message");
+                var (resultSession, resultMessage) = _doubleRatchetProtocol.Decrypt(bobSession, encrypted);
+                // If accepted, content should still match
+                Assert.AreEqual(message, resultMessage, "If accepting the message, content should match");
             }
-            else
+            catch (LibEmiddleException)
             {
-                // If implementation accepts but logs (we can't verify logging in a test)
-                Assert.AreEqual(message, resultMessage, "If accepting expired messages, content should match");
+                // Also acceptable — implementation may reject
             }
         }
 
@@ -236,22 +231,17 @@ namespace LibEmiddle.Tests.Unit
             var (aliceSession, bobSession, sessionId) = CreateTestSessionsAsync();
 
             string message = "Message with suspicious timestamp";
-            var (_, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+            var (_, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, message);
 
             // Set extremely high timestamp (potential overflow attack)
             encrypted.MessageId = Guid.NewGuid().ToString("N");
             encrypted.Timestamp = long.MaxValue;
             encrypted.SessionId = sessionId;
 
-            // Act
-            var (resultSession, resultMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
-
-            // Assert - Expect rejection (actual behavior depends on implementation)
-            if (resultSession == null || resultMessage == null)
-            {
-                Assert.IsNull(resultSession, "Session should be null for suspicious timestamp");
-                Assert.IsNull(resultMessage, "Decrypted message should be null for suspicious timestamp");
-            }
+            // Act & Assert - Expect LibEmiddleException for a timestamp far in the future
+            Assert.ThrowsException<LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(bobSession, encrypted),
+                "Should reject messages with timestamps far in the future");
         }
 
         [TestMethod]
@@ -261,19 +251,17 @@ namespace LibEmiddle.Tests.Unit
             var (aliceSession, bobSession, sessionId) = CreateTestSessionsAsync();
 
             string message = "Message with negative timestamp";
-            var (_, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+            var (_, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, message);
 
-            // Set negative timestamp (potential overflow attack)
+            // Set negative timestamp
             encrypted.MessageId = Guid.NewGuid().ToString("N");
             encrypted.Timestamp = -1;
             encrypted.SessionId = sessionId;
 
-            // Act
-            var (resultSession, resultMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
-
-            // Assert - Expect rejection
-            Assert.IsNull(resultSession, "Session should be null for negative timestamp");
-            Assert.IsNull(resultMessage, "Decrypted message should be null for negative timestamp");
+            // Act & Assert - Expect LibEmiddleException
+            Assert.ThrowsException<LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(bobSession, encrypted),
+                "Should reject messages with negative timestamps");
         }
 
         #endregion
@@ -312,14 +300,14 @@ namespace LibEmiddle.Tests.Unit
                     {
                         // Alice sends message to Bob
                         string message = $"Alice message {i}";
-                        var (updatedAliceSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(
+                        var (updatedAliceSession, encrypted) = _doubleRatchetProtocol.Encrypt(
                             currentAliceSession, message, KeyRotationStrategy.Standard);
 
                         Assert.IsNotNull(updatedAliceSession, $"Alice's session update failed at message {i}");
                         Assert.IsNotNull(encrypted, $"Message encryption failed at message {i}");
 
                         AddSecurityFields(encrypted, sessionId);
-                        var (updatedBobSession, decrypted) = _doubleRatchetProtocol.DecryptAsync(
+                        var (updatedBobSession, decrypted) = _doubleRatchetProtocol.Decrypt(
                             currentBobSession, encrypted);
 
                         Assert.IsNotNull(updatedBobSession, $"Bob's session update failed at message {i}");
@@ -333,14 +321,14 @@ namespace LibEmiddle.Tests.Unit
                     {
                         // Bob sends message to Alice
                         string message = $"Bob message {i}";
-                        var (updatedBobSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(
+                        var (updatedBobSession, encrypted) = _doubleRatchetProtocol.Encrypt(
                             currentBobSession, message, KeyRotationStrategy.Standard);
 
                         Assert.IsNotNull(updatedBobSession, $"Bob's session update failed at message {i}");
                         Assert.IsNotNull(encrypted, $"Message encryption failed at message {i}");
 
                         AddSecurityFields(encrypted, sessionId);
-                        var (updatedAliceSession, decrypted) = _doubleRatchetProtocol.DecryptAsync(
+                        var (updatedAliceSession, decrypted) = _doubleRatchetProtocol.Decrypt(
                             currentAliceSession, encrypted);
 
                         Assert.IsNotNull(updatedAliceSession, $"Alice's session update failed at message {i}");
@@ -394,7 +382,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Act - Use Alice's session to encrypt a message
             string message = "Test message for immutability";
-            var (updatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+            var (updatedSession, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, message);
 
             // Assert - Original session should not be modified
             Assert.AreNotSame(aliceSession, updatedSession,
@@ -428,7 +416,7 @@ namespace LibEmiddle.Tests.Unit
 
             // Send a message from Alice to Bob
             string message = "Message that should not be replayable";
-            var (_, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+            var (_, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, message);
 
             // Add security fields
             encrypted.MessageId = Guid.NewGuid().ToString("N");
@@ -436,18 +424,17 @@ namespace LibEmiddle.Tests.Unit
             encrypted.SessionId = sessionId;
 
             // First decryption should succeed
-            var (bobUpdatedSession, decrypted) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
+            var (bobUpdatedSession, decrypted) = _doubleRatchetProtocol.Decrypt(bobSession, encrypted);
 
             Assert.IsNotNull(bobUpdatedSession, "First decryption should succeed");
             Assert.IsNotNull(decrypted, "First decryption should succeed");
             Assert.AreEqual(message, decrypted, "First decryption should return correct message");
 
             // Act - Try to decrypt the exact same message again (replay attempt)
-            var (replaySession, replayMessage) = _doubleRatchetProtocol.DecryptAsync(bobUpdatedSession, encrypted);
-
-            // Assert - Replay should be detected and rejected
-            Assert.IsNull(replaySession, "Replay attempt should be rejected (session)");
-            Assert.IsNull(replayMessage, "Replay attempt should be rejected (message)");
+            // The protocol now throws LibEmiddleException for decryption failures (auth failure / replay)
+            Assert.ThrowsException<LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(bobUpdatedSession, encrypted),
+                "Replay attempt should throw LibEmiddleException");
 
             // Try with variations of replays to ensure comprehensive protection
 
@@ -463,11 +450,9 @@ namespace LibEmiddle.Tests.Unit
                 SessionId = sessionId
             };
 
-            var (replayResult1, replayMessage1) = _doubleRatchetProtocol.DecryptAsync(
-                bobUpdatedSession, replayWithNewId);
-
-            Assert.IsNull(replayResult1, "Replay with new ID should be rejected (session)");
-            Assert.IsNull(replayMessage1, "Replay with new ID should be rejected (message)");
+            Assert.ThrowsException<LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(bobUpdatedSession, replayWithNewId),
+                "Replay with new ID should throw LibEmiddleException");
 
             // 2. Same content, new ID, updated timestamp
             var replayWithNewTimestamp = new EncryptedMessage
@@ -481,11 +466,9 @@ namespace LibEmiddle.Tests.Unit
                 SessionId = sessionId
             };
 
-            var (replayResult2, replayMessage2) = _doubleRatchetProtocol.DecryptAsync(
-                bobUpdatedSession, replayWithNewTimestamp);
-
-            Assert.IsNull(replayResult2, "Replay with new timestamp should be rejected (session)");
-            Assert.IsNull(replayMessage2, "Replay with new timestamp should be rejected (message)");
+            Assert.ThrowsException<LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(bobUpdatedSession, replayWithNewTimestamp),
+                "Replay with new timestamp should throw LibEmiddleException");
         }
 
         [TestMethod]
@@ -505,7 +488,7 @@ namespace LibEmiddle.Tests.Unit
                 var task = Task.Run(() => {
                     // Each task tries to encrypt with the same original session
                     string message = $"Task {taskId} message";
-                    return _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+                    return _doubleRatchetProtocol.Encrypt(aliceSession, message);
                 });
                 encryptTasks.Add(task);
             }
@@ -566,10 +549,10 @@ namespace LibEmiddle.Tests.Unit
             string longMessage = messageBuilder.ToString();
 
             // Act
-            var (aliceUpdatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, longMessage);
+            var (aliceUpdatedSession, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, longMessage);
             AddSecurityFields(encrypted, sessionId);
 
-            var (bobUpdatedSession, decrypted) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
+            var (bobUpdatedSession, decrypted) = _doubleRatchetProtocol.Decrypt(bobSession, encrypted);
 
             // Assert
             Assert.IsNotNull(aliceUpdatedSession, "Alice's session should be updated");
@@ -592,7 +575,7 @@ namespace LibEmiddle.Tests.Unit
             // Act & Assert - Empty message should throw ArgumentException
             Assert.ThrowsException<ArgumentException>(() =>
             {
-                _doubleRatchetProtocol.EncryptAsync(aliceSession, "");
+                _doubleRatchetProtocol.Encrypt(aliceSession, "");
 
             }, "Empty message should be rejected");
         }
@@ -605,10 +588,10 @@ namespace LibEmiddle.Tests.Unit
             string zeroByteMessage = "\0";
 
             // Act
-            var (aliceUpdatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, zeroByteMessage);
+            var (aliceUpdatedSession, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, zeroByteMessage);
             AddSecurityFields(encrypted, sessionId);
 
-            var (bobUpdatedSession, decrypted) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
+            var (bobUpdatedSession, decrypted) = _doubleRatchetProtocol.Decrypt(bobSession, encrypted);
 
             // Assert
             Assert.IsNotNull(decrypted, "Null byte message should be decryptable");
@@ -623,10 +606,10 @@ namespace LibEmiddle.Tests.Unit
             string specialCharsMessage = "Special chars: 你好 áéíóú ñ Ж ß Ø אבג 😊 🔐 ∞ ≈ π √";
 
             // Act
-            var (aliceUpdatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, specialCharsMessage);
+            var (aliceUpdatedSession, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, specialCharsMessage);
             AddSecurityFields(encrypted, sessionId);
 
-            var (bobUpdatedSession, decrypted) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
+            var (bobUpdatedSession, decrypted) = _doubleRatchetProtocol.Decrypt(bobSession, encrypted);
 
             // Assert
             Assert.IsNotNull(decrypted, "Special character message should be decryptable");
@@ -639,19 +622,18 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var (aliceSession, bobSession, sessionId) = CreateTestSessionsAsync();
             string message = "Message with mismatched session ID";
-            var (_, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+            var (_, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, message);
 
             // Add security fields but use a completely different session ID
             encrypted.MessageId = Guid.NewGuid().ToString("N");
             encrypted.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             encrypted.SessionId = "completely-different-session-id";
 
-            // Act
-            var (resultSession, resultMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
-
-            // Assert
-            Assert.IsNull(resultSession, "Session should be null for mismatched session ID");
-            Assert.IsNull(resultMessage, "Decrypted message should be null for mismatched session ID");
+            // Act & Assert - Expect LibEmiddleException for session ID mismatch
+            var ex = Assert.ThrowsException<LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(bobSession, encrypted));
+            Assert.AreEqual(LibEmiddleErrorCode.InvalidMessage, ex.ErrorCode,
+                "Session ID mismatch should produce InvalidMessage error code");
         }
 
         [TestMethod]
@@ -660,18 +642,16 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var (aliceSession, bobSession, sessionId) = CreateTestSessionsAsync();
             string message = "Message with invalid DH key";
-            var (_, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+            var (_, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, message);
             AddSecurityFields(encrypted, sessionId);
 
             // Create a malformed DH key (wrong length)
             encrypted.SenderDHKey = new byte[16]; // Too short
 
-            // Act
-            var (resultSession, resultMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
-
-            // Assert
-            Assert.IsNull(resultSession, "Session should be null for malformed DH key");
-            Assert.IsNull(resultMessage, "Message should be null for malformed DH key");
+            // Act & Assert - Expect LibEmiddleException for a malformed DH key
+            Assert.ThrowsException<LibEmiddleException>(
+                () => _doubleRatchetProtocol.Decrypt(bobSession, encrypted),
+                "Malformed DH key should throw LibEmiddleException");
         }
 
         [TestMethod]
@@ -680,25 +660,25 @@ namespace LibEmiddle.Tests.Unit
             // Arrange
             var (aliceSession, bobSession, sessionId) = CreateTestSessionsAsync();
             string message = "Message with extreme message number";
-            var (_, encrypted) = _doubleRatchetProtocol.EncryptAsync(aliceSession, message);
+            var (_, encrypted) = _doubleRatchetProtocol.Encrypt(aliceSession, message);
             AddSecurityFields(encrypted, sessionId);
 
             // Set an unreasonably high message number
             encrypted.SenderMessageNumber = uint.MaxValue;
 
-            // Act
+            // Act - LibEmiddleException (too many skipped keys) or success are both acceptable.
+            // The test verifies that no unexpected exceptions escape.
             try
             {
-                var (resultSession, resultMessage) = _doubleRatchetProtocol.DecryptAsync(bobSession, encrypted);
-
-                // Our implementation might choose to accept this (it's not necessarily invalid)
-                // but this test verifies that it doesn't cause crashes or memory corruption
-
-                // No specific assertion here - we're mainly ensuring no exceptions are thrown
+                _doubleRatchetProtocol.Decrypt(bobSession, encrypted);
+            }
+            catch (LibEmiddleException)
+            {
+                // Expected — too many skipped message keys triggers a LibEmiddleException
             }
             catch (Exception ex)
             {
-                Assert.Fail($"MaxMessageNumber test should not throw exceptions: {ex.Message}");
+                Assert.Fail($"MaxMessageNumber test produced an unexpected exception type: {ex.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -719,7 +699,7 @@ namespace LibEmiddle.Tests.Unit
             for (int i = 0; i < messageCount; i++)
             {
                 string message = $"Rotation test message {i}";
-                var (updatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, encrypted) = _doubleRatchetProtocol.Encrypt(
                     currentAliceSession, message, KeyRotationStrategy.AfterEveryMessage);
 
                 // Add security fields
@@ -757,7 +737,7 @@ namespace LibEmiddle.Tests.Unit
             for (int i = 0; i < messageCount; i++)
             {
                 string message = $"Standard rotation test message {i}";
-                var (updatedSession, encrypted) = _doubleRatchetProtocol.EncryptAsync(
+                var (updatedSession, encrypted) = _doubleRatchetProtocol.Encrypt(
                     currentAliceSession, message, KeyRotationStrategy.Standard);
 
                 AddSecurityFields(encrypted, sessionId);
@@ -780,5 +760,50 @@ namespace LibEmiddle.Tests.Unit
         }
 
         #endregion
+    }
+
+    [TestClass]
+    public class DoubleRatchetExceptionTests
+    {
+        private static (DoubleRatchetSession sender, DoubleRatchetSession receiver) MakeSessionPair(string sessionId = "test-session")
+        {
+            var protocol = new DoubleRatchetProtocol();
+            var receiverKeyPair = Sodium.GenerateX25519KeyPair();
+            byte[] sharedKey = new byte[32];
+            RandomNumberGenerator.Fill(sharedKey);
+            var sender = protocol.InitializeSessionAsSender(sharedKey, receiverKeyPair.PublicKey, sessionId);
+            var receiver = protocol.InitializeSessionAsReceiver(sharedKey, receiverKeyPair, sender.SenderRatchetKeyPair.PublicKey, sessionId);
+            return (sender, receiver);
+        }
+
+        [TestMethod]
+        public void Decrypt_SessionIdMismatch_ThrowsLibEmiddleException()
+        {
+            var protocol = new DoubleRatchetProtocol();
+            var (sender, _) = MakeSessionPair("session-A");
+            var (_, wrongReceiver) = MakeSessionPair("session-B");
+
+            var (_, msg) = protocol.Encrypt(sender, "hello");
+            msg.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            var ex = Assert.ThrowsException<LibEmiddleException>(
+                () => protocol.Decrypt(wrongReceiver, msg));
+            Assert.AreEqual(LibEmiddleErrorCode.InvalidMessage, ex.ErrorCode);
+        }
+
+        [TestMethod]
+        public void Decrypt_TamperedCiphertext_ThrowsLibEmiddleException()
+        {
+            var protocol = new DoubleRatchetProtocol();
+            var (sender, receiver) = MakeSessionPair();
+
+            var (_, msg) = protocol.Encrypt(sender, "hello");
+            msg.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            msg.Ciphertext![0] ^= 0xFF;
+
+            var ex = Assert.ThrowsException<LibEmiddleException>(
+                () => protocol.Decrypt(receiver, msg));
+            Assert.AreEqual(LibEmiddleErrorCode.DecryptionFailed, ex.ErrorCode);
+        }
     }
 }

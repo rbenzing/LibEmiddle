@@ -248,11 +248,11 @@ namespace LibEmiddle.Tests.Unit
             {
                 // Alice to Bob
                 (DoubleRatchetSession aliceUpdatedSession, EncryptedMessage encryptedMessage) =
-                    _doubleRatchetProtocol.EncryptAsync(currentAliceSession, message);
+                    _doubleRatchetProtocol.Encrypt(currentAliceSession, message);
 
                 // Bob decrypts Alice's message
                 (DoubleRatchetSession bobUpdatedSession, string decryptedMessage) =
-                    _doubleRatchetProtocol.DecryptAsync(currentBobSession, encryptedMessage);
+                    _doubleRatchetProtocol.Decrypt(currentBobSession, encryptedMessage);
 
                 // Ensure everything worked correctly
                 Assert.IsNotNull(aliceUpdatedSession, $"Alice's updated session should not be null at iteration {i}");

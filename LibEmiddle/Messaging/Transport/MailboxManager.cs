@@ -177,11 +177,8 @@ namespace LibEmiddle.Messaging.Transport
             // Get or create session for this recipient
             string recipientId = Convert.ToBase64String(recipientKey);
 
-            // Encrypt the message
-            var (updatedSession, encryptedPayload) = _doubleRatchetProtocol.EncryptAsync(session, message);
-
-            ArgumentNullException.ThrowIfNull(updatedSession, nameof(updatedSession));
-            ArgumentNullException.ThrowIfNull(encryptedPayload, nameof(encryptedPayload));
+            // Encrypt the message; throws LibEmiddleException on failure
+            var (updatedSession, encryptedPayload) = _doubleRatchetProtocol.Encrypt(session, message);
 
             // Update the session
             _sessions[recipientId] = updatedSession;
@@ -232,14 +229,11 @@ namespace LibEmiddle.Messaging.Transport
                     string senderId = Convert.ToBase64String(message.SenderKey);
                     if (_sessions.TryGetValue(senderId, out var session))
                     {
-                        var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.DecryptAsync(session, message.EncryptedPayload);
+                        var (updatedSession, decryptedMessage) = _doubleRatchetProtocol.Decrypt(session, message.EncryptedPayload);
 
-                        if (updatedSession != null && decryptedMessage != null)
-                        {
-                            // Update session
-                            _sessions[senderId] = updatedSession;
-                            content = decryptedMessage;
-                        }
+                        // Update session
+                        _sessions[senderId] = updatedSession;
+                        content = decryptedMessage;
                     }
                 }
                 catch (Exception ex)

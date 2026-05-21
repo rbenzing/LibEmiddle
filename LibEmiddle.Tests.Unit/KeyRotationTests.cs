@@ -239,7 +239,7 @@ namespace LibEmiddle.Tests.Unit
             uint initialMessageNumber = aliceSession.SendMessageNumber;
 
             // Act: Encrypt a message (this should advance the chain key)
-            var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.EncryptAsync(
+            var (updatedSession, encryptedMessage) = _doubleRatchetProtocol.Encrypt(
                 aliceSession,
                 "Test message",
                 KeyRotationStrategy.Standard);
