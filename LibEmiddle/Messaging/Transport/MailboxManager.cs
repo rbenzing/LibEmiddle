@@ -3,6 +3,7 @@ using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
+using LibEmiddle.Domain.Exceptions;
 
 namespace LibEmiddle.Messaging.Transport
 {
@@ -178,7 +179,22 @@ namespace LibEmiddle.Messaging.Transport
             string recipientId = Convert.ToBase64String(recipientKey);
 
             // Encrypt the message; throws LibEmiddleException on failure
-            var (updatedSession, encryptedPayload) = _doubleRatchetProtocol.Encrypt(session, message);
+            DoubleRatchetSession updatedSession;
+            EncryptedMessage? encryptedPayload;
+            try
+            {
+                (updatedSession, encryptedPayload) = _doubleRatchetProtocol.Encrypt(session, message);
+            }
+            catch (LibEmiddleException)
+            {
+                throw; // already typed — let it propagate
+            }
+            catch (Exception ex)
+            {
+                throw new LibEmiddleException(
+                    $"Failed to encrypt message for mailbox delivery: {ex.Message}",
+                    LibEmiddleErrorCode.TransportError, ex);
+            }
 
             // Update the session
             _sessions[recipientId] = updatedSession;
