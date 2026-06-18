@@ -4,7 +4,7 @@
 ![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-purple)
-![Version](https://img.shields.io/badge/version-2.6.0-blue)
+![Version](https://img.shields.io/badge/version-2.6.2-blue)
 
 A comprehensive, production-ready end-to-end encryption library for .NET applications implementing modern cryptographic protocols with a focus on security, privacy, and usability. Now with advanced features including post-quantum cryptography preparation, WebRTC transport, message batching, and enterprise-grade monitoring capabilities.
 
@@ -12,7 +12,7 @@ A comprehensive, production-ready end-to-end encryption library for .NET applica
 
 ```csharp
 // Install via NuGet
-// dotnet add package LibEmiddle --version 2.6.0
+// dotnet add package LibEmiddle --version 2.6.2
 
 using LibEmiddle.API;
 using LibEmiddle.Domain.Enums;
@@ -352,7 +352,7 @@ session.StateChanged += (sender, args) =>
 };
 ```
 
-## 🆕 Advanced Features (v2.5)
+## 🆕 Advanced Features
 
 ### 📦 Message Batching
 ```csharp
@@ -494,53 +494,13 @@ dotnet add package LibEmiddle --version 2.6.0
 
 ### Package Manager Console
 ```powershell
-Install-Package LibEmiddle -Version 2.6.0
+Install-Package LibEmiddle -Version 2.6.2
 ```
 
 ### Requirements
 - .NET 8.0 or later
 - Windows, Linux, or macOS
 - libsodium native library (included in package)
-
-## 🔄 Migration Guide
-
-### From v2.0 to v2.5
-Version 2.5 is backward compatible with v2.0. New features are opt-in via `FeatureFlags`:
-
-```csharp
-var options = new LibEmiddleClientOptions
-{
-    FeatureFlags = new FeatureFlags
-    {
-        EnableMessageBatching = true,      // Opt-in to batching
-        EnableDiagnostics = true,          // Opt-in to monitoring
-        EnableAdvancedGroupManagement = true // Opt-in to enhanced groups
-    }
-};
-```
-
-### From v1.x to v2.x
-Version 2.x introduces breaking changes. See [CHANGELOG.md](CHANGELOG.md) for detailed migration instructions.
-
-### Key Changes in v2.5:
-- **Feature Flags System** - Gradual rollout of new capabilities
-- **WebRTC Transport** - Peer-to-peer encrypted communication
-- **Message Batching** - Improved performance with compression
-- **Post-Quantum Preparation** - Future-ready cryptographic interfaces
-- **Enterprise Monitoring** - Built-in diagnostics and resilience management
-- **Advanced Key Rotation** - Sophisticated rotation policies
-
-### Migration Example:
-```csharp
-// v1.x (deprecated)
-var oldClient = new LibEmiddleManager();
-await oldClient.InitializeAsync();
-
-// v2.x (current)
-var options = new LibEmiddleClientOptions { /* configuration */ };
-var newClient = new LibEmiddleClient(options);
-await newClient.InitializeAsync();
-```
 
 ## 🔮 Future Roadmap
 
