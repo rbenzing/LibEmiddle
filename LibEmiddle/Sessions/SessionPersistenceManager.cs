@@ -382,25 +382,26 @@ namespace LibEmiddle.Sessions
                         // Write encrypted data
                         writer.Write(encryptedData);
                     }
-
-                    // Store the encryption key in secure storage
-                    bool keyStored = await _cryptoProvider.StoreKeyAsync($"session:{dto.SessionId}", key);
-                    if (!keyStored)
-                    {
-                        // Key wasn't persisted — the session file is unreadable without the key; remove it.
-                        KeyStorage.SecureDeleteFile(filePath);
-                        LoggingManager.LogError(nameof(SessionPersistenceManager),
-                            $"Failed to store encryption key for session {dto.SessionId}; session file removed.");
-                        return false;
-                    }
-
-                    return true;
                 }
                 finally
                 {
                     if (lockAcquired)
                         _ioLock.Release();
                 }
+
+                // Store the encryption key in secure storage — outside _ioLock so key-storage
+                // round-trips (DPAPI / file I/O) don't block other session I/O operations.
+                bool keyStored = await _cryptoProvider.StoreKeyAsync($"session:{dto.SessionId}", key);
+                if (!keyStored)
+                {
+                    // Key wasn't persisted — the session file is unreadable without the key; remove it.
+                    KeyStorage.SecureDeleteFile(filePath);
+                    LoggingManager.LogError(nameof(SessionPersistenceManager),
+                        $"Failed to store encryption key for session {dto.SessionId}; session file removed.");
+                    return false;
+                }
+
+                return true;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
