@@ -246,10 +246,11 @@ namespace LibEmiddle.Protocol
                 RotateRatchetKey(updatedSession);
             }
 
+            byte[]? messageKey = null;
             try
             {
                 // FIXED: Generate a message key and advance the chain using Signal-compliant derivation
-                byte[] messageKey = Sodium.DeriveMessageKey(updatedSession.SenderChainKey);
+                messageKey = Sodium.DeriveMessageKey(updatedSession.SenderChainKey);
                 updatedSession.SenderChainKey = Sodium.AdvanceChainKey(updatedSession.SenderChainKey);
 
                 // Encrypt the message
@@ -275,7 +276,7 @@ namespace LibEmiddle.Protocol
                 // Record the message in history if needed
                 if (rotationStrategy == KeyRotationStrategy.Standard)
                 {
-                    updatedSession.SentMessages[encryptedMessage.SenderMessageNumber] = messageKey;
+                    updatedSession.SentMessages[encryptedMessage.SenderMessageNumber] = (byte[])messageKey.Clone();
 
                     // Clean up old messages if we have too many
                     CleanupOldSentMessages(updatedSession);
@@ -286,7 +287,12 @@ namespace LibEmiddle.Protocol
             catch (Exception ex) when (ex is not LibEmiddleException)
             {
                 LoggingManager.LogError(nameof(DoubleRatchetProtocol), $"Encryption failed: {ex.Message}");
-                throw new LibEmiddleException($"Message encryption failed: {ex.Message}", LibEmiddleErrorCode.DecryptionFailed, ex);
+                throw new LibEmiddleException($"Message encryption failed: {ex.Message}", LibEmiddleErrorCode.EncryptionFailed, ex);
+            }
+            finally
+            {
+                if (messageKey != null)
+                    SecureMemory.SecureClear(messageKey);
             }
         }
 
@@ -435,16 +441,25 @@ namespace LibEmiddle.Protocol
                         }
 
                         // FIXED: Generate the message key for decryption using Signal-compliant derivation
-                        byte[] messageKey = Sodium.DeriveMessageKey(updatedSession.ReceiverChainKey);
-                        updatedSession.ReceiverChainKey = Sodium.AdvanceChainKey(updatedSession.ReceiverChainKey);
+                        byte[]? messageKey = null;
+                        try
+                        {
+                            messageKey = Sodium.DeriveMessageKey(updatedSession.ReceiverChainKey);
+                            updatedSession.ReceiverChainKey = Sodium.AdvanceChainKey(updatedSession.ReceiverChainKey);
 
-                        // Decrypt the message
-                        string decryptedMessage = DecryptWithKey(encryptedMessage, messageKey);
+                            // Decrypt the message
+                            string decryptedMessage = DecryptWithKey(encryptedMessage, messageKey);
 
-                        // Update the message number
-                        updatedSession.ReceiveMessageNumber = encryptedMessage.SenderMessageNumber + 1;
+                            // Update the message number
+                            updatedSession.ReceiveMessageNumber = encryptedMessage.SenderMessageNumber + 1;
 
-                        return (updatedSession, decryptedMessage);
+                            return (updatedSession, decryptedMessage);
+                        }
+                        finally
+                        {
+                            if (messageKey != null)
+                                SecureMemory.SecureClear(messageKey);
+                        }
                     }
                     catch (Exception ex) when (ex is not LibEmiddleException)
                     {

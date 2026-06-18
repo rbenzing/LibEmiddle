@@ -19,6 +19,9 @@ namespace LibEmiddle.Domain.Exceptions
         /// <summary>Decryption of a message or payload failed.</summary>
         DecryptionFailed,
 
+        /// <summary>Encryption of a message or payload failed.</summary>
+        EncryptionFailed,
+
         /// <summary>A transport-level error occurred (e.g. WebSocket send/receive failure).</summary>
         TransportError,
 
