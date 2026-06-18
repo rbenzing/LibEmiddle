@@ -2,6 +2,7 @@
   <!-- General properties for all projects in the solution -->
   <PropertyGroup>
     <Product>LibEmiddle</Product>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <Copyright>Copyright © $(Company) $([System.DateTime]::Now.Year)</Copyright>
     <Authors>Russell Benzing</Authors>
     <Company>Russell Benzing Inc</Company>

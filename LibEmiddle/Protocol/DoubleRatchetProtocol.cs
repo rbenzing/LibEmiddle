@@ -104,7 +104,6 @@ namespace LibEmiddle.Protocol
             string sessionId)
         {
             ArgumentNullException.ThrowIfNull(sharedKeyFromX3DH, nameof(sharedKeyFromX3DH));
-            ArgumentNullException.ThrowIfNull(receiverInitialKeyPair, nameof(receiverInitialKeyPair));
             ArgumentNullException.ThrowIfNull(senderEphemeralKeyPublic, nameof(senderEphemeralKeyPublic));
             ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
 

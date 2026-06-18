@@ -56,7 +56,6 @@ namespace LibEmiddle.Protocol
 
                 // Validate inputs
                 ArgumentNullException.ThrowIfNull(recipientBundle, nameof(recipientBundle));
-                ArgumentNullException.ThrowIfNull(senderIdentityKeyPair, nameof(senderIdentityKeyPair));
                 ArgumentException.ThrowIfNullOrEmpty(sessionId, nameof(sessionId));
 
                 // Validate the bundle

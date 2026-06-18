@@ -208,7 +208,6 @@ namespace LibEmiddle.Sessions
             CancellationToken ct = default)
         {
             ArgumentNullException.ThrowIfNull(sessionId, nameof(sessionId));
-            ArgumentNullException.ThrowIfNull(identityKeyPair, nameof(identityKeyPair));
 
             try
             {

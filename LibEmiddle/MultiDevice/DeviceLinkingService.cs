@@ -359,7 +359,6 @@ public sealed class DeviceLinkingService : IDeviceLinkingService, IDisposable
         byte[] deviceToRevokePublicKey,
         string? reason = null)
     {
-        ArgumentNullException.ThrowIfNull(userIdentityKeyPair, nameof(userIdentityKeyPair));
         ArgumentNullException.ThrowIfNull(userIdentityKeyPair.PublicKey, nameof(userIdentityKeyPair.PublicKey));
         ArgumentNullException.ThrowIfNull(userIdentityKeyPair.PrivateKey, nameof(userIdentityKeyPair.PrivateKey));
         ArgumentNullException.ThrowIfNull(deviceToRevokePublicKey, nameof(deviceToRevokePublicKey));

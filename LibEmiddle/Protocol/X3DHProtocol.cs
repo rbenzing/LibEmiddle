@@ -252,7 +252,6 @@ namespace LibEmiddle.Protocol
             KeyPair senderIdentityKeyPair)
         {
             ArgumentNullException.ThrowIfNull(recipientBundle, nameof(recipientBundle));
-            ArgumentNullException.ThrowIfNull(senderIdentityKeyPair, nameof(senderIdentityKeyPair));
 
             if (senderIdentityKeyPair.PublicKey == null) throw new ArgumentNullException(nameof(senderIdentityKeyPair.PublicKey));
             if (senderIdentityKeyPair.PrivateKey == null) throw new ArgumentNullException(nameof(senderIdentityKeyPair.PrivateKey));
