@@ -134,8 +134,24 @@ namespace LibEmiddle.Infrastructure
 
             if (DateTime.UtcNow - state.CircuitOpenedAt >= _options.CircuitBreakerPolicy.RecoveryTimeout)
             {
-                state.CircuitState = CircuitBreakerState.HalfOpen;
-                return;
+                // Atomically transition Open → HalfOpen so exactly one thread becomes
+                // the probe request. Interlocked.CompareExchange returns the value that
+                // was in _circuitState before the operation:
+                //   - If it equals Open, this thread won the CAS and is now the probe.
+                //   - If it differs, another thread already moved the state; check whether
+                //     the circuit is still in a permissive state before deciding to throw.
+                int prev = Interlocked.CompareExchange(
+                    ref state._circuitState,
+                    (int)CircuitBreakerState.HalfOpen,
+                    (int)CircuitBreakerState.Open);
+
+                if (prev == (int)CircuitBreakerState.Open)
+                    return; // this thread won the race and is the probe request
+
+                // Another thread already moved the state — allow through if the circuit
+                // is HalfOpen (parallel probes) or Closed (probe already succeeded).
+                if (state.CircuitState != CircuitBreakerState.Open)
+                    return;
             }
 
             throw new InvalidOperationException(
@@ -148,7 +164,7 @@ namespace LibEmiddle.Infrastructure
             Interlocked.Increment(ref state.SuccessfulExecutions);
             state.UpdateAverageTime(elapsed);
             state.LastExecutionTime = DateTime.UtcNow;
-            state.CircuitState = CircuitBreakerState.Closed;
+            Interlocked.Exchange(ref state._circuitState, (int)CircuitBreakerState.Closed);
             Interlocked.Exchange(ref state.ConsecutiveFailures, 0);
         }
 
@@ -165,8 +181,18 @@ namespace LibEmiddle.Infrastructure
                 && failures >= _options.CircuitBreakerPolicy.FailureThreshold
                 && state.CircuitState != CircuitBreakerState.Open)
             {
-                state.CircuitState = CircuitBreakerState.Open;
+                // Record the timestamp before the CAS so it is visible to other threads
+                // as soon as the Open state is published.
                 state.CircuitOpenedAt = DateTime.UtcNow;
+                Interlocked.CompareExchange(
+                    ref state._circuitState,
+                    (int)CircuitBreakerState.Open,
+                    (int)CircuitBreakerState.Closed);
+                // Also handle HalfOpen → Open (failed probe re-opens the circuit).
+                Interlocked.CompareExchange(
+                    ref state._circuitState,
+                    (int)CircuitBreakerState.Open,
+                    (int)CircuitBreakerState.HalfOpen);
             }
         }
 
@@ -200,7 +226,20 @@ namespace LibEmiddle.Infrastructure
             public long SuccessfulExecutions;
             public long FailedExecutions;
             public long ConsecutiveFailures;
-            public volatile CircuitBreakerState CircuitState = CircuitBreakerState.Closed;
+
+            // Backing field for the circuit breaker state. All reads and writes must go
+            // through Interlocked operations to ensure atomic, sequentially-consistent
+            // visibility across threads. Use the CircuitState property for reads.
+            public int _circuitState = (int)CircuitBreakerState.Closed;
+
+            /// <summary>
+            /// Atomic snapshot of the current circuit breaker state.
+            /// Mutate exclusively via <see cref="Interlocked.CompareExchange(ref int, int, int)"/>
+            /// or <see cref="Interlocked.Exchange(ref int, int)"/> on <see cref="_circuitState"/>.
+            /// </summary>
+            public CircuitBreakerState CircuitState =>
+                (CircuitBreakerState)Interlocked.CompareExchange(ref _circuitState, 0, 0);
+
             public DateTime CircuitOpenedAt;
             public DateTime? LastExecutionTime;
             public Exception? LastException;
@@ -216,7 +255,7 @@ namespace LibEmiddle.Infrastructure
                 Interlocked.Exchange(ref FailedExecutions, 0);
                 Interlocked.Exchange(ref ConsecutiveFailures, 0);
                 Interlocked.Exchange(ref _totalElapsedMs, 0);
-                CircuitState = CircuitBreakerState.Closed;
+                Interlocked.Exchange(ref _circuitState, (int)CircuitBreakerState.Closed);
                 LastExecutionTime = null;
                 LastException = null;
             }
