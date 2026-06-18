@@ -49,8 +49,9 @@ public interface ISessionManager : IDisposable
     /// <summary>
     /// Lists all available session identifiers from persistent storage.
     /// </summary>
+    /// <param name="ct">A cancellation token that can be used to cancel the operation.</param>
     /// <returns>A task that represents the asynchronous operation. The task result contains an array of session identifiers.</returns>
-    Task<string?[]> ListSessionsAsync();
+    Task<string?[]> ListSessionsAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Creates a direct message (chat) session with a specific recipient.

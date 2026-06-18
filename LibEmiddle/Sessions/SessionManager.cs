@@ -202,12 +202,12 @@ namespace LibEmiddle.Sessions
         }
 
         /// <inheritdoc/>
-        public async Task<string?[]> ListSessionsAsync()
+        public async Task<string?[]> ListSessionsAsync(CancellationToken ct = default)
         {
             ThrowIfDisposed();
 
             // Get from disk
-            return await _persistenceManager.ListSessionsAsync();
+            return await _persistenceManager.ListSessionsAsync(ct);
         }
 
         /// <inheritdoc/>
