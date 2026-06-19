@@ -1,12 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+		<TargetFramework>net8.0</TargetFramework>
 		<ImplicitUsings>disable</ImplicitUsings>
 		<Nullable>disable</Nullable>
 		<IsPackable>false</IsPackable>
 		<IsTestProject>true</IsTestProject>
 		<GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+		<!-- MSTEST0006: [ExpectedException] is still supported in MSTest 3.x; suppress advisory-only analyzers -->
+		<!-- MSTEST0039: Assert.ThrowsException is still valid; ThrowsExactly preference is advisory only -->
+		<WarningsNotAsErrors>$(WarningsNotAsErrors);MSTEST0006;MSTEST0039</WarningsNotAsErrors>
+		<NoWarn>$(NoWarn);MSTEST0006;MSTEST0039</NoWarn>
 	</PropertyGroup>
 
 	<ItemGroup>
