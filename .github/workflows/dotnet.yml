@@ -21,9 +21,10 @@ jobs:
       with:
         fetch-depth: 0
 
-    # Reads SDK version from global.json automatically — no dotnet-version: needed.
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
 
     - name: Determine Version
       id: version
@@ -86,6 +87,8 @@ jobs:
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
 
     - name: Determine Version
       id: version
