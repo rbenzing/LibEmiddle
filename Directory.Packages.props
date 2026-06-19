@@ -15,7 +15,6 @@
   <ItemGroup>
     <PackageVersion Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.100" />
     <PackageVersion Include="SecurityCodeScan.VS2019" Version="5.6.7" />
-    <PackageVersion Include="Microsoft.DotNet.PackageValidation" Version="1.0.5" />
   </ItemGroup>
 
   <!-- Test-only packages -->

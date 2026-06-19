@@ -27,6 +27,14 @@
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 	</PropertyGroup>
 
+	<!-- API compatibility gate: enforces identical API surface across all TFMs in this package.
+	     PackageValidationBaselineVersion is omitted because LibEmiddle is not yet published on
+	     nuget.org; add it once a baseline release exists (e.g. <PackageValidationBaselineVersion>2.6.0</PackageValidationBaselineVersion>).
+	     EnablePackageValidation is a built-in .NET SDK property (no NuGet package needed). -->
+	<PropertyGroup>
+		<EnablePackageValidation>true</EnablePackageValidation>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<None Include="../README.md" Pack="true" PackagePath="/" />
 		<None Include="../LICENSE" Pack="true" PackagePath="/" />
