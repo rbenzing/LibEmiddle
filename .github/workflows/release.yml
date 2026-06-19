@@ -70,9 +70,8 @@ jobs:
     
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 8.0.x
-    
+      # SDK version read from global.json
+
     - name: Update version files
       run: |
         VERSION="${{ needs.validate.outputs.version }}"
