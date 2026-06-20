@@ -3,7 +3,7 @@
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
-![.NET](https://img.shields.io/badge/.NET-8.0-purple)
+![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-purple)
 ![Version](https://img.shields.io/badge/version-2.6.2-blue)
 
 A comprehensive, production-ready end-to-end encryption library for .NET applications implementing modern cryptographic protocols with a focus on security, privacy, and usability. Now with advanced features including post-quantum cryptography preparation, WebRTC transport, message batching, and enterprise-grade monitoring capabilities.
@@ -489,7 +489,7 @@ client.KeyRotated += (sender, args) =>
 
 ### NuGet Package
 ```bash
-dotnet add package LibEmiddle --version 2.6.0
+dotnet add package LibEmiddle --version 2.6.2
 ```
 
 ### Package Manager Console
@@ -498,7 +498,7 @@ Install-Package LibEmiddle -Version 2.6.2
 ```
 
 ### Requirements
-- .NET 8.0 or later
+- .NET 8.0 or .NET 10.0 (both LTS)
 - Windows, Linux, or macOS
 - libsodium native library (included in package)
 

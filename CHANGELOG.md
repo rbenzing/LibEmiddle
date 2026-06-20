@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-06-19
+
+### Added
+- **Multi-Framework Targeting**: Library now targets both `net8.0` and `net10.0` (both LTS). NuGet package ships a `lib/net8.0/` and `lib/net10.0/` asset, giving consumers first-class builds on either runtime.
+- **Centralized Package Management**: All NuGet dependency versions centralised in `Directory.Packages.props`; no inline `Version=` attributes in project files.
+- **NuGet Package Source Mapping**: `NuGet.config` restricts all package resolution to `nuget.org`, preventing dependency-confusion attacks.
+- **Package Validation**: `EnablePackageValidation=true` enforces identical public API surface across both TFMs on every `dotnet pack`.
+- **CI TFM Matrix**: GitHub Actions now runs a `tfm: [net8.0, net10.0]` matrix axis so each framework is independently built and tested on every push.
+
+### Changed
+- **MSTest upgraded**: Test project bumped from 2.2.10 to 3.11.1.
+- **Microsoft.Extensions.\* upgraded**: `DependencyInjection.Abstractions` and `Logging.Abstractions` upgraded from 9.0.4 to 10.0.0, picking up native `net10.0` TFMs.
+- **Microsoft.CodeAnalysis.NetAnalyzers upgraded**: 8.0.0 → 10.0.100 (SDK RTM build).
+
+### Fixed
+- **CA2264**: Removed five dead `ArgumentNullException.ThrowIfNull()` calls on `KeyPair readonly struct` parameters (`DeviceLinkingService`, `ProtocolAdapter`, `DoubleRatchetProtocol`, `SessionPersistenceManager`, `X3DHProtocol`). `ThrowIfNull` on a non-nullable value type is a no-op; struct fields are already validated in the constructor.
+- **Microsoft.TestPlatform removed from library project**: The test-runner package was incorrectly referenced as a production dependency of `LibEmiddle.csproj`; it has been removed.
+
 ## [2.6.0] - 2026-03-21
 
 ### Added
