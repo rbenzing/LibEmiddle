@@ -1,12 +1,27 @@
-# LibEmiddle - Secure End-to-End Encryption for .NET
+# LibEmiddle
 
-![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
-![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)
-![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
-![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-purple)
-![Version](https://img.shields.io/badge/version-2.6.2-blue)
+<div align="center">
+
+[![Build](https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge)]()
+[![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen?style=for-the-badge)]()
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg?style=for-the-badge)](./LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![Version](https://img.shields.io/badge/version-2.6.2-blue?style=for-the-badge)]()
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/russellbenzing)
+
+**Secure end-to-end encryption for .NET — modern cryptographic protocols, production-ready**
+
+🔒 **End-to-End Encrypted** • 🔑 **X3DH + Double Ratchet** • 📱 **Multi-Device** • 🏢 **Enterprise-Ready**
+
+[Quick Start](#-quick-start) • [Features](#-core-features) • [Documentation](#-documentation) • [License](#-license)
+
+</div>
+
+---
 
 A comprehensive, production-ready end-to-end encryption library for .NET applications implementing modern cryptographic protocols with a focus on security, privacy, and usability. Now with advanced features including post-quantum cryptography preparation, WebRTC transport, message batching, and enterprise-grade monitoring capabilities.
+
+---
 
 ## 🚀 Quick Start
 
@@ -35,9 +50,12 @@ var chatSession = await client.CreateChatSessionAsync(recipientPublicKey, "user1
 var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 ```
 
+---
+
 ## ✨ Core Features
 
 ### 🔒 Advanced Cryptographic Protocols
+
 - **X3DH Key Exchange** - Extended Triple Diffie-Hellman for secure initial key agreement
 - **Double Ratchet Algorithm** - Continuous key rotation for forward secrecy
 - **AES-GCM Encryption** - Authenticated encryption with strong integrity guarantees
@@ -48,6 +66,7 @@ var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 - **Post-Removal Forward Secrecy** - Group chain key rotated immediately on member removal
 
 ### 💬 Communication Patterns
+
 - **One-to-One Messaging** - Secure private conversations with forward secrecy
 - **Group Messaging** - Efficient encrypted group chats with advanced member management
 - **Multi-Device Support** - Seamless synchronization with encrypted persistent device list
@@ -56,6 +75,7 @@ var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 - **Flexible Transport Layer** - HTTP and InMemory transports (WebRTC planned for v3.0)
 
 ### 🏗️ Architecture Highlights
+
 - **Unified Client API** - Single `LibEmiddleClient` for all operations (`IAsyncDisposable` support)
 - **Modular Design** - Pluggable transport, storage, and crypto providers
 - **Session Management** - Automatic session persistence and recovery with backup capabilities
@@ -64,6 +84,8 @@ var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 - **Feature Flags** - Gradual rollout and configuration of new capabilities (v2.5)
 - **Enterprise Monitoring** - Built-in diagnostics and resilience management (v2.5)
 - **Connection Pooling** - Optimized connection management for high throughput (v2.5)
+
+---
 
 ## 💬 Individual Chat Sessions
 
@@ -106,6 +128,8 @@ chatSession.MessageReceived += (sender, args) =>
 };
 ```
 
+---
+
 ## 🚀 Multi-Device Management
 
 ```csharp
@@ -138,6 +162,8 @@ foreach (var (deviceId, message) in syncMessages)
 // Revoke a compromised device
 await client.RevokeDeviceAsync(compromisedDevicePublicKey, "Device lost");
 ```
+
+---
 
 ## 🔐 Enhanced Group Messaging
 
@@ -182,6 +208,8 @@ await groupSession.RotateKeysAsync();
 await client.LeaveGroupAsync("team-secure-chat");
 ```
 
+---
+
 ## 📬 Mailbox Transport System
 
 LibEmiddle uses a flexible **mailbox transport system** for asynchronous encrypted message delivery. The transport layer handles message routing while encryption is managed by the Double Ratchet protocol.
@@ -189,6 +217,7 @@ LibEmiddle uses a flexible **mailbox transport system** for asynchronous encrypt
 ### Transport Types
 
 #### InMemory Transport (Testing & Development)
+
 ```csharp
 // Perfect for testing and local development
 var options = new LibEmiddleClientOptions
@@ -201,6 +230,7 @@ await client.InitializeAsync();
 ```
 
 #### HTTP Transport (Production)
+
 ```csharp
 // Production-ready HTTP REST API transport
 var options = new LibEmiddleClientOptions
@@ -265,6 +295,8 @@ Application → LibEmiddleClient → ChatSession → MailboxManager (encrypts)
 
 For a complete guide, see [Mailbox Transport Guide](Documentation/Mailbox-Transport-Guide.md) and [Message Flow Diagram](Documentation/Message-Flow-Sequence.md).
 
+---
+
 ## 🔒 Advanced Configuration
 
 ```csharp
@@ -319,6 +351,8 @@ var options = new LibEmiddleClientOptions
 using var client = new LibEmiddleClient(options);
 ```
 
+---
+
 ## 🔍 Session Management
 
 ```csharp
@@ -352,9 +386,12 @@ session.StateChanged += (sender, args) =>
 };
 ```
 
+---
+
 ## 🆕 Advanced Features
 
 ### 📦 Message Batching
+
 ```csharp
 // Enable message batching for improved throughput
 var options = new LibEmiddleClientOptions
@@ -379,6 +416,7 @@ await client.SendChatMessageAsync(recipientKey, "Message 3");
 ```
 
 ### 🔐 Post-Quantum Cryptography Preparation
+
 ```csharp
 // Configure post-quantum crypto algorithms (preparation for future)
 var options = new LibEmiddleClientOptions
@@ -396,6 +434,7 @@ using var client = new LibEmiddleClient(options);
 ```
 
 ### 📊 Enterprise Monitoring & Diagnostics
+
 ```csharp
 // Enable comprehensive monitoring and diagnostics
 var options = new LibEmiddleClientOptions
@@ -429,6 +468,7 @@ client.ResilienceManager.ConnectionRestored += (sender, args) =>
 ```
 
 ### 🏊‍♂️ Connection Pooling
+
 ```csharp
 // Configure connection pooling for high-throughput scenarios
 var options = new LibEmiddleClientOptions
@@ -448,6 +488,7 @@ using var client = new LibEmiddleClient(options);
 ```
 
 ### 🔄 Advanced Key Rotation
+
 ```csharp
 // Configure sophisticated key rotation policies
 var rotationPolicy = new KeyRotationPolicy
@@ -468,46 +509,60 @@ client.KeyRotated += (sender, args) =>
 };
 ```
 
+---
+
 ## 🛡️ Security Features
 
 ### Forward Secrecy & Post-Compromise Security
+
 - **Automatic Key Rotation** - Configurable rotation strategies
 - **Perfect Forward Secrecy** - Past messages remain secure even if keys are compromised
 - **Post-Compromise Security** - Future messages are secure after key compromise recovery
 
 ### Authentication & Integrity
+
 - **Message Authentication** - Every message is cryptographically authenticated
 - **Replay Protection** - Built-in protection against message replay attacks
 - **Tampering Detection** - Immediate detection of message modification attempts
 
 ### Memory Security
+
 - **Secure Memory Handling** - Sensitive data is properly cleared from memory
 - **Key Derivation** - HKDF for protocol keys; Argon2id (memory-hard, 64 MB) for password-based keys
 - **Constant-Time Operations** - Protection against timing attacks
 
+---
+
 ## 📦 Installation
 
 ### NuGet Package
+
 ```bash
 dotnet add package LibEmiddle --version 2.6.2
 ```
 
 ### Package Manager Console
+
 ```powershell
 Install-Package LibEmiddle -Version 2.6.2
 ```
 
 ### Requirements
+
 - .NET 8.0 or .NET 10.0 (both LTS)
 - Windows, Linux, or macOS
 - libsodium native library (included in package)
+
+---
 
 ## 🔮 Future Roadmap
 
 ### Planned Features
 
 #### WebRTC Transport (Under Development)
+
 Direct peer-to-peer encrypted communication using WebRTC data channels:
+
 - Low-latency P2P messaging without server intermediaries
 - NAT traversal with ICE/STUN/TURN support
 - Adaptive bitrate based on network conditions
@@ -531,12 +586,15 @@ var webRtcOptions = new LibEmiddleClientOptions
 ```
 
 #### Other Planned Enhancements
+
 - Real-time presence indicators
 - Message search and indexing
 - Advanced group permissions and roles
 - Cross-platform push notifications
 - Server-side message filtering
 - WebSocket transport with server push (alternative to polling)
+
+---
 
 ## 📄 License
 
@@ -545,6 +603,8 @@ This project is licensed under the **GNU Affero General Public License v3.0 (AGP
 ⚠️ **Important**: If you modify this software and provide it as a service over a network (e.g., SaaS), you must make the complete source code of your modified version available to all users.
 
 See [LICENSE](LICENSE) file for details or visit https://www.gnu.org/licenses/agpl-3.0.html
+
+---
 
 ## 🤝 Contributing
 
@@ -555,6 +615,8 @@ We welcome contributions! Please see our [contributing guidelines](CONTRIBUTING.
 3. Make your changes
 4. Add tests for new functionality
 5. Submit a pull request
+
+---
 
 ## 📚 Documentation
 
@@ -572,11 +634,29 @@ The [Documentation/](Documentation/) folder contains comprehensive technical doc
   - Message batching and compression flows
 - **Technical Specifications**: In-depth coverage of cryptographic protocols and security features
 
-## 📞 Support
+---
+
+## 👤 About the Author
+
+Built by **Russell Benzing**. Reach out at [me@russellbenzing.com](mailto:me@russellbenzing.com).
+
+---
+
+## 💬 Support
 
 - **Issues**: [GitHub Issues](https://github.com/rbenzing/LibEmiddle/issues)
-- **Security**: For security concerns, email Russell Benzing at [me@russellbenzing.com]
+- **Security**: For security concerns, email Russell Benzing at [me@russellbenzing.com](mailto:me@russellbenzing.com)
 - **Documentation**: See [Documentation/](Documentation/) folder for detailed technical documentation and sequence diagrams
+
+If LibEmiddle is useful to you, you can support the work:
+
+<div align="center">
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/russellbenzing)
+
+</div>
+
+---
 
 ## 🔗 References
 
