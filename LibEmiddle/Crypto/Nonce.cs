@@ -74,7 +74,11 @@ namespace LibEmiddle.Crypto
 
         public static byte[] GenerateNonce(ReadOnlySpan<byte> sessionContext, uint sequenceNumber)
         {
-            using var buffer = new SecureBuffer(Constants.NONCE_SIZE);
+            // The salt buffer is sized independently of the nonce: a previous revision allocated
+            // Constants.NONCE_SIZE (12) bytes and then sliced [..16], which threw on every call.
+            const int SaltSize = 16;
+
+            using var buffer = new SecureBuffer(SaltSize);
             var span = buffer.AsSpan();
 
             // Pure random for base
@@ -83,7 +87,7 @@ namespace LibEmiddle.Crypto
             // Session-specific derivation
             var derived = Sodium.HkdfDerive(
                 sessionContext,
-                span[..16], // Use part of random as salt
+                span,
                 "LibEmiddle-Nonce"u8,
                 Constants.NONCE_SIZE);
 

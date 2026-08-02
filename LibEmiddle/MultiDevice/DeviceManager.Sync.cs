@@ -88,8 +88,33 @@ public partial class DeviceManager
             return null;
         }
 
-        // If we have a sender hint, try that device first
-        if (senderHint != null)
+        // Tracks which stored device keys we have already attempted, so the fallback loop does
+        // not retry them. Keyed by the dictionary key (base64 X25519), which is unambiguous.
+        var attempted = new HashSet<string>(StringComparer.Ordinal);
+
+        // If we have a sender hint, try that device first.
+        //
+        // Linked devices are stored under their X25519 public key. Callers may hand us either the
+        // X25519 key or the Ed25519 identity key, and the two formats are indistinguishable by
+        // inspection, so try the hint verbatim BEFORE attempting an Ed25519->X25519 conversion.
+        // Sniffing first is not safe: about one in eight X25519 keys also validates as an Ed25519
+        // point, so conversion would silently yield a different key and the lookup would miss at
+        // random. Trying the raw bytes first makes the common case deterministic.
+        if (senderHint != null && senderHint.Length == Constants.X25519_KEY_SIZE)
+        {
+            string rawHintBase64 = Convert.ToBase64String(senderHint);
+            if (_linkedDevices.TryGetValue(rawHintBase64, out var rawDeviceInfo))
+            {
+                attempted.Add(rawHintBase64);
+
+                byte[]? result = TryProcessSyncMessageFromDevice(encryptedMessage, rawDeviceInfo.PublicKey);
+                if (result != null)
+                    return result;
+            }
+        }
+
+        // The hint was not a stored X25519 key; treat it as an Ed25519 identity key and convert.
+        if (senderHint != null && attempted.Count == 0)
         {
             byte[]? normalizedHint = NormalizeDeviceKey(senderHint);
             if (normalizedHint != null)
@@ -100,6 +125,8 @@ public partial class DeviceManager
 
                     if (_linkedDevices.TryGetValue(senderKeyBase64, out var deviceInfo))
                     {
+                        attempted.Add(senderKeyBase64);
+
                         byte[]? result = TryProcessSyncMessageFromDevice(encryptedMessage, deviceInfo.PublicKey);
                         if (result != null)
                             return result;
@@ -118,8 +145,10 @@ public partial class DeviceManager
             DeviceInfo deviceInfo = deviceEntry.Value;
             byte[] deviceKey = deviceInfo.PublicKey;
 
-            // Skip the hint device if we already tried it
-            if (senderHint != null && IsSameDeviceKey(deviceKey, senderHint))
+            // Skip only devices we have actually already attempted above. Comparing the stored
+            // key against the raw hint here used to skip the one device that could decrypt the
+            // message whenever the caller passed an X25519 hint.
+            if (!attempted.Add(deviceEntry.Key))
                 continue;
 
             // Create a fresh copy of the message for each attempt

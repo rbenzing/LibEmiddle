@@ -354,8 +354,11 @@ namespace LibEmiddle.Crypto
             if (ed25519PrivateKey == null)
                 throw new ArgumentNullException(nameof(ed25519PrivateKey));
 
+            // If the key is already 32 bytes it is an X25519 scalar. Return a COPY, never the
+            // caller's array: every call site clears the returned buffer in a finally block, and
+            // handing back the original would zero the caller's live private key.
             if (ed25519PrivateKey.Length == Constants.X25519_KEY_SIZE)
-                return ed25519PrivateKey; // if the key is 32 and not 64 then send it back
+                return (byte[])ed25519PrivateKey.Clone();
 
             if (ed25519PrivateKey.Length != Constants.ED25519_PRIVATE_KEY_SIZE)
                 throw new ArgumentException($"Ed25519 private key must be {Constants.ED25519_PRIVATE_KEY_SIZE} bytes.", nameof(ed25519PrivateKey));
@@ -427,17 +430,21 @@ namespace LibEmiddle.Crypto
             {
                 if (password != null)
                 {
-                    // Encrypt the key before storage
-                    byte[] encryptionKey = DeriveKeyFromPassword(password);
+                    // Derive with a fresh random salt per stored key. A fixed application-wide salt
+                    // would give every user with the same password an identical encryption key and
+                    // let one precomputation table attack every installation at once.
+                    byte[] salt = Sodium.GenerateRandomBytes(Sodium.PwhashSaltBytes);
+                    byte[] encryptionKey = DeriveKeyFromPassword(password, salt);
                     try
                     {
                         byte[] nonce = GenerateNonce(Constants.NONCE_SIZE);
                         byte[] encryptedKey = Encrypt(key, encryptionKey, nonce, null);
 
-                        // Store encrypted key with nonce using StoreData (which doesn't double-encrypt)
-                        byte[] combinedData = new byte[nonce.Length + encryptedKey.Length];
-                        nonce.AsSpan().CopyTo(combinedData.AsSpan(0));
-                        encryptedKey.AsSpan().CopyTo(combinedData.AsSpan(nonce.Length));
+                        // Layout: salt (16) || nonce (12) || ciphertext+tag
+                        byte[] combinedData = new byte[salt.Length + nonce.Length + encryptedKey.Length];
+                        salt.AsSpan().CopyTo(combinedData.AsSpan(0));
+                        nonce.AsSpan().CopyTo(combinedData.AsSpan(salt.Length));
+                        encryptedKey.AsSpan().CopyTo(combinedData.AsSpan(salt.Length + nonce.Length));
 
                         return Task.FromResult(_keyStorage.StoreData($"password-key:{keyId}", combinedData));
                     }
@@ -480,16 +487,28 @@ namespace LibEmiddle.Crypto
                     if (storedData == null)
                         return Task.FromResult<byte[]?>(null);
 
+                    // Layout: salt (16) || nonce (12) || ciphertext+tag
+                    int headerLength = Sodium.PwhashSaltBytes + Constants.NONCE_SIZE;
+                    if (storedData.Length <= headerLength)
+                    {
+                        LoggingManager.LogError(nameof(CryptoProvider),
+                            $"Stored password-protected key {keyId} is truncated.");
+                        return Task.FromResult<byte[]?>(null);
+                    }
+
+                    byte[] salt = new byte[Sodium.PwhashSaltBytes];
+                    storedData.AsSpan(0, Sodium.PwhashSaltBytes).CopyTo(salt);
+
                     // Key is encrypted, decrypt it
-                    byte[] encryptionKey = DeriveKeyFromPassword(password);
+                    byte[] encryptionKey = DeriveKeyFromPassword(password, salt);
                     try
                     {
                         // Extract nonce and encrypted key
                         byte[] nonce = new byte[Constants.NONCE_SIZE];
-                        byte[] encryptedKey = new byte[storedData.Length - Constants.NONCE_SIZE];
+                        byte[] encryptedKey = new byte[storedData.Length - headerLength];
 
-                        storedData.AsSpan(0, Constants.NONCE_SIZE).CopyTo(nonce);
-                        storedData.AsSpan(Constants.NONCE_SIZE).CopyTo(encryptedKey);
+                        storedData.AsSpan(Sodium.PwhashSaltBytes, Constants.NONCE_SIZE).CopyTo(nonce);
+                        storedData.AsSpan(headerLength).CopyTo(encryptedKey);
 
                         // Decrypt the key
                         return Task.FromResult<byte[]?>(Decrypt(encryptedKey, encryptionKey, nonce, null));

@@ -250,7 +250,12 @@ namespace LibEmiddle.Protocol
             {
                 // FIXED: Generate a message key and advance the chain using Signal-compliant derivation
                 messageKey = Sodium.DeriveMessageKey(updatedSession.SenderChainKey);
-                updatedSession.SenderChainKey = Sodium.AdvanceChainKey(updatedSession.SenderChainKey);
+
+                byte[] previousSenderChainKey = updatedSession.SenderChainKey;
+                updatedSession.SenderChainKey = Sodium.AdvanceChainKey(previousSenderChainKey);
+                // The superseded chain key is a clone owned by this session; zero it so a memory
+                // capture cannot re-derive already-sent message keys.
+                SecureMemory.SecureClear(previousSenderChainKey);
 
                 // Encrypt the message
                 byte[] plaintext = Encoding.UTF8.GetBytes(message);
@@ -263,6 +268,7 @@ namespace LibEmiddle.Protocol
                     SessionId = session.SessionId,
                     SenderDHKey = updatedSession.SenderRatchetKeyPair.PublicKey,
                     SenderMessageNumber = updatedSession.SendMessageNumber,
+                    PreviousChainLength = updatedSession.PreviousSendChainLength,
                     Ciphertext = ciphertext,
                     Nonce = nonce,
                     MessageId = Guid.NewGuid().ToString("N"),
@@ -272,14 +278,9 @@ namespace LibEmiddle.Protocol
                 // Increment the send message number
                 updatedSession.SendMessageNumber++;
 
-                // Record the message in history if needed
-                if (rotationStrategy == KeyRotationStrategy.Standard)
-                {
-                    updatedSession.SentMessages[encryptedMessage.SenderMessageNumber] = (byte[])messageKey.Clone();
-
-                    // Clean up old messages if we have too many
-                    CleanupOldSentMessages(updatedSession);
-                }
+                // Sent message keys are deliberately NOT retained. Keeping them would let anyone
+                // who obtains a persisted session decrypt previously sent traffic, which defeats
+                // the forward secrecy the ratchet exists to provide.
 
                 return (updatedSession, encryptedMessage);
             }
@@ -353,11 +354,19 @@ namespace LibEmiddle.Protocol
 
                         if (updatedSession.SkippedMessageKeys.TryGetValue(skippedMessageKeyId, out byte[]? skippedMsgKey))
                         {
-                            // Remove this key from the skipped keys
-                            updatedSession.SkippedMessageKeys.Remove(skippedMessageKeyId);
+                            try
+                            {
+                                string skippedPlaintext = DecryptWithKey(encryptedMessage, skippedMsgKey);
 
-                            // Decrypt the message using the skipped key
-                            return (updatedSession, DecryptWithKey(encryptedMessage, skippedMsgKey));
+                                // Consume the key only once decryption has actually succeeded.
+                                updatedSession.SkippedMessageKeys.Remove(skippedMessageKeyId);
+
+                                return (updatedSession, skippedPlaintext);
+                            }
+                            finally
+                            {
+                                SecureMemory.SecureClear(skippedMsgKey);
+                            }
                         }
 
                         bool isNewRatchetKey = false;
@@ -380,15 +389,22 @@ namespace LibEmiddle.Protocol
                             // Store current receiver key for later comparison
                             updatedSession.PreviousReceiverRatchetPublicKey = updatedSession.ReceiverRatchetPublicKey;
 
+                            // Drain any message keys the peer sent on the OLD chain that we never
+                            // received, before that chain is replaced. This must happen while
+                            // ReceiveMessageNumber still refers to the old chain.
+                            if (updatedSession.ReceiverChainKey != null &&
+                                updatedSession.PreviousReceiverRatchetPublicKey != null)
+                            {
+                                SkipReceiverMessageKeys(
+                                    updatedSession,
+                                    updatedSession.PreviousReceiverRatchetPublicKey,
+                                    updatedSession.ReceiveMessageNumber,
+                                    encryptedMessage.PreviousChainLength);
+                            }
+
                             // This is a message with a new ratchet key, we need to perform DH key exchange
                             updatedSession.ReceiverRatchetPublicKey = encryptedMessage.SenderDHKey;
                             updatedSession.ReceiveMessageNumber = 0;
-
-                            // If we have a receiver chain, we need to store all skipped message keys
-                            if (updatedSession.ReceiverChainKey != null && updatedSession.PreviousReceiverRatchetPublicKey != null)
-                            {
-                                SkipReceiverMessageKeysAsync(updatedSession);
-                            }
 
                             isNewRatchetKey = true;
                         }
@@ -405,7 +421,14 @@ namespace LibEmiddle.Protocol
                             {
                                 // FIXED: Use Signal-compliant ratchet key derivation
                                 var (newRootKey, newChainKey) = Sodium.DeriveRatchetKeys(updatedSession.RootKey, dhResult);
+
+                                byte[] previousRootKey = updatedSession.RootKey;
                                 updatedSession.RootKey = newRootKey;
+                                SecureMemory.SecureClear(previousRootKey);
+
+                                if (updatedSession.ReceiverChainKey != null)
+                                    SecureMemory.SecureClear(updatedSession.ReceiverChainKey);
+
                                 updatedSession.ReceiverChainKey = newChainKey;
                             }
                             finally
@@ -418,7 +441,11 @@ namespace LibEmiddle.Protocol
                             // The receiver should keep their current key pair because the sender is still using
                             // the receiver's current public key for DH calculations.
                             // A new key pair will be generated when the receiver actually sends a message.
+                            if (updatedSession.SenderChainKey != null)
+                                SecureMemory.SecureClear(updatedSession.SenderChainKey);
+
                             updatedSession.SenderChainKey = null; // Will be derived when sending
+                            updatedSession.PreviousSendChainLength = updatedSession.SendMessageNumber;
                             updatedSession.SendMessageNumber = 0;
                         }
 
@@ -444,7 +471,10 @@ namespace LibEmiddle.Protocol
                         try
                         {
                             messageKey = Sodium.DeriveMessageKey(updatedSession.ReceiverChainKey);
-                            updatedSession.ReceiverChainKey = Sodium.AdvanceChainKey(updatedSession.ReceiverChainKey);
+
+                            byte[] previousReceiverChainKey = updatedSession.ReceiverChainKey;
+                            updatedSession.ReceiverChainKey = Sodium.AdvanceChainKey(previousReceiverChainKey);
+                            SecureMemory.SecureClear(previousReceiverChainKey);
 
                             // Decrypt the message
                             string decryptedMessage = DecryptWithKey(encryptedMessage, messageKey);
@@ -492,47 +522,107 @@ namespace LibEmiddle.Protocol
                     session.ReceiverRatchetPublicKey,
                     session.ReceiveMessageNumber + i
                 );
-                session.SkippedMessageKeys[skippedKey] = Sodium.DeriveMessageKey(currentChainKey);
+                StoreSkippedMessageKey(session, skippedKey, Sodium.DeriveMessageKey(currentChainKey));
 
-                // Advance the chain
-                currentChainKey = Sodium.AdvanceChainKey(currentChainKey);
+                // Advance the chain, zeroing the key we just consumed
+                byte[] previous = currentChainKey;
+                currentChainKey = Sodium.AdvanceChainKey(previous);
+                SecureMemory.SecureClear(previous);
             }
 
             // Update the session chain key
             session.ReceiverChainKey = currentChainKey;
 
-            // Remove oldest skipped message keys if we have too many
-            if (session.SkippedMessageKeys.Count > _maxSkippedMessageKeys)
-            {
-                int keysToRemove = session.SkippedMessageKeys.Count - _maxSkippedMessageKeys;
-                var keysToRemoveList = session.SkippedMessageKeys.Keys.Take(keysToRemove).ToList();
-
-                foreach (var key in keysToRemoveList)
-                {
-                    session.SkippedMessageKeys.Remove(key);
-                }
-            }
+            TrimSkippedMessageKeys(session);
         }
 
         /// <summary>
         /// Skip all message keys in the previous receiver chain when a new ratchet arrives
         /// </summary>
-        private void SkipReceiverMessageKeysAsync(DoubleRatchetSession session)
+        /// <param name="session">The session being updated. Its receiver chain is advanced to the end.</param>
+        /// <param name="oldRatchetPublicKey">The ratchet public key the old receiving chain belongs to.</param>
+        /// <param name="firstUnclaimedNumber">The next message number expected on the old chain.</param>
+        /// <param name="previousChainLength">
+        /// The sender's PN: how many messages they sent on the old chain in total. Message numbers
+        /// in [firstUnclaimedNumber, previousChainLength) were sent but not yet received.
+        /// </param>
+        private void SkipReceiverMessageKeys(
+            DoubleRatchetSession session,
+            byte[] oldRatchetPublicKey,
+            uint firstUnclaimedNumber,
+            uint previousChainLength)
         {
-            // When a new ratchet key arrives, we should skip any remaining keys in the old receiver chain
-            // But we need to be careful not to skip too many keys
+            if (session.ReceiverChainKey == null)
+                return;
+
+            if (previousChainLength <= firstUnclaimedNumber)
+                return;
+
+            uint count = previousChainLength - firstUnclaimedNumber;
+            if (count > _maxSkippedMessageKeys)
+            {
+                throw new SecurityException(
+                    $"Too many skipped message keys across ratchet step: {count} > {_maxSkippedMessageKeys}");
+            }
 
             LoggingManager.LogDebug(nameof(DoubleRatchetProtocol),
-                $"Skipping receiver chain keys due to new ratchet key");
+                $"Draining {count} unclaimed key(s) from the previous receiving chain");
 
-            // Storing skipped keys from the old chain requires the caller to NOT have reset
-            // ReceiveMessageNumber yet (so we know the actual old message number range).
-            // The caller resets ReceiveMessageNumber = 0 before calling this method, so we
-            // cannot implement this safely here without restructuring Decrypt.
-            // This is intentionally left as a no-op until Decrypt passes the old
-            // ReceiveMessageNumber in. Out-of-order message delivery on chain transitions
-            // is tracked as a separate improvement item.
+            byte[] currentChainKey = session.ReceiverChainKey;
 
+            for (uint i = 0; i < count; i++)
+            {
+                var skippedKey = new SkippedMessageKey(oldRatchetPublicKey, firstUnclaimedNumber + i);
+                StoreSkippedMessageKey(session, skippedKey, Sodium.DeriveMessageKey(currentChainKey));
+
+                byte[] previous = currentChainKey;
+                currentChainKey = Sodium.AdvanceChainKey(previous);
+                SecureMemory.SecureClear(previous);
+            }
+
+            // The old chain is fully drained; it is replaced by the caller's new DH derivation.
+            SecureMemory.SecureClear(currentChainKey);
+            session.ReceiverChainKey = null;
+
+            TrimSkippedMessageKeys(session);
+        }
+
+        /// <summary>
+        /// Stores a skipped message key, zeroing any key it displaces.
+        /// </summary>
+        private static void StoreSkippedMessageKey(
+            DoubleRatchetSession session, SkippedMessageKey id, byte[] messageKey)
+        {
+            if (session.SkippedMessageKeys.TryGetValue(id, out byte[]? existing))
+                SecureMemory.SecureClear(existing);
+
+            session.SkippedMessageKeys[id] = messageKey;
+        }
+
+        /// <summary>
+        /// Bounds the skipped-key store, zeroing every evicted key.
+        /// </summary>
+        private void TrimSkippedMessageKeys(DoubleRatchetSession session)
+        {
+            if (session.SkippedMessageKeys.Count <= _maxSkippedMessageKeys)
+                return;
+
+            int keysToRemove = session.SkippedMessageKeys.Count - _maxSkippedMessageKeys;
+
+            // Evict by message number rather than Dictionary enumeration order, which is
+            // unspecified and does not correspond to insertion order.
+            var oldest = session.SkippedMessageKeys.Keys
+                .OrderBy(k => k.MessageNumber)
+                .Take(keysToRemove)
+                .ToList();
+
+            foreach (var key in oldest)
+            {
+                if (session.SkippedMessageKeys.TryGetValue(key, out byte[]? evicted))
+                    SecureMemory.SecureClear(evicted);
+
+                session.SkippedMessageKeys.Remove(key);
+            }
         }
 
         /// <summary>
@@ -547,8 +637,17 @@ namespace LibEmiddle.Protocol
 
                 case KeyRotationStrategy.Standard:
                 default:
-                    // In standard mode, rotate after 20 messages (but not on the very first message)
-                    return session.SendMessageNumber > 0 && session.SendMessageNumber % 20 == 0;
+                    // Never rotate on a send-count schedule.
+                    //
+                    // A DH ratchet step is only safe when it is a RESPONSE to a new ratchet key
+                    // from the peer, because the peer must already hold the public key we are
+                    // ratcheting against. Rotating unilaterally every N messages breaks that
+                    // invariant: if both sides rotate while neither has received the other's new
+                    // key, their DH inputs diverge and the session is permanently unrecoverable.
+                    // Forward secrecy within a chain is already provided by the symmetric ratchet
+                    // (each message key is derived then discarded); the DH ratchet is driven by
+                    // Decrypt() when a new SenderDHKey arrives.
+                    return false;
             }
         }
 
@@ -572,11 +671,22 @@ namespace LibEmiddle.Protocol
             {
                 // FIXED: Use Signal-compliant ratchet key derivation
                 var (newRootKey, newChainKey) = Sodium.DeriveRatchetKeys(session.RootKey, dhResult);
+
+                byte[] previousRootKey = session.RootKey;
                 session.RootKey = newRootKey;
+                SecureMemory.SecureClear(previousRootKey);
+
+                if (session.SenderChainKey != null)
+                    SecureMemory.SecureClear(session.SenderChainKey);
+
                 session.SenderChainKey = newChainKey;
 
-                // Update our ratchet key pair
+                // Update our ratchet key pair, zeroing the private key we are retiring
+                if (session.SenderRatchetKeyPair.PrivateKey != null)
+                    SecureMemory.SecureClear(session.SenderRatchetKeyPair.PrivateKey);
+
                 session.SenderRatchetKeyPair = newRatchetKeyPair;
+                session.PreviousSendChainLength = session.SendMessageNumber;
                 session.SendMessageNumber = 0;
 
                 LoggingManager.LogDebug(nameof(DoubleRatchetProtocol), "Rotated ratchet key pair");
@@ -585,25 +695,6 @@ namespace LibEmiddle.Protocol
             {
                 // Securely clear the DH result
                 SecureMemory.SecureClear(dhResult);
-            }
-        }
-
-        /// <summary>
-        /// Cleans up old sent messages from the session
-        /// </summary>
-        private void CleanupOldSentMessages(DoubleRatchetSession session)
-        {
-            // Max number of sent message keys to keep
-            const int MAX_SENT_MESSAGES = 100;
-
-            if (session.SentMessages.Count > MAX_SENT_MESSAGES)
-            {
-                // Sort keys and remove oldest
-                var oldestKeys = session.SentMessages.Keys.OrderBy(k => k).Take(session.SentMessages.Count - MAX_SENT_MESSAGES);
-                foreach (var key in oldestKeys.ToList())
-                {
-                    session.SentMessages.Remove(key);
-                }
             }
         }
 
@@ -624,7 +715,14 @@ namespace LibEmiddle.Protocol
                 encryptedMessage.Nonce,
                 null);
 
-            return Encoding.UTF8.GetString(decrypted);
+            try
+            {
+                return Encoding.UTF8.GetString(decrypted);
+            }
+            finally
+            {
+                SecureMemory.SecureClear(decrypted);
+            }
         }
 
         /// <summary>
@@ -636,21 +734,24 @@ namespace LibEmiddle.Protocol
                 throw new ArgumentNullException(nameof(original), "Cannot deep clone session: Original is null.");
 
             // Create a new session object
+            // Every byte array must be copied. Sharing a reference here would let the clone's
+            // SecureClear calls zero key material still owned by the caller's session.
             var clone = new DoubleRatchetSession
             {
                 SessionId = original.SessionId,
-                RootKey = original.RootKey,
+                RootKey = original.RootKey.ToArray(),
                 SenderChainKey = original.SenderChainKey?.ToArray(),
                 ReceiverChainKey = original.ReceiverChainKey?.ToArray(),
                 SenderRatchetKeyPair = new KeyPair
                 {
-                    PublicKey = original.SenderRatchetKeyPair.PublicKey,
-                    PrivateKey = original.SenderRatchetKeyPair.PrivateKey
+                    PublicKey = original.SenderRatchetKeyPair.PublicKey?.ToArray() ?? [],
+                    PrivateKey = original.SenderRatchetKeyPair.PrivateKey?.ToArray() ?? []
                 },
                 ReceiverRatchetPublicKey = original.ReceiverRatchetPublicKey?.ToArray(),
                 PreviousReceiverRatchetPublicKey = original.PreviousReceiverRatchetPublicKey?.ToArray(),
                 SendMessageNumber = original.SendMessageNumber,
                 ReceiveMessageNumber = original.ReceiveMessageNumber,
+                PreviousSendChainLength = original.PreviousSendChainLength,
                 SentMessages = new Dictionary<uint, byte[]>(),
                 SkippedMessageKeys = new Dictionary<SkippedMessageKey, byte[]>(),
                 IsInitialized = original.IsInitialized,

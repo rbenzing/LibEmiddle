@@ -50,5 +50,48 @@ namespace LibEmiddle.Core
                 "Invalid public key — neither Ed25519 nor X25519 validation passed.",
                 nameof(ed25519PublicKey));
         }
+
+        /// <summary>
+        /// Converts a public key to X25519 format using an explicitly declared input format.
+        /// </summary>
+        /// <remarks>
+        /// Prefer this over <see cref="ConvertEd25519PublicKeyToX25519(byte[])"/> whenever the
+        /// caller knows the key's format. Ed25519 and X25519 public keys are both 32 opaque bytes
+        /// and cannot be reliably told apart by inspection: roughly one in eight X25519 public keys
+        /// also decodes as a valid Ed25519 point, so format sniffing silently converts those keys
+        /// into a different (wrong) key.
+        /// </remarks>
+        /// <param name="publicKey">A 32-byte public key.</param>
+        /// <param name="inputIsEd25519">
+        /// True when <paramref name="publicKey"/> is an Ed25519 key that must be converted;
+        /// false when it is already an X25519 key and should only be validated and copied.
+        /// </param>
+        /// <returns>The key in X25519 format.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="publicKey"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when the key length is wrong or validation fails.</exception>
+        public static byte[] ConvertPublicKeyToX25519(byte[] publicKey, bool inputIsEd25519)
+        {
+            ArgumentNullException.ThrowIfNull(publicKey);
+
+            if (publicKey.Length != Constants.ED25519_PUBLIC_KEY_SIZE)
+            {
+                throw new ArgumentException(
+                    $"Invalid public key length: {publicKey.Length}. Expected 32 bytes.",
+                    nameof(publicKey));
+            }
+
+            if (inputIsEd25519)
+            {
+                if (!Sodium.ValidateEd25519PublicKey(publicKey))
+                    throw new ArgumentException("Key failed Ed25519 validation.", nameof(publicKey));
+
+                return Sodium.ConvertEd25519PublicKeyToX25519(publicKey);
+            }
+
+            if (!Sodium.ValidateX25519PublicKey(publicKey))
+                throw new ArgumentException("Key failed X25519 validation.", nameof(publicKey));
+
+            return (byte[])publicKey.Clone();
+        }
     }
 }

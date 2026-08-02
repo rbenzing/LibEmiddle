@@ -6,7 +6,7 @@
     <Copyright>Copyright © $(Company) $([System.DateTime]::Now.Year)</Copyright>
     <Authors>Russell Benzing</Authors>
     <Company>Russell Benzing Inc</Company>
-    <VersionPrefix>2.6.2</VersionPrefix>
+    <VersionPrefix>2.7.0</VersionPrefix>
     <VersionSuffix></VersionSuffix>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/rbenzing/LibEmiddle</PackageProjectUrl>

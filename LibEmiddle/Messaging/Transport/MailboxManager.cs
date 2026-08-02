@@ -554,14 +554,16 @@ namespace LibEmiddle.Messaging.Transport
             }
 
             // Convert to X25519 for key exchange if needed
+            // Copy in the already-X25519 case too: this buffer is local working key material and
+            // must never alias the long-lived identity key pair.
             byte[] x25519PrivateKey = _identityKeyPair.PrivateKey.Length != Constants.X25519_KEY_SIZE ?
                 Sodium.ConvertEd25519PrivateKeyToX25519(_identityKeyPair.PrivateKey).ToArray() :
-                _identityKeyPair.PrivateKey;
+                (byte[])_identityKeyPair.PrivateKey.Clone();
 
             // Ensure contact key is in X25519 format
             byte[] contactX25519Key = contactKey.Length != Constants.X25519_KEY_SIZE ?
                 Sodium.ConvertEd25519PublicKeyToX25519(contactKey).ToArray() :
-                contactKey;
+                (byte[])contactKey.Clone();
 
             // Perform key exchange  
             byte[] sharedSecret = Sodium.HkdfDerive(contactX25519Key, x25519PrivateKey);

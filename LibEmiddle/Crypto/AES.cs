@@ -114,7 +114,18 @@ namespace LibEmiddle.Crypto
 
             byte[] plaintext = Encoding.UTF8.GetBytes(message); // Changed from Encoding.Default
             byte[] nonce = Nonce.GenerateNonce();
-            byte[] ciphertext = AESEncrypt(plaintext, key.ToArray(), nonce);
+
+            byte[] keyCopy = key.ToArray();
+            byte[] ciphertext;
+            try
+            {
+                ciphertext = AESEncrypt(plaintext, keyCopy, nonce);
+            }
+            finally
+            {
+                SecureMemory.SecureClear(keyCopy);
+                SecureMemory.SecureClear(plaintext);
+            }
 
             return new EncryptedMessage
             {
@@ -136,14 +147,18 @@ namespace LibEmiddle.Crypto
             ArgumentNullException.ThrowIfNull(encryptedMessage, nameof(encryptedMessage));
             ArgumentNullException.ThrowIfNull(encryptedMessage.Ciphertext, "Ciphertext cannot be null");
             ArgumentNullException.ThrowIfNull(encryptedMessage.Nonce, "Nonce cannot be null");
-            ArgumentNullException.ThrowIfNull(key.ToArray(), nameof(key));
 
             if (key.Length != Constants.AES_KEY_SIZE)
                 throw new ArgumentException($"Key must be {Constants.AES_KEY_SIZE} bytes long", nameof(key));
 
+            // Single working copy of the key, zeroed on every path. The previous code called
+            // key.ToArray() twice — once purely as a null check on a freshly allocated array,
+            // which can never be null — and left both copies of the key on the heap.
+            byte[] keyCopy = key.ToArray();
+
             try
             {
-                byte[] plaintext = AESDecrypt(encryptedMessage.Ciphertext, key.ToArray(), encryptedMessage.Nonce);
+                byte[] plaintext = AESDecrypt(encryptedMessage.Ciphertext, keyCopy, encryptedMessage.Nonce);
 
                 // Validate the plaintext before converting to string
                 if (plaintext == null || plaintext.Length == 0)
@@ -167,6 +182,10 @@ namespace LibEmiddle.Crypto
             catch (CryptographicException ex)
             {
                 throw new CryptographicException("Message decryption failed. The key may be incorrect.", ex);
+            }
+            finally
+            {
+                SecureMemory.SecureClear(keyCopy);
             }
         }
 

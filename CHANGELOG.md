@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-08-02
+
+Security and protocol-correctness release. Fixes two key-handling defects that could zero or
+corrupt live private keys, three Double Ratchet deviations from the Signal specification, and a
+password-KDF weakness. All 546 unit tests pass on `net8.0` and `net10.0`.
+
+### Added
+- **Double Ratchet `PN` header field**: `EncryptedMessage.PreviousChainLength` and
+  `DoubleRatchetSession.PreviousSendChainLength` implement the Signal header's previous-chain-length
+  field, which is required to recover message keys left unclaimed in a receiving chain when a DH
+  ratchet step replaces it. Absent on messages from older versions, where it defaults to `0`.
+- **Explicit key-format conversion**: `KeyConversion.ConvertPublicKeyToX25519(byte[], bool inputIsEd25519)`
+  converts a public key using a caller-declared format instead of guessing. Prefer it over the
+  format-sniffing `ConvertEd25519PublicKeyToX25519(byte[])`.
+
+### Fixed
+- **Ed25519/X25519 key type confusion (critical)**: `KeyConversion.ConvertEd25519PublicKeyToX25519()`
+  identified a key's format by trying Ed25519 validation first. Ed25519 and X25519 public keys are
+  both 32 opaque bytes, and roughly **12.4%** of X25519 public keys (measured 2 486 / 20 000) also
+  decode as valid Ed25519 points, so that fraction of already-X25519 keys was silently converted into
+  a different key. `DeviceManager.ProcessSyncMessage()` now matches a sender hint against the stored
+  key verbatim before attempting any conversion, making device lookup deterministic. This was the
+  cause of intermittent `MultiDeviceSynchronization_ShouldRecoverFromMessageLoss` failures.
+- **Private key destroyed by its own callers (critical)**: `CryptoProvider.ConvertEd25519PrivateKeyToX25519()`
+  returned the caller's array unchanged when given a 32-byte key. All four call sites clear the
+  returned buffer in a `finally` block, so the call zeroed the live device/identity private key. It
+  now returns a copy. `MailboxManager` likewise no longer aliases `_identityKeyPair.PrivateKey`.
+- **Unilateral ratchet rotation broke sessions**: `KeyRotationStrategy.Standard` rotated the sender's
+  DH ratchet key every 20 messages regardless of whether the peer had received it. A DH ratchet step
+  is only valid as a *response* to a new peer ratchet key; when both parties rotated before receiving
+  the other's key, their DH inputs diverged and the session became permanently unrecoverable.
+  Rotation is now driven solely by `Decrypt()` on receipt of a new `SenderDHKey`.
+- **Out-of-order messages lost across ratchet steps**: `SkipReceiverMessageKeysAsync()` was a no-op.
+  It is replaced by `SkipReceiverMessageKeys()`, which uses the new `PN` field to derive and retain
+  the unclaimed keys of the outgoing chain before it is discarded.
+- **Sent message keys retained (forward secrecy)**: `Encrypt()` stored up to 100 used message keys in
+  `DoubleRatchetSession.SentMessages`, which is serialized to disk. Anyone obtaining a persisted
+  session could decrypt previously sent traffic. Message keys are no longer retained after use.
+- **Fixed application-wide Argon2id salt**: `StoreKeyAsync()`/`RetrieveKeyAsync()` derived their
+  encryption key with a hardcoded salt, so every user sharing a password shared an encryption key and
+  a single precomputation table applied to all installations. Each stored key now carries a fresh
+  random 16-byte salt. **Breaking:** the stored blob layout changed from `nonce‖ciphertext` to
+  `salt‖nonce‖ciphertext`; password-protected keys written by earlier versions cannot be read.
+- **X25519 small-order point blocklist was inert**: one of the three entries in
+  `Sodium.SMALL_ORDER_POINTS` was a hex string passed to `Convert.FromBase64String()`, decoding to 48
+  bytes and therefore never matching a 32-byte key. Replaced with the full 12-entry libsodium
+  blacklist, hex-decoded, including the non-canonical high-bit-set encodings.
+- **Session clone shared key material**: `DeepCloneSession()` copied every byte array except
+  `RootKey` and the ratchet key pair, which were shared by reference — so clearing the clone destroyed
+  the caller's session state. All arrays are now copied.
+- **Superseded keys left in memory**: retired root keys, chain keys, ratchet private keys, evicted
+  skipped-message keys, and decrypted plaintext buffers are now zeroed via `SecureMemory.SecureClear()`
+  on both success and failure paths.
+- **Skipped-key eviction order**: the skipped-message-key cache evicted via `Dictionary.Keys.Take()`,
+  whose enumeration order is unspecified and unrelated to age. Eviction is now ordered by message
+  number, and every evicted key is zeroed.
+- **Skipped-key consumption on failure**: a skipped message key was removed from the cache before
+  decryption was attempted, discarding it if decryption failed. It is now consumed only on success.
+- **`Nonce.GenerateNonce(ReadOnlySpan<byte>, uint)` always threw**: the method allocated a
+  `Constants.NONCE_SIZE` (12-byte) buffer and then sliced `[..16]`, guaranteeing
+  `ArgumentOutOfRangeException`. The salt buffer is now sized independently of the nonce.
+- **Redundant key copies in `AES`**: `Decrypt()` called `key.ToArray()` twice — once purely as a null
+  check on a freshly allocated array, which can never be null — leaving both copies of the key on the
+  heap unzeroed. Both `Encrypt()` and `Decrypt()` now use a single copy, cleared in a `finally`.
+
 ## [2.6.2] - 2026-06-19
 
 ### Added

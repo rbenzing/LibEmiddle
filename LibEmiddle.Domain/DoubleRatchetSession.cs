@@ -63,6 +63,14 @@ namespace LibEmiddle.Domain
         public uint ReceiveMessageNumber { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of messages sent in the previous sending chain, i.e. the value
+        /// <see cref="SendMessageNumber"/> held immediately before the most recent DH ratchet step.
+        /// Emitted on outgoing messages as the Double Ratchet header's <c>PN</c> field so the peer
+        /// can drain its old receiving chain before replacing it.
+        /// </summary>
+        public uint PreviousSendChainLength { get; set; }
+
+        /// <summary>
         /// Gets or sets the dictionary of message keys for sent messages.
         /// Used for handling out-of-order messages.
         /// Key is the message number, value is the message key.

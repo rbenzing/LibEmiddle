@@ -40,6 +40,17 @@ namespace LibEmiddle.Domain
         public uint SenderMessageNumber { get; set; }
 
         /// <summary>
+        /// Gets or sets the number of messages the sender sent in the PREVIOUS sending chain
+        /// before performing the DH ratchet step that produced <see cref="SenderDHKey"/>.
+        /// This is the Double Ratchet header's <c>PN</c> field: it tells the receiver how many
+        /// message keys remain unclaimed in the old receiving chain so they can be derived and
+        /// retained before the chain is replaced. Without it, messages that arrive out of order
+        /// across a ratchet step are permanently undecryptable.
+        /// Defaults to 0 for messages produced before this field existed.
+        /// </summary>
+        public uint PreviousChainLength { get; set; }
+
+        /// <summary>
         /// Gets or sets the encrypted message content.
         /// </summary>
         public byte[]? Ciphertext { get; set; }
@@ -74,6 +85,7 @@ namespace LibEmiddle.Domain
                 SenderIdentityKey = SenderIdentityKey?.ToArray(),
                 SenderDHKey = SenderDHKey?.ToArray(),
                 SenderMessageNumber = SenderMessageNumber,
+                PreviousChainLength = PreviousChainLength,
                 Ciphertext = Ciphertext?.ToArray(),
                 Nonce = Nonce?.ToArray(),
                 Timestamp = Timestamp,
@@ -130,6 +142,7 @@ namespace LibEmiddle.Domain
 
             // Other fields
             size += sizeof(uint); // SenderMessageNumber
+            size += sizeof(uint); // PreviousChainLength
             size += sizeof(long); // Timestamp
 
             // Headers
@@ -212,6 +225,19 @@ namespace LibEmiddle.Domain
                     {
                         throw new FormatException("Invalid SenderMessageNumber format");
                     }
+                }
+
+                // Handle PreviousChainLength (Double Ratchet PN); absent on legacy messages
+                if (dictionary.TryGetValue("PreviousChainLength", out var pnObj))
+                {
+                    message.PreviousChainLength = pnObj switch
+                    {
+                        uint pn => pn,
+                        int intPn when intPn >= 0 => (uint)intPn,
+                        long longPn when longPn >= 0 && longPn <= uint.MaxValue => (uint)longPn,
+                        string pnStr when uint.TryParse(pnStr, out uint parsedPn) => parsedPn,
+                        _ => throw new FormatException("Invalid PreviousChainLength format")
+                    };
                 }
 
                 // Optional fields with defaults
@@ -346,6 +372,7 @@ namespace LibEmiddle.Domain
                 ["Ciphertext"] = Convert.ToBase64String(Ciphertext),
                 ["Nonce"] = Convert.ToBase64String(Nonce),
                 ["SenderMessageNumber"] = SenderMessageNumber,
+                ["PreviousChainLength"] = PreviousChainLength,
                 ["SenderDHKey"] = Convert.ToBase64String(SenderDHKey),
                 ["Timestamp"] = Timestamp
             };
