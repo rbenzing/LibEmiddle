@@ -6,7 +6,7 @@
 [![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen?style=for-the-badge)]()
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg?style=for-the-badge)](./LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![Version](https://img.shields.io/badge/version-2.6.2-blue?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/version-2.7.0-blue?style=for-the-badge)]()
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/russellbenzing)
 
 **Secure end-to-end encryption for .NET — modern cryptographic protocols, production-ready**
@@ -27,7 +27,7 @@ A comprehensive, production-ready end-to-end encryption library for .NET applica
 
 ```csharp
 // Install via NuGet
-// dotnet add package LibEmiddle --version 2.6.2
+// dotnet add package LibEmiddle --version 2.7.0
 
 using LibEmiddle.API;
 using LibEmiddle.Domain.Enums;
@@ -60,10 +60,11 @@ var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 - **Double Ratchet Algorithm** - Continuous key rotation for forward secrecy
 - **AES-GCM Encryption** - Authenticated encryption with strong integrity guarantees
 - **Ed25519 & X25519** - Modern elliptic curve cryptography for digital signatures and key exchange
-- **Post-Quantum Cryptography** - Preparation for quantum-resistant algorithms (v2.5)
+- **Post-Quantum Cryptography** - API scaffolding only; see [Future Roadmap](#-future-roadmap) before use
 - **Advanced Key Rotation** - Sophisticated key rotation policies and monitoring
 - **Replay Attack Protection** - Per-sender message ID deduplication in both chat and group sessions
 - **Post-Removal Forward Secrecy** - Group chain key rotated immediately on member removal
+- **Out-of-Order Delivery** - Signal `PN` header field lets messages that arrive across a ratchet step still decrypt (v2.7)
 
 ### 💬 Communication Patterns
 
@@ -73,6 +74,7 @@ var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 - **Asynchronous Communication** - Robust mailbox system with delivery and read receipts
 - **Message Batching** - Efficient bulk messaging with compression support (v2.5)
 - **Flexible Transport Layer** - HTTP and InMemory transports (WebRTC planned for v3.0)
+- **Out-of-Order Tolerance** - Skipped message keys are retained across DH ratchet steps, so delayed or reordered messages still decrypt
 
 ### 🏗️ Architecture Highlights
 
@@ -82,8 +84,11 @@ var encryptedMessage = await chatSession.EncryptAsync("Hello, secure world!");
 - **Structured Exceptions** - `LibEmiddleException` with typed `LibEmiddleErrorCode` for precise error handling
 - **Event-Driven** - Real-time message handling with comprehensive events
 - **Feature Flags** - Gradual rollout and configuration of new capabilities (v2.5)
-- **Enterprise Monitoring** - Built-in diagnostics and resilience management (v2.5)
-- **Connection Pooling** - Optimized connection management for high throughput (v2.5)
+- **Enterprise Monitoring** - Built-in diagnostics, plus retry / circuit-breaker / timeout via `ResilienceManager`
+
+> **Note**: connection pooling, session backup, advanced key-rotation scheduling, WebRTC transport, and
+> post-quantum crypto are present as **API stubs only** — they satisfy their interfaces but perform no
+> real work. See [Feature Maturity](#-feature-maturity) before depending on them.
 
 ---
 
@@ -515,21 +520,74 @@ client.KeyRotated += (sender, args) =>
 
 ### Forward Secrecy & Post-Compromise Security
 
-- **Automatic Key Rotation** - Configurable rotation strategies
-- **Perfect Forward Secrecy** - Past messages remain secure even if keys are compromised
-- **Post-Compromise Security** - Future messages are secure after key compromise recovery
+- **Symmetric Ratchet** - Every message key is derived, used once, then zeroed; used keys are never persisted
+- **DH Ratchet** - A new Diffie-Hellman ratchet step runs on receipt of a peer's new ratchet key, giving post-compromise recovery
+- **Perfect Forward Secrecy** - Past messages remain secure even if current keys are compromised
+- **Post-Removal Forward Secrecy** - Group chain keys rotate immediately when a member is removed
+
+> **On `KeyRotationStrategy.Standard`** (changed in v2.7): the DH ratchet advances only in response to
+> a peer's new ratchet key, per the Signal specification. Earlier versions also rotated the sender's
+> ratchet key every 20 messages; because a DH ratchet step is only valid once the peer holds the new
+> public key, that could diverge both sides' DH inputs and permanently break a session where both
+> parties were actively sending. Forward secrecy within a chain comes from the symmetric ratchet and
+> is unaffected. `KeyRotationStrategy.AfterEveryMessage` is unchanged.
 
 ### Authentication & Integrity
 
-- **Message Authentication** - Every message is cryptographically authenticated
-- **Replay Protection** - Built-in protection against message replay attacks
-- **Tampering Detection** - Immediate detection of message modification attempts
+- **Message Authentication** - AES-256-GCM authenticates every message body
+- **Replay Protection** - 500-entry FIFO deduplication in chat sessions, per-sender message IDs in groups
+- **Tampering Detection** - Immediate detection of ciphertext modification
+- **Key Validation** - X25519 public keys are checked against the full libsodium small-order point blacklist
 
 ### Memory Security
 
-- **Secure Memory Handling** - Sensitive data is properly cleared from memory
-- **Key Derivation** - HKDF for protocol keys; Argon2id (memory-hard, 64 MB) for password-based keys
+- **Secure Memory Handling** - Key material is pinned and zeroed via `sodium_memzero`, including superseded root keys, chain keys, retired ratchet private keys, and evicted skipped-message keys
+- **Key Derivation** - HKDF for protocol keys; Argon2id (memory-hard, 64 MB, per-key random salt) for password-based keys
 - **Constant-Time Operations** - Protection against timing attacks
+
+---
+
+## 🧪 Feature Maturity
+
+Not every type in the public surface is backed by a real implementation. This table is the
+authoritative list — treat anything marked **Stub** as unavailable.
+
+| Area | Status | Notes |
+|------|--------|-------|
+| X3DH + Double Ratchet | ✅ Production | Signal-compliant key agreement and ratcheting |
+| AES-256-GCM / Ed25519 / X25519 | ✅ Production | All via libsodium |
+| Chat & group sessions | ✅ Production | Replay protection, forward secrecy, member management |
+| Multi-device linking & sync | ✅ Production | Encrypted persistent device list |
+| Session persistence | ✅ Production | Argon2id-derived keys, atomic writes |
+| HTTP / InMemory transport | ✅ Production | |
+| Resilience (retry, circuit breaker, timeout) | ✅ Production | `ResilienceManager` |
+| **Post-quantum crypto** | ⚠️ **Stub** | `PostQuantumCryptoStub` returns random bytes for all Kyber/Dilithium/Falcon operations and its `VerifyAsync` returns `true` for any correctly-sized signature. **Do not use for any security decision.** |
+| **WebRTC transport** | ⚠️ **Stub** | Echoes sent bytes back as received |
+| **Session backup manager** | ⚠️ **Stub** | Returns hardcoded checksums; writes nothing to disk |
+| **Connection pool** | ⚠️ **Stub** | Returns a connection that echoes sends as receives |
+| **Advanced key rotation scheduling** | ⚠️ **Stub** | `Task.Delay` then a synthetic result; no keys are rotated |
+
+All stubs are targeted for real implementations in v3.0.
+
+---
+
+## ⬆️ Upgrading to 2.7.0
+
+**Breaking — password-protected key storage.** `StoreKeyAsync()` / `RetrieveKeyAsync()` now derive
+their encryption key with a fresh random Argon2id salt per stored key instead of a fixed
+application-wide salt. The stored blob layout changed from `nonce‖ciphertext` to
+`salt‖nonce‖ciphertext`, so **password-protected keys written by 2.6.x and earlier cannot be read by
+2.7.0**. Re-store any affected keys before upgrading, or keep a 2.6.x reader available to migrate
+them. Keys stored without a password are unaffected, as are session files and device lists.
+
+**Behavioral — `KeyRotationStrategy.Standard`.** No longer performs a send-count-based DH ratchet
+rotation; see [Forward Secrecy & Post-Compromise Security](#forward-secrecy--post-compromise-security).
+No API change and no action required.
+
+**Wire format — additive and backward compatible.** `EncryptedMessage` gained
+`PreviousChainLength` (the Signal `PN` header field). It defaults to `0` when absent, so 2.7.0 reads
+messages from older peers. Older peers ignore the field. Out-of-order delivery across a ratchet step
+only recovers when *both* sides run 2.7.0+.
 
 ---
 
@@ -538,13 +596,13 @@ client.KeyRotated += (sender, args) =>
 ### NuGet Package
 
 ```bash
-dotnet add package LibEmiddle --version 2.6.2
+dotnet add package LibEmiddle --version 2.7.0
 ```
 
 ### Package Manager Console
 
 ```powershell
-Install-Package LibEmiddle -Version 2.6.2
+Install-Package LibEmiddle -Version 2.7.0
 ```
 
 ### Requirements
@@ -568,7 +626,7 @@ Direct peer-to-peer encrypted communication using WebRTC data channels:
 - Adaptive bitrate based on network conditions
 - Network quality monitoring and automatic fallback
 
-**Status**: Currently a stub implementation for API development. Not production-ready in v2.5.
+**Status**: API stub only — `WebRTCTransportStub` echoes sent bytes back as received bytes. Not functional.
 
 **Target**: v3.0 release
 
