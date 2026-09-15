@@ -19,11 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key, then impersonate that member. No *sending* path in the library ever produced an
   unsigned message, so this rejects only forgeries. (One receive path,
   `LibEmiddleClient.Helpers.cs`'s `RouteGroupMessageAsync`, does construct an
-  `EncryptedGroupMessage` without a `Signature` — but it also hardcodes
-  `RotationEpoch = 0` against an always-non-zero real value, which already broke the AES
-  associated data and made it unable to decrypt anything before this release. Nothing in
-  the library sends that message type and no test exercises it; it is a pre-existing,
-  non-functional route, not a consequence of this change.)
+  `EncryptedGroupMessage` without a `Signature` — but it also omits
+  `RotationEpoch`, taking the type's default of `0` against an always-non-zero real value,
+  which already broke the AES associated data and made it unable to decrypt anything before
+  this release. Nothing in the library sends that message type and no test exercises it; it
+  is a pre-existing, non-functional route, not a consequence of this change.)
 - **Null ciphertext no longer crashes the process (denial of service).** A malformed group
   message with a null `Ciphertext`, a valid member's `SenderIdentityKey`, and a well-formed
   nonce reached the AES decryption path uncaught: `Ciphertext?.Length == 0` is false when

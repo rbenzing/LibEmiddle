@@ -58,12 +58,15 @@ namespace LibEmiddle.Tests.Unit
             // Accepted characteristic of the frozen format, not a defect: null and
             // Array.Empty<byte>() both write a zero-length length-prefixed field
             // (00 00 00 00 with no following bytes), so they are indistinguishable in the
-            // signed byte string. This is safe because both group paths (ValidateGroupMessage
-            // and ProcessDistributionMessage) reject a null or empty SenderIdentityKey before
-            // ever building a signing payload or verifying a signature over one, so this
-            // ambiguity is never reachable with a value that would otherwise need to be
-            // distinguished. See GroupSignatureData's class remarks for the general
-            // length-prefix rationale.
+            // signed byte string. This is safe because both group paths reject a null or empty
+            // SenderIdentityKey before verifying a signature over one, so this ambiguity is
+            // never reachable with a value that would otherwise need to be distinguished.
+            // ValidateGroupMessage (Validation.cs) checks both null and empty explicitly.
+            // ProcessDistributionMessage (Keys.cs) checks only null at line 108; an empty key is
+            // rejected one line later by the membership check (GetMemberId(Array.Empty<byte>())
+            // produces an empty string not in _members). This empty-key rejection is safe only
+            // because nothing ever adds an empty identity key to _members.
+            // See GroupSignatureData's class remarks for the general length-prefix rationale.
             var withNullKey = new SenderKeyDistributionMessage
             {
                 GroupId = "g",
