@@ -117,7 +117,12 @@ public sealed partial class GroupSession
         // Validate signature. Mandatory: an absent signature is a rejection, not a skip.
         // An unsigned distribution would install distribution.ChainKey under
         // distribution.SenderIdentityKey, which is public — full member impersonation.
-        if (distribution.Signature is null || distribution.Signature.Length == 0)
+        // Length is checked here too: Sodium.SignVerifyDetached throws ArgumentException
+        // rather than returning false when the signature is not exactly
+        // Constants.ED25519_SIGNATURE_SIZE bytes, so a non-null, non-empty, wrong-length
+        // signature must be rejected before reaching it or it escapes as an unhandled
+        // exception out of ProcessDistributionMessage.
+        if (distribution.Signature is null || distribution.Signature.Length != Constants.ED25519_SIGNATURE_SIZE)
             return false;
 
         byte[] dataToSign = GetDistributionDataToSign(distribution);

@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wrapping `try` had only a `finally`, no `catch`. This was remotely triggerable by any
   party able to submit a group message. Null ciphertext is now rejected explicitly before
   it reaches the signing/decryption path.
+- **Wrong-length signature no longer crashes the process (denial of service).** A malformed
+  group message could carry a `Signature` that was non-null and non-empty but not exactly
+  64 bytes. `ValidateGroupMessage` and `ProcessDistributionMessage` rejected only a null or
+  zero-length signature, so a wrong-length one reached `Sodium.SignVerifyDetached`, which
+  throws `ArgumentException` rather than returning `false` for any length other than
+  `Constants.ED25519_SIGNATURE_SIZE`. That exception propagated out of
+  `DecryptMessageAsync`/`ProcessDistributionMessage` uncaught, crashing the receiving
+  session. Both guards now reject a wrong-length signature the same way they reject an
+  absent one.
 - **Replay-set eviction is now insertion-ordered.** Eviction used
   `ConcurrentDictionary.Keys.Take()`, which guarantees no ordering, so a recently seen
   message ID could be evicted while older ones survived.

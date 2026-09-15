@@ -206,5 +206,46 @@ namespace LibEmiddle.Tests.Unit
 
             Assert.IsNull(result, "A message with empty ciphertext must be rejected.");
         }
+
+        [TestMethod]
+        public async Task DecryptMessageAsync_WrongLengthSignature_IsRejectedWithoutThrowing()
+        {
+            // Sodium.SignVerifyDetached throws ArgumentException for any signature whose
+            // length is not exactly Constants.ED25519_SIGNATURE_SIZE (64 bytes) — it does not
+            // return false. The null/empty check alone lets a non-null, non-empty,
+            // wrong-length signature reach that call and escape as an unhandled exception
+            // out of DecryptMessageAsync. The guard must reject the wrong length itself.
+            var (sender, receiver) = await BuildPairAsync();
+            var message = await sender.EncryptMessageAsync("payload");
+            Assert.IsNotNull(message);
+            Assert.IsNotNull(message.Signature, "precondition: sender signed the message");
+
+            message.Signature = new byte[10]; // non-null, non-empty, wrong length
+
+            string result = await receiver.DecryptMessageAsync(message);
+
+            Assert.IsNull(result,
+                "A group message with a wrong-length signature must be rejected by validation, " +
+                "not reach Sodium.SignVerifyDetached where it would throw ArgumentException.");
+        }
+
+        [TestMethod]
+        public async Task ProcessDistributionMessage_WrongLengthSignature_IsRejectedWithoutThrowing()
+        {
+            // Same bug class as above, for the distribution path: a wrong-length signature
+            // must not reach Sodium.SignVerifyDetached, which throws rather than returning
+            // false for a length other than Constants.ED25519_SIGNATURE_SIZE.
+            var (sender, receiver) = await BuildPairAsync();
+            var distribution = sender.CreateDistributionMessage();
+            Assert.IsNotNull(distribution.Signature, "precondition: distributions are signed");
+
+            distribution.Signature = new byte[10]; // non-null, non-empty, wrong length
+
+            bool accepted = receiver.ProcessDistributionMessage(distribution);
+
+            Assert.IsFalse(accepted,
+                "A sender-key distribution with a wrong-length signature must be rejected by " +
+                "validation, not reach Sodium.SignVerifyDetached where it would throw.");
+        }
     }
 }

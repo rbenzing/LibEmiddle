@@ -33,7 +33,12 @@ public sealed partial class GroupSession
         // Verify signature. Mandatory: an absent signature is a rejection, not a skip.
         // SenderIdentityKey is public, so treating unsigned messages as valid would let
         // anyone with transport write access impersonate a member.
-        if (message.Signature is null || message.Signature.Length == 0)
+        // Length is checked here too: Sodium.SignVerifyDetached throws ArgumentException
+        // rather than returning false when the signature is not exactly
+        // Constants.ED25519_SIGNATURE_SIZE bytes, so a non-null, non-empty, wrong-length
+        // signature must be rejected before reaching it or it escapes as an unhandled
+        // exception out of DecryptMessageAsync.
+        if (message.Signature is null || message.Signature.Length != Constants.ED25519_SIGNATURE_SIZE)
             return false;
 
         byte[] dataToSign = GetMessageDataToSign(message);
