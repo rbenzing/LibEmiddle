@@ -160,6 +160,26 @@ namespace LibEmiddle.Tests.Unit
             var goodMessage = await sender.EncryptMessageAsync("Good message");
             Assert.IsNotNull(goodMessage);
 
+            // Positive control — before tampering anything, prove that BuildGroupMessageSigningPayload
+            // (below) still matches GroupSession's actual signing format. Take a message with its
+            // ciphertext left INTACT, replace its signature with one produced via the same
+            // replica + Sodium.SignDetached path the tampered message uses further down, and confirm
+            // it still decrypts to the expected plaintext. Use a distinct message (own MessageId) so
+            // this does not interact with the replay-bookkeeping assertions on goodMessage below.
+            var controlMessage = await sender.EncryptMessageAsync("Positive control message");
+            Assert.IsNotNull(controlMessage);
+            controlMessage.Signature = Sodium.SignDetached(BuildGroupMessageSigningPayload(controlMessage), senderKey.PrivateKey);
+
+            string controlResult = await receiver.DecryptMessageAsync(controlMessage);
+            Assert.AreEqual(
+                "Positive control message",
+                controlResult,
+                "BuildGroupMessageSigningPayload (this test file) has drifted from GroupSession's " +
+                "GetMessageDataToSign (GroupSession.Helpers.cs) and must be updated to match it. " +
+                "Without this, the corrupt-ciphertext assertions below would silently stop testing " +
+                "AES-decryption failure and start testing signature-verification failure instead, " +
+                "while still reporting green.");
+
             // Tamper: create a message with the SAME MessageId but corrupted ciphertext, then
             // re-sign it with the sender's identity key so it reaches the AES-decryption path
             // instead of being rejected earlier by (now-mandatory) signature verification.
