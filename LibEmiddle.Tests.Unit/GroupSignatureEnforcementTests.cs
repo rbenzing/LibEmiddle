@@ -83,5 +83,98 @@ namespace LibEmiddle.Tests.Unit
 
             Assert.IsNull(result, "A group message with an invalid signature must be rejected.");
         }
+
+        [TestMethod]
+        public async Task ProcessDistributionMessage_NullSignature_IsRejected()
+        {
+            var (sender, receiver) = await BuildPairAsync();
+            var distribution = sender.CreateDistributionMessage();
+            Assert.IsNotNull(distribution.Signature, "precondition: distributions are signed");
+
+            distribution.Signature = null;
+
+            bool accepted = receiver.ProcessDistributionMessage(distribution);
+
+            Assert.IsFalse(accepted,
+                "An unsigned sender-key distribution must be rejected. Accepting it installs " +
+                "an attacker-chosen chain key under a member's public identity key.");
+        }
+
+        [TestMethod]
+        public async Task ProcessDistributionMessage_ForgedSignature_IsRejected()
+        {
+            var (sender, receiver) = await BuildPairAsync();
+            var distribution = sender.CreateDistributionMessage();
+            Assert.IsNotNull(distribution.Signature);
+
+            distribution.Signature[0] ^= 0xFF;
+
+            bool accepted = receiver.ProcessDistributionMessage(distribution);
+
+            Assert.IsFalse(accepted, "A distribution with an invalid signature must be rejected.");
+        }
+
+        [TestMethod]
+        public async Task DecryptMessageAsync_SignatureFromAnotherMember_IsRejected()
+        {
+            // A signature must bind to the sender it claims. Taking a message genuinely
+            // signed by one member and relabelling it as another member's must fail, or
+            // any member could be impersonated by replaying another's traffic under their
+            // identity key.
+            var senderKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var otherKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var receiverKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            string groupId = $"sig-bind-{Guid.NewGuid()}";
+
+            var sender = new GroupSession(groupId, "Binding Test", senderKey);
+            var receiver = new GroupSession(groupId, "Binding Test", receiverKey);
+            await sender.ActivateAsync();
+            await receiver.ActivateAsync();
+
+            // Both sender and other are members, so the membership check passes and the
+            // signature check is what must reject the message.
+            await sender.AddMemberAsync(receiverKey.PublicKey);
+            await receiver.AddMemberAsync(senderKey.PublicKey);
+            await receiver.AddMemberAsync(otherKey.PublicKey);
+            receiver.ProcessDistributionMessage(sender.CreateDistributionMessage());
+
+            var message = await sender.EncryptMessageAsync("relabelled payload");
+            Assert.IsNotNull(message);
+
+            // Keep the genuine signature, claim a different member as the sender.
+            message.SenderIdentityKey = otherKey.PublicKey;
+
+            string result = await receiver.DecryptMessageAsync(message);
+
+            Assert.IsNull(result,
+                "A message signed by one member but labelled as another must be rejected.");
+        }
+
+        [TestMethod]
+        public async Task ProcessDistributionMessage_SignatureFromAnotherMember_IsRejected()
+        {
+            var senderKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var otherKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var receiverKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            string groupId = $"dist-bind-{Guid.NewGuid()}";
+
+            var sender = new GroupSession(groupId, "Binding Test", senderKey);
+            var receiver = new GroupSession(groupId, "Binding Test", receiverKey);
+            await sender.ActivateAsync();
+            await receiver.ActivateAsync();
+            await receiver.AddMemberAsync(senderKey.PublicKey);
+            await receiver.AddMemberAsync(otherKey.PublicKey);
+
+            var distribution = sender.CreateDistributionMessage();
+            Assert.IsNotNull(distribution.Signature);
+
+            distribution.SenderIdentityKey = otherKey.PublicKey;
+
+            bool accepted = receiver.ProcessDistributionMessage(distribution);
+
+            Assert.IsFalse(accepted,
+                "A distribution signed by one member but claiming another must be rejected. " +
+                "Accepting it would install the signer's chain key under the other member's identity.");
+        }
     }
 }

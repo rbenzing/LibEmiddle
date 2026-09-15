@@ -108,13 +108,15 @@ public sealed partial class GroupSession
         if (distribution.SenderIdentityKey == null || distribution.ChainKey == null)
             return false;
 
-        // Validate signature
-        if (distribution.Signature != null)
-        {
-            byte[] dataToSign = GetDistributionDataToSign(distribution);
-            if (!Sodium.SignVerifyDetached(distribution.Signature, dataToSign, distribution.SenderIdentityKey))
-                return false;
-        }
+        // Validate signature. Mandatory: an absent signature is a rejection, not a skip.
+        // An unsigned distribution would install distribution.ChainKey under
+        // distribution.SenderIdentityKey, which is public — full member impersonation.
+        if (distribution.Signature is null || distribution.Signature.Length == 0)
+            return false;
+
+        byte[] dataToSign = GetDistributionDataToSign(distribution);
+        if (!Sodium.SignVerifyDetached(distribution.Signature, dataToSign, distribution.SenderIdentityKey))
+            return false;
 
         // Check if sender is a member
         string senderId = GetMemberId(distribution.SenderIdentityKey);
