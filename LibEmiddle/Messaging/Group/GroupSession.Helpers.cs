@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text;
 using LibEmiddle.Abstractions;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
@@ -80,37 +79,10 @@ public sealed partial class GroupSession
     }
 
     private static byte[] GetMessageDataToSign(EncryptedGroupMessage message)
-    {
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        writer.Write(Encoding.UTF8.GetBytes(message.GroupId));
-        writer.Write(message.SenderIdentityKey);
-        writer.Write(message.Ciphertext);
-        writer.Write(message.Nonce);
-        writer.Write(message.Timestamp);
-        writer.Write(message.RotationEpoch);
-        writer.Write(Encoding.UTF8.GetBytes(message.MessageId ?? string.Empty));
-
-        return ms.ToArray();
-    }
+        => GroupSignatureData.ForMessage(message);
 
     private static byte[] GetDistributionDataToSign(SenderKeyDistributionMessage distribution)
-    {
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        writer.Write(Encoding.UTF8.GetBytes(distribution.GroupId!));
-        writer.Write(distribution.ChainKey!);
-        writer.Write(distribution.Iteration);
-        writer.Write(distribution.Timestamp);
-        if (distribution.SenderIdentityKey != null)
-        {
-            writer.Write(distribution.SenderIdentityKey);
-        }
-
-        return ms.ToArray();
-    }
+        => GroupSignatureData.ForDistribution(distribution);
 
     private void OnStateChanged(SessionState previousState, SessionState newState)
     {

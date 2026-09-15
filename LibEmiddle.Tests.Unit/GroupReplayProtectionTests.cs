@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -203,23 +204,47 @@ namespace LibEmiddle.Tests.Unit
             Assert.AreEqual("Good message", goodResult);
         }
 
-        // Mirrors the private wire format GroupSession.GetMessageDataToSign builds internally,
-        // so a test can produce a signature that ValidateGroupMessage will accept for a message
-        // it has tampered with after the sender originally signed it.
+        // Mirrors the private wire format GroupSession.GetMessageDataToSign builds internally
+        // (via GroupSignatureData.ForMessage), so a test can produce a signature that
+        // ValidateGroupMessage will accept for a message it has tampered with after the sender
+        // originally signed it.
+        //
+        // Every field is length-prefixed with a 4-byte big-endian unsigned integer so that a
+        // byte string corresponds to exactly one decomposition into fields (see
+        // LibEmiddle/Messaging/Group/GroupSignatureData.cs for the rationale).
         private static byte[] BuildGroupMessageSigningPayload(EncryptedGroupMessage message)
         {
             using var ms = new MemoryStream();
-            using var writer = new BinaryWriter(ms);
 
-            writer.Write(Encoding.UTF8.GetBytes(message.GroupId));
-            writer.Write(message.SenderIdentityKey);
-            writer.Write(message.Ciphertext);
-            writer.Write(message.Nonce);
-            writer.Write(message.Timestamp);
-            writer.Write(message.RotationEpoch);
-            writer.Write(Encoding.UTF8.GetBytes(message.MessageId ?? string.Empty));
+            WriteField(ms, Encoding.UTF8.GetBytes(message.GroupId ?? string.Empty));
+            WriteField(ms, message.SenderIdentityKey ?? Array.Empty<byte>());
+            WriteField(ms, message.Ciphertext ?? Array.Empty<byte>());
+            WriteField(ms, message.Nonce ?? Array.Empty<byte>());
+            WriteInt64(ms, message.Timestamp);
+            WriteInt64(ms, message.RotationEpoch);
+            WriteField(ms, Encoding.UTF8.GetBytes(message.MessageId ?? string.Empty));
 
             return ms.ToArray();
+        }
+
+        private static void WriteField(Stream stream, byte[] value)
+        {
+            WriteUInt32(stream, (uint)value.Length);
+            stream.Write(value, 0, value.Length);
+        }
+
+        private static void WriteUInt32(Stream stream, uint value)
+        {
+            Span<byte> buffer = stackalloc byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32BigEndian(buffer, value);
+            stream.Write(buffer);
+        }
+
+        private static void WriteInt64(Stream stream, long value)
+        {
+            Span<byte> buffer = stackalloc byte[sizeof(long)];
+            BinaryPrimitives.WriteInt64BigEndian(buffer, value);
+            stream.Write(buffer);
         }
 
         // ------------------------------------------------------------------
