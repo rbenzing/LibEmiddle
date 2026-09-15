@@ -62,6 +62,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   peers, or vice versa.** All members of a group must upgrade together. One-to-one chat
   sessions are unaffected.
 
+  **This failure is silent.** Group messages carry no protocol-version field, and
+  `ProtocolVersion.IsCompatible` treats every 2.x peer as compatible, so a mixed-version
+  group does not detect the mismatch. Cross-version messages are rejected one at a time and
+  `DecryptMessageAsync` returns `null` — no exception reaches the caller. The rejections are
+  recorded via `LoggingManager.LogSecurityEvent` (message: "signature verification failed"),
+  so **enable security-event logging before upgrading a group incrementally**, or the
+  symptom is simply that some members stop receiving messages with no error surfaced.
+
+  **Note on version numbering.** `VERSIONING.md` reserves MAJOR for "breaking changes to
+  the public API or protocol", so by that rule this change belongs in 3.0.0. It ships as a
+  minor deliberately: the public API is unchanged, and the backward-compatible security
+  fixes above were judged too important to hold behind the v3.0 milestone. Do not infer
+  from the version number that 2.7.x and 2.8.0 group members interoperate — they do not.
+
 ## [2.7.0] - 2026-08-02
 
 Security and protocol-correctness release. Fixes two key-handling defects that could zero or
