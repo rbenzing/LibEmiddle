@@ -176,5 +176,35 @@ namespace LibEmiddle.Tests.Unit
                 "A distribution signed by one member but claiming another must be rejected. " +
                 "Accepting it would install the signer's chain key under the other member's identity.");
         }
+
+        [TestMethod]
+        public async Task DecryptMessageAsync_NullCiphertext_IsRejectedWithoutThrowing()
+        {
+            var (sender, receiver) = await BuildPairAsync();
+            var message = await sender.EncryptMessageAsync("payload");
+            Assert.IsNotNull(message);
+
+            message.Ciphertext = null;
+
+            string result = await receiver.DecryptMessageAsync(message);
+
+            Assert.IsNull(result,
+                "A message with null ciphertext must be rejected by validation, not reach " +
+                "the signing-data serialiser where it would throw.");
+        }
+
+        [TestMethod]
+        public async Task DecryptMessageAsync_EmptyCiphertext_IsRejected()
+        {
+            var (sender, receiver) = await BuildPairAsync();
+            var message = await sender.EncryptMessageAsync("payload");
+            Assert.IsNotNull(message);
+
+            message.Ciphertext = Array.Empty<byte>();
+
+            string result = await receiver.DecryptMessageAsync(message);
+
+            Assert.IsNull(result, "A message with empty ciphertext must be rejected.");
+        }
     }
 }

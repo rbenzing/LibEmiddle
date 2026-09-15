@@ -14,8 +14,13 @@ public sealed partial class GroupSession
 
     private bool ValidateGroupMessage(EncryptedGroupMessage message)
     {
-        // Basic validation
-        if (message.Ciphertext?.Length == 0 || message.Nonce?.Length != Constants.NONCE_SIZE)
+        // Basic validation.
+        // Note: 'Ciphertext?.Length == 0' is false when Ciphertext is null, so the null
+        // case must be tested explicitly or it reaches the signing-data serialiser.
+        if (message.Ciphertext is null || message.Ciphertext.Length == 0)
+            return false;
+
+        if (message.Nonce?.Length != Constants.NONCE_SIZE)
             return false;
 
         if (message.SenderIdentityKey == null || message.SenderIdentityKey?.Length == 0 || message.Timestamp <= 0)
