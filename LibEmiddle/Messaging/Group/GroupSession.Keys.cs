@@ -108,6 +108,12 @@ public sealed partial class GroupSession
         if (distribution.SenderIdentityKey == null || distribution.ChainKey == null)
             return false;
 
+        // Check if sender is a member. Perform the cheap membership lookup before the
+        // expensive Ed25519 signature verification to short-circuit non-members early.
+        string senderId = GetMemberId(distribution.SenderIdentityKey);
+        if (!_members.ContainsKey(senderId))
+            return false;
+
         // Validate signature. Mandatory: an absent signature is a rejection, not a skip.
         // An unsigned distribution would install distribution.ChainKey under
         // distribution.SenderIdentityKey, which is public — full member impersonation.
@@ -116,11 +122,6 @@ public sealed partial class GroupSession
 
         byte[] dataToSign = GetDistributionDataToSign(distribution);
         if (!Sodium.SignVerifyDetached(distribution.Signature, dataToSign, distribution.SenderIdentityKey))
-            return false;
-
-        // Check if sender is a member
-        string senderId = GetMemberId(distribution.SenderIdentityKey);
-        if (!_members.ContainsKey(senderId))
             return false;
 
         // Store the sender key state
