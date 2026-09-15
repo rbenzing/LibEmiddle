@@ -1,6 +1,11 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Buffers.Binary;
+using System.IO;
+using System.Reflection;
+using System.Text;
 using System.Threading.Tasks;
+using LibEmiddle.Core;
 using LibEmiddle.Crypto;
 using LibEmiddle.Domain;
 using LibEmiddle.Domain.Enums;
@@ -51,6 +56,99 @@ namespace LibEmiddle.Tests.Unit
             sender.ProcessDistributionMessage(receiver.CreateDistributionMessage());
 
             return (sender, receiver);
+        }
+
+        /// <summary>
+        /// Same as <see cref="BuildPairAsync"/> but also returns the sender's raw key pair, so
+        /// a test can re-sign a message it has tampered with after the sender originally signed
+        /// it (needed to isolate a guard that runs BEFORE signature verification from signature
+        /// verification itself).
+        /// </summary>
+        private async Task<(GroupSession sender, GroupSession receiver, KeyPair senderKey)> BuildPairWithSenderKeyAsync()
+        {
+            var senderKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var receiverKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            string groupId = $"sig-enforce-{Guid.NewGuid()}";
+            const string groupName = "Signature Enforcement Group";
+
+            var sender = new GroupSession(groupId, groupName, senderKey);
+            var receiver = new GroupSession(groupId, groupName, receiverKey);
+
+            await sender.ActivateAsync();
+            await receiver.ActivateAsync();
+
+            await sender.AddMemberAsync(receiverKey.PublicKey);
+            await receiver.AddMemberAsync(senderKey.PublicKey);
+
+            receiver.ProcessDistributionMessage(sender.CreateDistributionMessage());
+            sender.ProcessDistributionMessage(receiver.CreateDistributionMessage());
+
+            return (sender, receiver, senderKey);
+        }
+
+        // Mirrors the private wire format GroupSession.GetMessageDataToSign builds internally
+        // (via GroupSignatureData.ForMessage), including its null-coalescing of Ciphertext to
+        // Array.Empty<byte>() — see LibEmiddle/Messaging/Group/GroupSignatureData.cs. This lets
+        // a test produce a signature that ValidateGroupMessage's signature check would accept
+        // for a message it has tampered with, INCLUDING a message whose Ciphertext is null,
+        // isolating the explicit ciphertext guard (which runs before signature verification)
+        // from signature verification itself.
+        private const byte MessageDomainTag = 0x01;
+
+        private static byte[] BuildGroupMessageSigningPayload(EncryptedGroupMessage message)
+        {
+            using var ms = new MemoryStream();
+
+            ms.WriteByte(MessageDomainTag);
+            WriteField(ms, Encoding.UTF8.GetBytes(message.GroupId ?? string.Empty));
+            WriteField(ms, message.SenderIdentityKey ?? Array.Empty<byte>());
+            WriteField(ms, message.Ciphertext ?? Array.Empty<byte>());
+            WriteField(ms, message.Nonce ?? Array.Empty<byte>());
+            WriteInt64(ms, message.Timestamp);
+            WriteInt64(ms, message.RotationEpoch);
+            WriteField(ms, Encoding.UTF8.GetBytes(message.MessageId ?? string.Empty));
+
+            return ms.ToArray();
+        }
+
+        private static void WriteField(Stream stream, byte[] value)
+        {
+            WriteUInt32(stream, (uint)value.Length);
+            stream.Write(value, 0, value.Length);
+        }
+
+        private static void WriteUInt32(Stream stream, uint value)
+        {
+            Span<byte> buffer = stackalloc byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32BigEndian(buffer, value);
+            stream.Write(buffer);
+        }
+
+        private static void WriteInt64(Stream stream, long value)
+        {
+            Span<byte> buffer = stackalloc byte[sizeof(long)];
+            BinaryPrimitives.WriteInt64BigEndian(buffer, value);
+            stream.Write(buffer);
+        }
+
+        // Invokes the private GroupSession.ValidateGroupMessage directly via reflection.
+        //
+        // This is necessary (not merely convenient) for the null/empty-ciphertext tests below:
+        // DecryptMessageAsync wraps the AES-decryption step in a catch-all that returns null for
+        // ANY exception, including the ArgumentNullException/CryptographicException that
+        // AES.AESDecrypt throws for a null or empty ciphertext. So even with the explicit
+        // ciphertext guard in ValidateGroupMessage deleted entirely, a message with null or
+        // empty Ciphertext that reaches AES decryption is independently turned into a null
+        // result there too -- DecryptMessageAsync's return value alone cannot distinguish
+        // "rejected by the guard" from "rejected because AES threw and the exception was
+        // swallowed downstream". Calling ValidateGroupMessage directly removes that confound.
+        private static bool InvokeValidateGroupMessage(GroupSession session, EncryptedGroupMessage message)
+        {
+            var method = typeof(GroupSession).GetMethod("ValidateGroupMessage",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(method, "GroupSession.ValidateGroupMessage was not found via reflection " +
+                "(method renamed or removed) — this test needs updating to match.");
+            return (bool)method!.Invoke(session, new object[] { message })!;
         }
 
         [TestMethod]
@@ -118,17 +216,36 @@ namespace LibEmiddle.Tests.Unit
         public async Task DecryptMessageAsync_SignatureFromAnotherMember_IsRejected()
         {
             // A signature must bind to the sender it claims. Taking a message genuinely
-            // signed by one member and relabelling it as another member's must fail, or
-            // any member could be impersonated by replaying another's traffic under their
-            // identity key.
+            // signed by one member and relabelling it as another member's must fail.
+            //
+            // WHAT THIS TEST DOES AND DOES NOT PROVE: `receiver` installs sender-key state for
+            // `other` (by processing `other`'s own distribution message) before the relabelled
+            // message is decrypted. This closes the trivial, unrepresentative way this test used
+            // to pass: without that installed state, `_senderKeys.TryGetValue` in
+            // GroupSession.Messaging.cs would miss and reject the message BEFORE signature
+            // binding is ever evaluated, so the test would pass even with binding verification
+            // deleted entirely.
+            //
+            // Even with that gate open, this test does NOT fully isolate signature binding from
+            // AES decryption: `other`'s chain key is independently generated by `other`'s own
+            // session and can never decrypt ciphertext that `sender` produced with sender's own
+            // chain key, so the relabelled message is also rejected at AES decryption -- it would
+            // be rejected here even if binding verification were skipped entirely. The message
+            // path appears to be structurally incapable of isolating binding from decryption this
+            // way. The genuine, isolated proof that a relabelled signature is rejected BY
+            // SIGNATURE VERIFICATION (and not some other reason) is
+            // ProcessDistributionMessage_SignatureFromAnotherMember_IsRejected below, which has
+            // no analogous decryption step to confound it.
             var senderKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var otherKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             var receiverKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
             string groupId = $"sig-bind-{Guid.NewGuid()}";
 
             var sender = new GroupSession(groupId, "Binding Test", senderKey);
+            var other = new GroupSession(groupId, "Binding Test", otherKey);
             var receiver = new GroupSession(groupId, "Binding Test", receiverKey);
             await sender.ActivateAsync();
+            await other.ActivateAsync();
             await receiver.ActivateAsync();
 
             // Both sender and other are members, so the membership check passes and the
@@ -137,6 +254,10 @@ namespace LibEmiddle.Tests.Unit
             await receiver.AddMemberAsync(senderKey.PublicKey);
             await receiver.AddMemberAsync(otherKey.PublicKey);
             receiver.ProcessDistributionMessage(sender.CreateDistributionMessage());
+            // Open the sender-key gate for `other` too, via other's own genuine distribution
+            // message, so the relabelled message below is not rejected merely because receiver
+            // has no chain-key state for `other` at all (see the comment above).
+            receiver.ProcessDistributionMessage(other.CreateDistributionMessage());
 
             var message = await sender.EncryptMessageAsync("relabelled payload");
             Assert.IsNotNull(message);
@@ -178,32 +299,79 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
+        public async Task PositiveControl_ReSignedMessageWithUnmodifiedCiphertext_StillDecrypts()
+        {
+            // Proves BuildGroupMessageSigningPayload (above) still matches GroupSession's
+            // actual signing format (GetMessageDataToSign / GroupSignatureData.ForMessage)
+            // BEFORE it is relied on destructively below. Without this, a replica that has
+            // drifted from production would make a "tampered" message fail at signature
+            // verification instead of at the guard under test, and the test would still
+            // report green — silently testing the wrong thing.
+            var (sender, receiver, senderKey) = await BuildPairWithSenderKeyAsync();
+            var message = await sender.EncryptMessageAsync("control payload");
+            Assert.IsNotNull(message);
+
+            message.Signature = Sodium.SignDetached(BuildGroupMessageSigningPayload(message), senderKey.PrivateKey);
+
+            string result = await receiver.DecryptMessageAsync(message);
+
+            Assert.AreEqual("control payload", result,
+                "BuildGroupMessageSigningPayload (this test file) has drifted from GroupSession's " +
+                "GetMessageDataToSign (GroupSession.Helpers.cs) and must be updated to match it.");
+        }
+
+        [TestMethod]
         public async Task DecryptMessageAsync_NullCiphertext_IsRejectedWithoutThrowing()
         {
-            var (sender, receiver) = await BuildPairAsync();
+            // Signature verification is mandatory, and mutating Ciphertext changes the bytes
+            // that were signed, so an unmodified signature would already be rejected by
+            // verification regardless of whether the explicit ciphertext guard exists. To
+            // isolate the guard, re-sign the tampered message with the sender's key using a
+            // replica of the production signing format that coalesces null the same way
+            // GroupSignatureData.ForMessage does — so signature verification cannot be what
+            // rejects the message.
+            var (sender, receiver, senderKey) = await BuildPairWithSenderKeyAsync();
             var message = await sender.EncryptMessageAsync("payload");
             Assert.IsNotNull(message);
 
             message.Ciphertext = null;
+            message.Signature = Sodium.SignDetached(BuildGroupMessageSigningPayload(message), senderKey.PrivateKey);
 
+            // Primary, isolated assertion: ValidateGroupMessage itself must reject a null
+            // ciphertext. See InvokeValidateGroupMessage for why this must be called directly
+            // rather than only through DecryptMessageAsync.
+            bool valid = InvokeValidateGroupMessage(receiver, message);
+            Assert.IsFalse(valid,
+                "A message with null ciphertext must be rejected by ValidateGroupMessage, not " +
+                "reach the signing-data serialiser where it would throw.");
+
+            // End-to-end contract: the public API must also return null, without throwing.
             string result = await receiver.DecryptMessageAsync(message);
-
             Assert.IsNull(result,
-                "A message with null ciphertext must be rejected by validation, not reach " +
-                "the signing-data serialiser where it would throw.");
+                "A message with null ciphertext must be rejected without throwing.");
         }
 
         [TestMethod]
         public async Task DecryptMessageAsync_EmptyCiphertext_IsRejected()
         {
-            var (sender, receiver) = await BuildPairAsync();
+            // Same isolation concern as the null-ciphertext test above: re-sign over the
+            // tampered (empty-ciphertext) message so signature verification cannot be what
+            // rejects it.
+            var (sender, receiver, senderKey) = await BuildPairWithSenderKeyAsync();
             var message = await sender.EncryptMessageAsync("payload");
             Assert.IsNotNull(message);
 
             message.Ciphertext = Array.Empty<byte>();
+            message.Signature = Sodium.SignDetached(BuildGroupMessageSigningPayload(message), senderKey.PrivateKey);
 
+            // Primary, isolated assertion: ValidateGroupMessage itself must reject an empty
+            // ciphertext. See InvokeValidateGroupMessage for why this must be called directly
+            // rather than only through DecryptMessageAsync.
+            bool valid = InvokeValidateGroupMessage(receiver, message);
+            Assert.IsFalse(valid, "A message with empty ciphertext must be rejected by ValidateGroupMessage.");
+
+            // End-to-end contract: the public API must also return null.
             string result = await receiver.DecryptMessageAsync(message);
-
             Assert.IsNull(result, "A message with empty ciphertext must be rejected.");
         }
 

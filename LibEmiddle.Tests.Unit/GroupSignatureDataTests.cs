@@ -53,20 +53,18 @@ namespace LibEmiddle.Tests.Unit
         }
 
         [TestMethod]
-        public void ForDistribution_SenderIdentityKeyAlwaysContributes()
+        public void ForDistribution_NullAndEmptySenderIdentityKey_SerialiseIdentically()
         {
-            // SenderIdentityKey was written only when non-null, so its absence silently
-            // changed the signed byte string rather than producing a distinct one.
-            var withKey = new SenderKeyDistributionMessage
-            {
-                GroupId = "g",
-                ChainKey = new byte[] { 0x01, 0x02 },
-                Iteration = 1,
-                Timestamp = 100,
-                SenderIdentityKey = new byte[] { 0xAA }
-            };
-
-            var withoutKey = new SenderKeyDistributionMessage
+            // Accepted characteristic of the frozen format, not a defect: null and
+            // Array.Empty<byte>() both write a zero-length length-prefixed field
+            // (00 00 00 00 with no following bytes), so they are indistinguishable in the
+            // signed byte string. This is safe because both group paths (ValidateGroupMessage
+            // and ProcessDistributionMessage) reject a null or empty SenderIdentityKey before
+            // ever building a signing payload or verifying a signature over one, so this
+            // ambiguity is never reachable with a value that would otherwise need to be
+            // distinguished. See GroupSignatureData's class remarks for the general
+            // length-prefix rationale.
+            var withNullKey = new SenderKeyDistributionMessage
             {
                 GroupId = "g",
                 ChainKey = new byte[] { 0x01, 0x02 },
@@ -75,11 +73,21 @@ namespace LibEmiddle.Tests.Unit
                 SenderIdentityKey = null
             };
 
-            byte[] a = GroupSignatureData.ForDistribution(withKey);
-            byte[] b = GroupSignatureData.ForDistribution(withoutKey);
+            var withEmptyKey = new SenderKeyDistributionMessage
+            {
+                GroupId = "g",
+                ChainKey = new byte[] { 0x01, 0x02 },
+                Iteration = 1,
+                Timestamp = 100,
+                SenderIdentityKey = Array.Empty<byte>()
+            };
 
-            CollectionAssert.AreNotEqual(a, b,
-                "Presence and absence of SenderIdentityKey must produce different signing input.");
+            byte[] a = GroupSignatureData.ForDistribution(withNullKey);
+            byte[] b = GroupSignatureData.ForDistribution(withEmptyKey);
+
+            CollectionAssert.AreEqual(a, b,
+                "null and empty SenderIdentityKey are expected to serialise identically in the " +
+                "frozen format.");
         }
 
         [TestMethod]
@@ -125,7 +133,9 @@ namespace LibEmiddle.Tests.Unit
             // though every field is individually length-prefixed. Both signing contexts share
             // one Ed25519 identity key, so a collision here would let a signature over one
             // payload type be reinterpreted as covering the other. This exact pair collides
-            // (all 38 bytes equal) if the leading domain tag is removed from either function.
+            // (all 38 bytes equal) only if the leading domain tag is removed from BOTH
+            // functions -- removing it from just one leaves a 38 vs. 39 byte length
+            // mismatch, so the pair no longer collides.
             var message = new EncryptedGroupMessage
             {
                 GroupId = "g",

@@ -122,12 +122,32 @@ public sealed partial class GroupSession
         // Constants.ED25519_SIGNATURE_SIZE bytes, so a non-null, non-empty, wrong-length
         // signature must be rejected before reaching it or it escapes as an unhandled
         // exception out of ProcessDistributionMessage.
-        if (distribution.Signature is null || distribution.Signature.Length != Constants.ED25519_SIGNATURE_SIZE)
+        // Each distinct rejection reason is logged separately (no key material, signature, or
+        // chain-key bytes included) so an operator can tell a mass-rollout of unsigned
+        // distributions from a pre-2.8.0 peer apart from a wrong-length or forged signature,
+        // which is more consistent with an active attack. Sender-key distributions carry no
+        // version field, so this is otherwise the only diagnostic available for either case.
+        if (distribution.Signature is null)
+        {
+            LoggingManager.LogSecurityEvent(nameof(GroupSession),
+                "Sender-key distribution rejected: signature absent (expected if the sender predates mandatory group signing)",
+                isAlert: true);
             return false;
+        }
+        if (distribution.Signature.Length != Constants.ED25519_SIGNATURE_SIZE)
+        {
+            LoggingManager.LogSecurityEvent(nameof(GroupSession),
+                "Sender-key distribution rejected: signature has the wrong length", isAlert: true);
+            return false;
+        }
 
         byte[] dataToSign = GetDistributionDataToSign(distribution);
         if (!Sodium.SignVerifyDetached(distribution.Signature, dataToSign, distribution.SenderIdentityKey))
+        {
+            LoggingManager.LogSecurityEvent(nameof(GroupSession),
+                "Sender-key distribution rejected: signature verification failed", isAlert: true);
             return false;
+        }
 
         // Store the sender key state
         if (distribution.ChainKey == null || distribution.ChainKey.Length != Constants.CHAIN_KEY_SIZE)

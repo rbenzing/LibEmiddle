@@ -38,12 +38,32 @@ public sealed partial class GroupSession
         // Constants.ED25519_SIGNATURE_SIZE bytes, so a non-null, non-empty, wrong-length
         // signature must be rejected before reaching it or it escapes as an unhandled
         // exception out of DecryptMessageAsync.
-        if (message.Signature is null || message.Signature.Length != Constants.ED25519_SIGNATURE_SIZE)
+        // Each distinct rejection reason is logged separately (no key material, signature, or
+        // ciphertext bytes included) so an operator can tell a mass-rollout of unsigned
+        // messages from a pre-2.8.0 peer apart from a wrong-length or forged signature, which
+        // is more consistent with an active attack. Group messages carry no version field, so
+        // this is otherwise the only diagnostic available for either case.
+        if (message.Signature is null)
+        {
+            LoggingManager.LogSecurityEvent(nameof(GroupSession),
+                "Group message rejected: signature absent (expected if the sender predates mandatory group signing)",
+                isAlert: true);
             return false;
+        }
+        if (message.Signature.Length != Constants.ED25519_SIGNATURE_SIZE)
+        {
+            LoggingManager.LogSecurityEvent(nameof(GroupSession),
+                "Group message rejected: signature has the wrong length", isAlert: true);
+            return false;
+        }
 
         byte[] dataToSign = GetMessageDataToSign(message);
         if (!Sodium.SignVerifyDetached(message.Signature, dataToSign, message.SenderIdentityKey))
+        {
+            LoggingManager.LogSecurityEvent(nameof(GroupSession),
+                "Group message rejected: signature verification failed", isAlert: true);
             return false;
+        }
 
         // Validate message sequence for replay protection
         // Check message ID for exact duplicate detection (read-only — registration happens after successful decryption)

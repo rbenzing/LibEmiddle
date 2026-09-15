@@ -191,6 +191,17 @@ public sealed partial class LibEmiddleClient
     /// <see cref="MailboxMessage.Metadata"/> (key <c>"GroupId"</c>), and the sender
     /// identity key comes from <see cref="MailboxMessage.SenderKey"/>.
     /// </summary>
+    /// <remarks>
+    /// This route cannot currently succeed. The <see cref="EncryptedGroupMessage"/> it builds
+    /// sets neither <see cref="EncryptedGroupMessage.Signature"/> (so it is rejected outright by
+    /// the mandatory signature check in <c>GroupSession.ValidateGroupMessage</c>) nor
+    /// <see cref="EncryptedGroupMessage.RotationEpoch"/> (which is left at its default of 0,
+    /// while a genuine sender's real epoch is always non-zero, so even a signed message
+    /// reconstructed this way would fail AES decryption on mismatched associated data). This is
+    /// pre-existing and predates mandatory group signature verification — nothing in the library
+    /// sends a <see cref="MailboxMessage"/> that reaches this method, and no test exercises it.
+    /// Do not treat this as a working receive path; fixing it is out of scope here.
+    /// </remarks>
     private async Task RouteGroupMessageAsync(MailboxMessage message)
     {
         try

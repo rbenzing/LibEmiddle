@@ -38,12 +38,24 @@ internal static class GroupSignatureData
     /// <summary>
     /// Domain-separation tag for <see cref="ForMessage"/>. Frozen by W3's golden vectors —
     /// must never be reused for another payload type or renumbered.
+    ///
+    /// Reservation scope: 0x01 and 0x02 (see <see cref="DistributionDomainTag"/>) are reserved
+    /// library-wide for group signing contexts, not just for the two schedules in this class.
+    /// The same Ed25519 identity key that signs these payloads also signs several other,
+    /// currently-untagged payload types elsewhere in the library — X3DH prekeys, device
+    /// linking, device revocation, and sync data. Those payloads carry no domain tag today, so
+    /// this reservation costs nothing there yet, but if a library-wide signature domain
+    /// registry is ever introduced (tracked as a W3 input), it must not assign 0x01 or 0x02 to
+    /// any of those other contexts, to keep this reservation meaningful.
     /// </summary>
     private const byte MessageDomainTag = 0x01;
 
     /// <summary>
     /// Domain-separation tag for <see cref="ForDistribution"/>. Frozen by W3's golden
     /// vectors — must never be reused for another payload type or renumbered.
+    ///
+    /// See <see cref="MessageDomainTag"/>: this value is likewise reserved library-wide, not
+    /// only within this class.
     /// </summary>
     private const byte DistributionDomainTag = 0x02;
 
