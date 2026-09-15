@@ -123,15 +123,18 @@ public sealed partial class GroupSession
         if (!string.IsNullOrEmpty(message.MessageId))
         {
             var senderMessageIds = _seenMessageIds.GetOrAdd(senderId, _ => new ConcurrentDictionary<string, byte>());
-            senderMessageIds.TryAdd(message.MessageId, 0);
+            var order = _seenMessageIdOrder.GetOrAdd(senderId, _ => new Queue<string>());
 
-            // Cap the set at 1000 entries per sender to prevent unbounded memory growth
-            if (senderMessageIds.Count > 1000)
+            // Only a genuinely new ID is queued, so the queue and the set stay the same size.
+            // Called with _sessionLock held, so the pair is mutated atomically.
+            if (senderMessageIds.TryAdd(message.MessageId, 0))
             {
-                var oldestIds = senderMessageIds.Keys.Take(senderMessageIds.Count - 1000).ToList();
-                foreach (var oldId in oldestIds)
+                order.Enqueue(message.MessageId);
+
+                while (order.Count > MaxSeenMessageIdsPerSender)
                 {
-                    senderMessageIds.TryRemove(oldId, out _);
+                    string oldest = order.Dequeue();
+                    senderMessageIds.TryRemove(oldest, out _);
                 }
             }
         }

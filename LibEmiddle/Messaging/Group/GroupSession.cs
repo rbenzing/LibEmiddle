@@ -38,6 +38,12 @@ public sealed partial class GroupSession : IGroupSession, ISession, IDisposable
     private readonly ConcurrentDictionary<string, long> _joinTimestamps = new();
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _seenMessageIds = new();
 
+    // Parallel insertion-order index for _seenMessageIds, so eviction at the cap removes
+    // the oldest ID rather than an arbitrary one. ConcurrentDictionary.Keys guarantees no
+    // ordering. Mirrors the ChatSession pattern required by CLAUDE.md.
+    private readonly ConcurrentDictionary<string, Queue<string>> _seenMessageIdOrder = new();
+    private const int MaxSeenMessageIdsPerSender = 1000;
+
     // Enhanced Group Management
     private readonly ConcurrentDictionary<string, GroupInvitation> _activeInvitations = new();
     private readonly object _statisticsLock = new object();
