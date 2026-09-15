@@ -45,9 +45,11 @@ public sealed partial class GroupSession
         if (!string.IsNullOrEmpty(message.MessageId))
         {
             string senderId = GetMemberId(message.SenderIdentityKey!);
-            var senderMessageIds = _seenMessageIds.GetOrAdd(senderId, _ => new ConcurrentDictionary<string, byte>());
 
-            if (senderMessageIds.ContainsKey(message.MessageId))
+            // Read-only: a sender with no recorded entry has not been seen, so absence
+            // from the dictionary means "not seen" rather than requiring an entry to exist.
+            if (_seenMessageIds.TryGetValue(senderId, out var senderMessageIds) &&
+                senderMessageIds.Contains(message.MessageId))
             {
                 LoggingManager.LogSecurityEvent(nameof(GroupSession), "Message ID replay detected", isAlert: true);
                 return false;
@@ -119,24 +121,15 @@ public sealed partial class GroupSession
 
         string senderId = GetMemberId(message.SenderIdentityKey);
 
-        // Register the message ID so subsequent presentations of the same message are rejected
+        // Register the message ID so subsequent presentations of the same message are rejected.
+        // A single GetOrAdd yields the set and its eviction queue together, so a concurrent
+        // reset (ProcessDistributionMessage's TryRemove on a new key epoch) can only ever
+        // detach the whole pair, never just one half — see the SeenMessageIdSet remarks.
+        // Called with _sessionLock held, so this is not otherwise racing itself.
         if (!string.IsNullOrEmpty(message.MessageId))
         {
-            var senderMessageIds = _seenMessageIds.GetOrAdd(senderId, _ => new ConcurrentDictionary<string, byte>());
-            var order = _seenMessageIdOrder.GetOrAdd(senderId, _ => new Queue<string>());
-
-            // Only a genuinely new ID is queued, so the queue and the set stay the same size.
-            // Called with _sessionLock held, so the pair is mutated atomically.
-            if (senderMessageIds.TryAdd(message.MessageId, 0))
-            {
-                order.Enqueue(message.MessageId);
-
-                while (order.Count > MaxSeenMessageIdsPerSender)
-                {
-                    string oldest = order.Dequeue();
-                    senderMessageIds.TryRemove(oldest, out _);
-                }
-            }
+            var senderMessageIds = _seenMessageIds.GetOrAdd(senderId, _ => new SeenMessageIdSet());
+            senderMessageIds.RecordIfNew(message.MessageId, MaxSeenMessageIdsPerSender);
         }
 
         // Advance the last-seen sequence so that any equal-or-lower sequence is rejected in future

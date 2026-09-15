@@ -142,7 +142,6 @@ public sealed partial class GroupSession
         // iteration counting from zero again) are not incorrectly rejected.
         _lastSeenSequence.TryRemove(senderId, out _);
         _seenMessageIds.TryRemove(senderId, out _);
-        _seenMessageIdOrder.TryRemove(senderId, out _);
 
         // Record join time if not already recorded
         RecordJoinTime(distribution.SenderIdentityKey);

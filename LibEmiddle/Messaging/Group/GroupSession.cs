@@ -36,13 +36,56 @@ public sealed partial class GroupSession : IGroupSession, ISession, IDisposable
     // Message tracking for replay protection
     private readonly ConcurrentDictionary<string, long> _lastSeenSequence = new();
     private readonly ConcurrentDictionary<string, long> _joinTimestamps = new();
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _seenMessageIds = new();
-
-    // Parallel insertion-order index for _seenMessageIds, so eviction at the cap removes
-    // the oldest ID rather than an arbitrary one. ConcurrentDictionary.Keys guarantees no
-    // ordering. Mirrors the ChatSession pattern required by CLAUDE.md.
-    private readonly ConcurrentDictionary<string, Queue<string>> _seenMessageIdOrder = new();
+    // Per-sender bounded FIFO set of seen message IDs, used for replay detection. The
+    // seen-ID lookup set and its insertion-order eviction queue are combined into one
+    // SeenMessageIdSet object (rather than two parallel dictionaries keyed by senderId)
+    // because a reset (ProcessDistributionMessage's TryRemove on a new key epoch) must
+    // detach both halves together. With two separate dictionaries, a reset could land
+    // between one GetOrAdd and the other in RecordMessageSeen, detaching only one half:
+    // the caller would then enqueue into a freshly re-added, still-live queue while adding
+    // to an orphaned set, producing a permanent +1 skew between queue length and set size
+    // on every such race. Skew accumulates (it never self-corrects), and because eviction
+    // is driven off the queue's length, the set silently stabilizes below the intended cap
+    // — degrading replay protection for that sender without any visible error. Combining
+    // both halves into one object eliminates the seam: a single TryRemove on the outer
+    // dictionary detaches the whole pair atomically by construction.
+    private readonly ConcurrentDictionary<string, SeenMessageIdSet> _seenMessageIds = new();
     private const int MaxSeenMessageIdsPerSender = 1000;
+
+    /// <summary>
+    /// Bounded FIFO set of seen message IDs for a single sender: an O(1) lookup set paired
+    /// with an insertion-order queue so eviction at <see cref="MaxSeenMessageIdsPerSender"/>
+    /// always removes the oldest ID, never an arbitrary one (ConcurrentDictionary.Keys
+    /// documents no ordering). Mirrors the ChatSession pattern required by CLAUDE.md.
+    /// Instances are only ever mutated by RecordMessageSeen, which runs with
+    /// _sessionLock held, so the set and queue stay consistent without their own locking.
+    /// </summary>
+    private sealed class SeenMessageIdSet
+    {
+        private readonly ConcurrentDictionary<string, byte> _ids = new();
+        private readonly Queue<string> _order = new();
+
+        public bool Contains(string messageId) => _ids.ContainsKey(messageId);
+
+        /// <summary>
+        /// Records <paramref name="messageId"/> as seen if it is not already present, then
+        /// evicts the oldest entries while the queue exceeds <paramref name="cap"/>. A no-op
+        /// for an ID that has already been recorded, so the queue and set stay the same size.
+        /// </summary>
+        public void RecordIfNew(string messageId, int cap)
+        {
+            if (_ids.TryAdd(messageId, 0))
+            {
+                _order.Enqueue(messageId);
+
+                while (_order.Count > cap)
+                {
+                    string oldest = _order.Dequeue();
+                    _ids.TryRemove(oldest, out _);
+                }
+            }
+        }
+    }
 
     // Enhanced Group Management
     private readonly ConcurrentDictionary<string, GroupInvitation> _activeInvitations = new();
