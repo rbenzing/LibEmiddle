@@ -25,13 +25,15 @@ public sealed partial class GroupSession
         if (!IsMember(message.SenderIdentityKey!))
             return false;
 
-        // Verify signature
-        if (message.Signature != null)
-        {
-            byte[] dataToSign = GetMessageDataToSign(message);
-            if (!Sodium.SignVerifyDetached(message.Signature, dataToSign, message.SenderIdentityKey))
-                return false;
-        }
+        // Verify signature. Mandatory: an absent signature is a rejection, not a skip.
+        // SenderIdentityKey is public, so treating unsigned messages as valid would let
+        // anyone with transport write access impersonate a member.
+        if (message.Signature is null || message.Signature.Length == 0)
+            return false;
+
+        byte[] dataToSign = GetMessageDataToSign(message);
+        if (!Sodium.SignVerifyDetached(message.Signature, dataToSign, message.SenderIdentityKey))
+            return false;
 
         // Validate message sequence for replay protection
         // Check message ID for exact duplicate detection (read-only — registration happens after successful decryption)
