@@ -1,6 +1,8 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using LibEmiddle.Core;
 using LibEmiddle.Crypto;
@@ -133,26 +135,44 @@ namespace LibEmiddle.Tests.Unit
         [TestMethod]
         public async Task DecryptMessageAsync_FailedDecryptionDoesNotConsumeMessageId()
         {
-            // Arrange
-            var (sender, receiver) = await BuildPairAsync();
+            // Arrange — build the pair locally (rather than via BuildPairAsync) so the sender's
+            // private key is available here to re-sign the tampered message below. Signature
+            // verification is now mandatory (GroupSession.Validation.cs), so a message with no
+            // signature is rejected before it ever reaches the AES-decryption path this test
+            // targets — it must carry a *valid* signature over the corrupted ciphertext instead.
+            var senderKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            var receiverKey = await _cryptoProvider.GenerateKeyPairAsync(KeyType.Ed25519);
+            string groupId = $"replay-test-{Guid.NewGuid()}";
+            const string groupName = "Replay Test Group";
+
+            var sender = new GroupSession(groupId, groupName, senderKey);
+            var receiver = new GroupSession(groupId, groupName, receiverKey);
+
+            await sender.ActivateAsync();
+            await receiver.ActivateAsync();
+
+            await sender.AddMemberAsync(receiverKey.PublicKey);
+            await receiver.AddMemberAsync(senderKey.PublicKey);
+
+            receiver.ProcessDistributionMessage(sender.CreateDistributionMessage());
+            sender.ProcessDistributionMessage(receiver.CreateDistributionMessage());
+
             var goodMessage = await sender.EncryptMessageAsync("Good message");
             Assert.IsNotNull(goodMessage);
 
-            // Tamper: create a message with the SAME MessageId but corrupted ciphertext
+            // Tamper: create a message with the SAME MessageId but corrupted ciphertext, then
+            // re-sign it with the sender's identity key so it reaches the AES-decryption path
+            // instead of being rejected earlier by (now-mandatory) signature verification.
             var tampered = goodMessage.Clone();
             tampered.Ciphertext = new byte[tampered.Ciphertext.Length]; // all zeroes — invalid
+            tampered.Signature = Sodium.SignDetached(BuildGroupMessageSigningPayload(tampered), senderKey.PrivateKey);
 
-            // Act — attempt to decrypt the tampered version; expect null (decryption failure)
-            // NOTE: the tampered message will fail signature verification (not the MessageId check),
-            // so we can't directly test the "ID not consumed" path through signature tampering.
-            // Instead, strip the signature so only ciphertext corruption matters.
-            tampered.Signature = null;
-
-            // The message will still fail at ValidateGroupMessage (signature was null — skipped) and
-            // then at actual AES decryption.  After this failure the real message ID must NOT be in
+            // Act — attempt to decrypt the tampered version; expect null. The signature is now
+            // valid, so this fails at AES decryption (bad ciphertext), which is the path this
+            // test exercises. After this failure the real message ID must NOT be in
             // _seenMessageIds, so the genuine message must still decrypt.
             string tamperedResult = await receiver.DecryptMessageAsync(tampered);
-            // May be null due to AES failure or signature skip — either is acceptable for setup
+            Assert.IsNull(tamperedResult, "Corrupted ciphertext must fail decryption even with a valid signature.");
 
             // Act — decrypt the real (unmodified) message — must succeed even after the tampered attempt
             string goodResult = await receiver.DecryptMessageAsync(goodMessage);
@@ -161,6 +181,25 @@ namespace LibEmiddle.Tests.Unit
             Assert.IsNotNull(goodResult,
                 "Genuine message must still decrypt successfully after a failed attempt with the same MessageId prefix.");
             Assert.AreEqual("Good message", goodResult);
+        }
+
+        // Mirrors the private wire format GroupSession.GetMessageDataToSign builds internally,
+        // so a test can produce a signature that ValidateGroupMessage will accept for a message
+        // it has tampered with after the sender originally signed it.
+        private static byte[] BuildGroupMessageSigningPayload(EncryptedGroupMessage message)
+        {
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms);
+
+            writer.Write(Encoding.UTF8.GetBytes(message.GroupId));
+            writer.Write(message.SenderIdentityKey);
+            writer.Write(message.Ciphertext);
+            writer.Write(message.Nonce);
+            writer.Write(message.Timestamp);
+            writer.Write(message.RotationEpoch);
+            writer.Write(Encoding.UTF8.GetBytes(message.MessageId ?? string.Empty));
+
+            return ms.ToArray();
         }
 
         // ------------------------------------------------------------------
