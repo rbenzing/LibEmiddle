@@ -1,4 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Text;
 using LibEmiddle.Domain;
 using LibEmiddle.Messaging.Group;
@@ -79,6 +80,80 @@ namespace LibEmiddle.Tests.Unit
 
             CollectionAssert.AreNotEqual(a, b,
                 "Presence and absence of SenderIdentityKey must produce different signing input.");
+        }
+
+        [TestMethod]
+        public void ForDistribution_DifferentFieldSplit_ProducesDifferentBytes()
+        {
+            // Mirrors ForMessage_DifferentFieldSplit_ProducesDifferentBytes above: the boundary
+            // between GroupId and ChainKey shifts by one byte ('x' / 0x78 moves from the end of
+            // A's GroupId to the start of B's ChainKey). Under the old (pre-length-prefix)
+            // format these collapsed to the identical byte string; without this test, removing
+            // the length prefix from ForDistribution alone would go uncaught even though
+            // ForMessage's equivalent test still passes.
+            var a = new SenderKeyDistributionMessage
+            {
+                GroupId = "gx",
+                ChainKey = new byte[] { 0x01, 0x02 },
+                Iteration = 1,
+                Timestamp = 100,
+                SenderIdentityKey = new byte[] { 0xAA }
+            };
+
+            var b = new SenderKeyDistributionMessage
+            {
+                GroupId = "g",
+                ChainKey = new byte[] { 0x78, 0x01, 0x02 },
+                Iteration = 1,
+                Timestamp = 100,
+                SenderIdentityKey = new byte[] { 0xAA }
+            };
+
+            byte[] bytesA = GroupSignatureData.ForDistribution(a);
+            byte[] bytesB = GroupSignatureData.ForDistribution(b);
+
+            CollectionAssert.AreNotEqual(bytesA, bytesB,
+                "Two different field decompositions produced identical signing input, so a " +
+                "signature over one is also valid over the other.");
+        }
+
+        [TestMethod]
+        public void ForMessageAndForDistribution_NeverProduceIdenticalBytes()
+        {
+            // Without a domain-separation tag, a message payload and a distribution payload
+            // with compatible field widths can serialise to the identical byte string, even
+            // though every field is individually length-prefixed. Both signing contexts share
+            // one Ed25519 identity key, so a collision here would let a signature over one
+            // payload type be reinterpreted as covering the other. This exact pair collides
+            // (all 38 bytes equal) if the leading domain tag is removed from either function.
+            var message = new EncryptedGroupMessage
+            {
+                GroupId = "g",
+                SenderIdentityKey = new byte[] { 0xAA },
+                Ciphertext = Array.Empty<byte>(),
+                Nonce = Array.Empty<byte>(),
+                Timestamp = 12,
+                RotationEpoch = 0,
+                MessageId = ""
+            };
+
+            var distribution = new SenderKeyDistributionMessage
+            {
+                GroupId = "g",
+                ChainKey = new byte[] { 0xAA },
+                Iteration = 0,
+                Timestamp = 0,
+                SenderIdentityKey = new byte[12]
+            };
+
+            byte[] messageBytes = GroupSignatureData.ForMessage(message);
+            byte[] distributionBytes = GroupSignatureData.ForDistribution(distribution);
+
+            CollectionAssert.AreNotEqual(messageBytes, distributionBytes,
+                "A group message payload and a sender-key distribution payload serialised to " +
+                "identical bytes. Since both are signed with the same Ed25519 identity key, this " +
+                "would let a signature over one payload type be replayed as a valid signature " +
+                "over the other.");
         }
     }
 }

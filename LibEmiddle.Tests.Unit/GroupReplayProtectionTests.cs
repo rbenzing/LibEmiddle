@@ -209,13 +209,19 @@ namespace LibEmiddle.Tests.Unit
         // ValidateGroupMessage will accept for a message it has tampered with after the sender
         // originally signed it.
         //
-        // Every field is length-prefixed with a 4-byte big-endian unsigned integer so that a
-        // byte string corresponds to exactly one decomposition into fields (see
+        // A leading 0x01 domain-separation tag distinguishes this schedule from
+        // GroupSignatureData.ForDistribution's, which are otherwise re-splittable into an
+        // identical byte string for certain inputs. Every subsequent variable-length field is
+        // length-prefixed with a 4-byte big-endian unsigned integer so that a byte string
+        // corresponds to exactly one decomposition into fields (see
         // LibEmiddle/Messaging/Group/GroupSignatureData.cs for the rationale).
+        private const byte MessageDomainTag = 0x01;
+
         private static byte[] BuildGroupMessageSigningPayload(EncryptedGroupMessage message)
         {
             using var ms = new MemoryStream();
 
+            ms.WriteByte(MessageDomainTag);
             WriteField(ms, Encoding.UTF8.GetBytes(message.GroupId ?? string.Empty));
             WriteField(ms, message.SenderIdentityKey ?? Array.Empty<byte>());
             WriteField(ms, message.Ciphertext ?? Array.Empty<byte>());
