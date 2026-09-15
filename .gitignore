@@ -401,3 +401,5 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+# Subagent-driven development scratch (ledger, briefs, review packages)
+.superpowers/
