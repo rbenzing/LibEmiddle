@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-09-15
+
+### Security
+
+- **Group signature verification is now mandatory.** Both `ValidateGroupMessage` and
+  `ProcessDistributionMessage` previously skipped verification when a message carried no
+  signature, treating it as valid. Because `SenderIdentityKey` is public and the transport
+  is untrusted, an attacker able to write to the transport could send an unsigned
+  sender-key distribution bearing a member's identity key and an attacker-chosen chain
+  key, then impersonate that member. No code path in the library ever produced an unsigned
+  message, so this rejects only forgeries.
+- **Null ciphertext no longer crashes the process (denial of service).** A malformed group
+  message with a null `Ciphertext`, a valid member's `SenderIdentityKey`, and a well-formed
+  nonce reached the AES decryption path uncaught: `Ciphertext?.Length == 0` is false when
+  `Ciphertext` is null, so the guard intended to reject empty ciphertext accepted null, and
+  the resulting `ArgumentNullException` propagated out of `DecryptMessageAsync` because the
+  wrapping `try` had only a `finally`, no `catch`. This was remotely triggerable by any
+  party able to submit a group message. Null ciphertext is now rejected explicitly before
+  it reaches the signing/decryption path.
+- **Replay-set eviction is now insertion-ordered.** Eviction used
+  `ConcurrentDictionary.Keys.Take()`, which guarantees no ordering, so a recently seen
+  message ID could be evicted while older ones survived.
+
+### Breaking
+
+- **Group signature format changed.** Fields in the signed byte string are now
+  length-prefixed with a 4-byte big-endian length, `SenderIdentityKey` is always
+  included, and a one-byte domain-separation tag (`0x01` for messages, `0x02` for
+  sender-key distributions) is prepended to the signed payload. Previously fields were
+  concatenated without prefixes, so distinct field decompositions could produce identical
+  signing input and a signature did not uniquely commit to the message it covered; and
+  without the domain tag, a byte string valid for one payload type could in principle
+  parse as the other, since both signing contexts share a single Ed25519 identity key. Not
+  exploitable in the shipped code today, but closed now because the wire format is about
+  to be frozen by golden vectors.
+
+  **2.8.0 peers cannot verify group messages or sender-key distributions from 2.7.x
+  peers, or vice versa.** All members of a group must upgrade together. One-to-one chat
+  sessions are unaffected.
+
 ## [2.7.0] - 2026-08-02
 
 Security and protocol-correctness release. Fixes two key-handling defects that could zero or

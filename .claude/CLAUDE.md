@@ -91,7 +91,7 @@ All public-facing interfaces live here: `IChatSession`, `IGroupSession`, `IDoubl
 - Never swallow exceptions in catch — log and rethrow with context; `(null, null)` tuple returns are the only silent failure allowed and only in protocol decrypt paths
 - Never share the cached key array — `GetKeyCopy()` returns a fresh copy; the cache retains the original
 - Never use `Task.FromResult` to wrap genuinely async work — only for operations that are provably synchronous
-- Never skip timestamp validation on incoming messages — reject anything negative or more than 1 hour in the future before touching crypto
+- Never skip timestamp validation on incoming messages — reject anything negative or more than 5 minutes in the future (the clock-skew tolerance in `EncryptedMessage.IsValid()`) before touching crypto
 
 ## Key Conventions
 
