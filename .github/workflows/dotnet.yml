@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [ "main", "legacy-1.0", "experimental" ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
